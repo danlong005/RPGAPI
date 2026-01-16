@@ -1,5 +1,6 @@
 LIB=RPGAPI
 IFS_PATH=/home/longdm/builds/RPGAPI
+SHELL=/QOpenSys/usr/bin/qsh
 
 all:
 	-system "CRTLIB LIB($(LIB))"
@@ -14,8 +15,9 @@ all:
 
 test:
 	system "CHGATR OBJ('$(IFS_PATH)/qtestsrc/*.sqlrpgle') ATR(*CCSID) VALUE(1252)"
-	system "RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI)"
-	system "RUCALLTST TSTPGM($(LIB)/RPGAPITEST)"
+	-liblist -a RPGUNIT;\
+	system "RPGUNIT/RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI) BNDSRVPGM((RUTESTCASE))"
+	system "RPGUNIT/RUCALLTST TSTPGM($(LIB)/RPGAPITEST)"
 
 clean:
 	-system "DLTLIB LIB($(LIB))"
