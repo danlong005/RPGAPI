@@ -25,4 +25,5 @@ dcl-ds HTTP_messages qualified dim(100);
    status zoned(3:0);
    text char(25);
 end-ds;
+
 /endif                        

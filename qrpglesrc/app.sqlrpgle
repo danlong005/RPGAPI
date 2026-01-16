@@ -6,9 +6,9 @@ ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI':'YAJL')
 /copy './qrpglesrc/rpgapi_h.rpgle'
 /include yajl/qrpglesrc,YAJL_H
 
-dcl-ds request likeds(RPGAPIRQST);
-dcl-ds response likeds(RPGAPIRSP);
-dcl-ds app likeds(RPGAPIAPP);
+dcl-ds request likeds(RPGAPI_Request);
+dcl-ds response likeds(RPGAPI_Response);
+dcl-ds app likeds(RPGAPI_App);
 
 clear app;
 app.port = 3012;
@@ -28,16 +28,16 @@ return;
 
 dcl-proc CHECK_AUTH;
    dcl-pi *n ind;
-      request likeds(RPGAPIRQST) const;
-      response likeds(RPGAPIRSP) const;
+      request likeds(RPGAPI_Request) const;
+      response likeds(RPGAPI_Response) const;
    end-pi;
 
    return *on;
 end-proc;
 
 dcl-proc MBR_show;
-   dcl-pi *n likeds(RPGAPIRSP);
-      request likeds(RPGAPIRQST) const;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
    end-pi;
    dcl-s Length Int(10:0) Inz;
    dcl-s CCSID Int(10:0) Inz;

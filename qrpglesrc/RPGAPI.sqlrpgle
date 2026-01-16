@@ -6,14 +6,14 @@ ctl-opt option(*nodebugio:*srcstmt) nomain;
 
 dcl-proc RPGAPI_start export;
    dcl-pi *n;
-      config likeds(RPGAPIAPP);
+      config likeds(RPGAPI_App);
       port int(10:0) options(*nopass) const;
    end-pi;
    dcl-s index int(10:0) inz;
    dcl-s index2 int(10:0) inz;
    dcl-s route_found ind inz;
-   dcl-ds response likeds(RPGAPIRSP) inz;
-   dcl-ds request likeds(RPGAPIRQST) inz;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-ds request likeds(RPGAPI_Request) inz;
    dcl-s middleware_completed ind;
 
    if config.port = 0 and %parms < 2;
@@ -83,7 +83,7 @@ end-proc;
 
 dcl-proc RPGAPI_stop export;
    dcl-pi *n;
-      config likeds(RPGAPIAPP) const;
+      config likeds(RPGAPI_App) const;
    end-pi;
 
    close_port( config.return_socket_descriptor );
@@ -93,8 +93,8 @@ end-proc;
 
 
 dcl-proc RPGAPI_acceptRequest export;
-   dcl-pi *n likeds(RPGAPIRQST);
-      config likeds(RPGAPIAPP);
+   dcl-pi *n likeds(RPGAPI_Request);
+      config likeds(RPGAPI_App);
    end-pi;
    dcl-ds socket_address likeds(socketaddr);
    dcl-s data varchar(32766);
@@ -118,10 +118,10 @@ end-proc;
 
 
 dcl-proc RPGAPI_parse export;
-   dcl-pi *n likeds(RPGAPIRQST);
+   dcl-pi *n likeds(RPGAPI_Request);
       raw_request varchar(32000) const;
    end-pi;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s line char(1024);
    dcl-s start int(10:0);
    dcl-s stop int(10:0);
@@ -137,10 +137,10 @@ dcl-proc RPGAPI_parse export;
    stop = position;
    line = %subst(raw_request:start:stop);
 
-   parts = RPGAPI_split(line : ' ');
-   request.method = parts(1);
-   request.route = parts(2);
-   request.protocol = parts(3);
+   parts = %split(line : ' ');
+   request.method = %trim(parts(1));   
+   request.route = %trim(parts(2));
+   request.protocol = %trim(parts(3));
 
    start = 0;
    start = %scan('?' : request.route);
@@ -151,10 +151,10 @@ dcl-proc RPGAPI_parse export;
       request.route = %subst(request.route : 1 : start - 1);
    endif;
 
-   parts = RPGAPI_split(request.query_string : '&');
+   parts = %split(request.query_string : '&');
    for index = 1 to %elem(parts) by 1;
       if parts(index) <> *blanks;
-         pieces = RPGAPI_split(parts(index) : '=');
+         pieces = %split(parts(index) : '=');
          request.query_params(index).name = pieces(1);
          request.query_params(index).value = %trim(pieces(2));
       else;
@@ -165,11 +165,11 @@ dcl-proc RPGAPI_parse export;
    start = stop + 1;
    stop = %scan(RPGAPI_DBL_CRLF : raw_request);
    raw_headers = %subst(raw_request : start : stop - start);
-   parts = RPGAPI_split(raw_headers : RPGAPI_CRLF);
+   parts = %split(raw_headers : RPGAPI_CRLF);
 
    for index = 1 to %elem(parts) by 1;
       if parts(index) <> *blanks;
-         pieces = RPGAPI_split(parts(index) : ':');
+         pieces = %split(parts(index) : ':');
          request.headers(index).name = pieces(1);
          request.headers(index).value = %trim(pieces(2));
       else;
@@ -187,7 +187,7 @@ end-proc;
 
 dcl-proc RPGAPI_getParam export;
    dcl-pi *n varchar(1024);
-      request likeds(RPGAPIRQST) const;
+      request likeds(RPGAPI_Request) const;
       param char(50) const;
    end-pi;
    dcl-s param_value varchar(1024);
@@ -195,8 +195,8 @@ dcl-proc RPGAPI_getParam export;
 
    clear param_value;
    for index = 1 to %elem(request.params) by 1;
-      if RPGAPI_toUpper(request.params(index).name) =
-                RPGAPI_toUpper(param);
+      if %upper(request.params(index).name) =
+                %upper(param);
          param_value = request.params(index).value;
          index = %elem(request.params) + 1;
       endif;
@@ -208,7 +208,7 @@ end-proc;
 
 dcl-proc RPGAPI_getQueryParam export;
    dcl-pi *n varchar(1024);
-      request likeds(RPGAPIRQST) const;
+      request likeds(RPGAPI_Request) const;
       param char(50) const;
    end-pi;
    dcl-s param_value varchar(1024);
@@ -216,8 +216,8 @@ dcl-proc RPGAPI_getQueryParam export;
 
    clear param_value;
    for index = 1 to %elem(request.query_params) by 1;
-      if RPGAPI_toUpper(request.query_params(index).name) =
-                RPGAPI_toUpper(param);
+      if %upper(request.query_params(index).name) =
+                %upper(param);
          param_value = request.query_params(index).value;
          index = %elem(request.query_params) + 1;
       endif;
@@ -229,7 +229,7 @@ end-proc;
 
 dcl-proc RPGAPI_getHeader export;
    dcl-pi *n varchar(1024);
-      request likeds(RPGAPIRQST) const;
+      request likeds(RPGAPI_Request) const;
       header char(50) const;
    end-pi;
    dcl-s header_value varchar(1024);
@@ -237,8 +237,8 @@ dcl-proc RPGAPI_getHeader export;
 
    clear header_value;
    for index = 1 to %elem(request.headers) by 1;
-      if RPGAPI_toUpper(request.headers(index).name) =
-                RPGAPI_toUpper(header);
+      if %upper(request.headers(index).name) =
+                %upper(header);
          header_value = request.headers(index).value;
          index = %elem(request.headers) + 1;
       endif;
@@ -251,7 +251,7 @@ end-proc;
 
 dcl-proc RPGAPI_setHeader export;
    dcl-pi *n;
-      response likeds(RPGAPIRSP);
+      response likeds(RPGAPI_Response);
       header_name char(50) const;
       header_value varchar(1024) const;
    end-pi;
@@ -271,7 +271,7 @@ end-proc;
 dcl-proc RPGAPI_routeMatches export;
    dcl-pi *n ind;
       route likeds(RPGAPI_route_ds);
-      request likeds(RPGAPIRQST);
+      request likeds(RPGAPI_Request);
    end-pi;
    dcl-s position int(10:0);
    dcl-s url varchar(32000);
@@ -331,7 +331,7 @@ end-proc;
 dcl-proc RPGAPI_mwMatches export;
    dcl-pi *n ind;
       route likeds(RPGAPI_route_ds);
-      request likeds(RPGAPIRQST);
+      request likeds(RPGAPI_Request);
    end-pi;
    dcl-s position int(10:0);
    dcl-s url varchar(32000);
@@ -395,8 +395,8 @@ end-proc;
 
 dcl-proc RPGAPI_sendResponse export;
    dcl-pi *n;
-      config likeds(RPGAPIAPP) const;
-      response likeds(RPGAPIRSP) const;
+      config likeds(RPGAPI_App) const;
+      response likeds(RPGAPI_Response) const;
    end-pi;
    dcl-s data varchar(32766);
    dcl-s return_code int(10:0) inz(0);
@@ -437,14 +437,7 @@ dcl-proc RPGAPI_sendResponse export;
 end-proc;
 
 
-
-dcl-proc RPGAPI_setup;
-   dcl-pi *n;
-      config likeds(RPGAPIAPP);
-   end-pi;
-   dcl-s return_code int(10:0) inz(0);
-   dcl-ds socket_address likeds(socketaddr);
-        
+dcl-proc RPGAPI_initHttp export;
    HTTP_messages(1).status = HTTP_OK;
    HTTP_messages(1).text = 'OK';
    HTTP_messages(2).status = HTTP_CREATED;
@@ -465,6 +458,17 @@ dcl-proc RPGAPI_setup;
    HTTP_messages(9).text = 'Found';
    HTTP_messages(10).status = HTTP_FORBIDDEN;
    HTTP_messages(10).text = 'Forbidden';
+end-proc;
+
+
+dcl-proc RPGAPI_setup;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+   end-pi;
+   dcl-s return_code int(10:0) inz(0);
+   dcl-ds socket_address likeds(socketaddr);
+
+   RPGAPI_initHttp();
 
    config.socket_descriptor = socket(AF_INET : SOCK_STREAM : 0);
    return_code = set_socket_options( config.socket_descriptor :
@@ -487,7 +491,7 @@ end-proc;
 
 dcl-proc RPGAPI_setRoute export;
    dcl-pi *n;
-      config likeds(RPGAPIAPP);
+      config likeds(RPGAPI_App);
       method char(10) const;
       url varchar(32000) const;
       procedure pointer(*proc) const;
@@ -507,7 +511,7 @@ end-proc;
 
 dcl-proc RPGAPI_setMiddleware export;
    dcl-pi *n;
-      config likeds(RPGAPIAPP);
+      config likeds(RPGAPI_App);
       url varchar(32000) const;
       procedure pointer(*proc) const;
    end-pi;
@@ -525,7 +529,7 @@ end-proc;
 
 dcl-proc RPGAPI_get export;
    dcl-pi *n;
-      config likeds(RPGAPIAPP);
+      config likeds(RPGAPI_App);
       url varchar(32000) const;
       procedure pointer(*proc) const;
    end-pi;
@@ -537,7 +541,7 @@ end-proc;
 
 dcl-proc RPGAPI_put export;
    dcl-pi *n;
-      config likeds(RPGAPIAPP);
+      config likeds(RPGAPI_App);
       url varchar(32000) const;
       procedure pointer(*proc) const;
    end-pi;
@@ -549,7 +553,7 @@ end-proc;
 
 dcl-proc RPGAPI_post export;
    dcl-pi *n;
-      config likeds(RPGAPIAPP);
+      config likeds(RPGAPI_App);
       url varchar(32000) const;
       procedure pointer(*proc) const;
    end-pi;
@@ -561,7 +565,7 @@ end-proc;
 
 dcl-proc RPGAPI_delete export;
    dcl-pi *n;
-      config likeds(RPGAPIAPP);
+      config likeds(RPGAPI_App);
       url varchar(32000) const;
       procedure pointer(*proc) const;
    end-pi;
@@ -572,67 +576,17 @@ end-proc;
 
 
 dcl-proc RPGAPI_setResponse export;
-   dcl-pi *n likeds(RPGAPIRSP);
-      request likeds(RPGAPIRQST);
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request);
       status zoned(3:0) const;
    end-pi;
-   dcl-ds response likeds(RPGAPIRSP) inz;
+   dcl-ds response likeds(RPGAPI_Response) inz;
 
    clear response;
    response.status = status;
    RPGAPI_setHeader(response : 'Connection' : 'Close');
           
    return response;
-end-proc;
-
-
-
-dcl-proc RPGAPI_toUpper export;
-   dcl-pi *n varchar(32000);
-      param varchar(32000) const;
-   end-pi;
-   dcl-s return_param varchar(32000);
-
-   exec sql set :return_param = upper(:param);
-
-   return return_param;
-end-proc;
-
-
-
-dcl-proc RPGAPI_split export;
-   dcl-pi *n char(1024) dim(50);
-      line varchar(32000) const;
-      delimiter char(1) const;
-   end-pi;
-   dcl-s parts char(1024) dim(50);
-   dcl-s start int(10:0);
-   dcl-s stop int(10:0);
-   dcl-s index int(10:0);
-   dcl-s length int(10:0);
-   dcl-s location int(10:0);
-
-   clear parts;
-   length = %len(%trim(line));
-
-   index = 1;
-   dow index < 50;
-      start = stop + 1;
-      if start <= length;
-         stop = %scan(delimiter:line:start);
-         if stop = *zeros;
-            stop = %len(%trim(line)) + 1;
-         endif;
-         parts(index) =
-                      RPGAPI_cleanString(%subst(line:start:stop-start));
-      else;
-         index = 49;
-      endif;
-
-      index = index + 1;
-   enddo;
-
-   return parts;
 end-proc;
 
 

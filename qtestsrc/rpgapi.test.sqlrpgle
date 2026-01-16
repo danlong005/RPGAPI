@@ -12,53 +12,6 @@ dcl-c DBL_CRLF x'0d250d25';
 // UTILITY FUNCTION TESTS
 // ============================================
 
-dcl-proc test_toUpper_lowercase export;
-   dcl-s result varchar(32000);
-   result = RPGAPI_toUpper('hello world');
-   aEqual('HELLO WORLD' : result);
-end-proc;
-
-dcl-proc test_toUpper_mixedCase export;
-   dcl-s result varchar(32000);
-   result = RPGAPI_toUpper('HeLLo WoRLD');
-   aEqual('HELLO WORLD' : result);
-end-proc;
-
-dcl-proc test_toUpper_alreadyUpper export;
-   dcl-s result varchar(32000);
-   result = RPGAPI_toUpper('ALREADY UPPER');
-   aEqual('ALREADY UPPER' : result);
-end-proc;
-
-dcl-proc test_toUpper_empty export;
-   dcl-s result varchar(32000);
-   result = RPGAPI_toUpper('');
-   aEqual('' : result);
-end-proc;
-
-dcl-proc test_split_comma export;
-   dcl-s result char(1024) dim(50);
-   result = RPGAPI_split('one,two,three' : ',');
-   aEqual('one' : %trim(result(1)));
-   aEqual('two' : %trim(result(2)));
-   aEqual('three' : %trim(result(3)));
-end-proc;
-
-dcl-proc test_split_single export;
-   dcl-s result char(1024) dim(50);
-   result = RPGAPI_split('single' : ',');
-   aEqual('single' : %trim(result(1)));
-end-proc;
-
-dcl-proc test_split_slash export;
-   dcl-s result char(1024) dim(50);
-   result = RPGAPI_split('a/b/c/d' : '/');
-   aEqual('a' : %trim(result(1)));
-   aEqual('b' : %trim(result(2)));
-   aEqual('c' : %trim(result(3)));
-   aEqual('d' : %trim(result(4)));
-end-proc;
-
 dcl-proc test_cleanString_CR export;
    dcl-s result varchar(32000);
    dcl-s dirty varchar(32000);
@@ -91,6 +44,9 @@ end-proc;
 
 dcl-proc test_getMessage_200 export;
    dcl-s result char(25);
+
+   RPGAPI_initHttp();
+
    result = RPGAPI_getMessage(200);
    aEqual('OK' : %trim(result));
 end-proc;
@@ -130,7 +86,7 @@ end-proc;
 // ============================================
 
 dcl-proc test_parse_simpleGet export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s rawRequest varchar(32000);
 
    rawRequest = 'GET /api/users HTTP/1.1' + CRLF +
@@ -141,10 +97,11 @@ dcl-proc test_parse_simpleGet export;
    aEqual('GET' : %trim(request.method));
    aEqual('/api/users' : %trim(request.route));
    aEqual('HTTP/1.1' : %trim(request.protocol));
+   
 end-proc;
 
 dcl-proc test_parse_withQueryString export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s rawRequest varchar(32000);
 
    rawRequest = 'GET /api/users?name=john&age=30 HTTP/1.1' + CRLF +
@@ -161,7 +118,7 @@ dcl-proc test_parse_withQueryString export;
 end-proc;
 
 dcl-proc test_parse_withHeaders export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s rawRequest varchar(32000);
 
    rawRequest = 'GET /api/users HTTP/1.1' + CRLF +
@@ -178,7 +135,7 @@ dcl-proc test_parse_withHeaders export;
 end-proc;
 
 dcl-proc test_parse_withBody export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s rawRequest varchar(32000);
 
    rawRequest = 'POST /api/users HTTP/1.1' + CRLF +
@@ -193,7 +150,7 @@ dcl-proc test_parse_withBody export;
 end-proc;
 
 dcl-proc test_parse_postRequest export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s rawRequest varchar(32000);
 
    rawRequest = 'POST /api/users HTTP/1.1' + CRLF +
@@ -210,7 +167,7 @@ end-proc;
 // ============================================
 
 dcl-proc test_getQueryParam export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s result varchar(1024);
    dcl-s rawRequest varchar(32000);
 
@@ -226,7 +183,7 @@ dcl-proc test_getQueryParam export;
 end-proc;
 
 dcl-proc test_getQueryParam_caseInsensitive export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s result varchar(1024);
    dcl-s rawRequest varchar(32000);
 
@@ -242,7 +199,7 @@ dcl-proc test_getQueryParam_caseInsensitive export;
 end-proc;
 
 dcl-proc test_getQueryParam_notFound export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s result varchar(1024);
    dcl-s rawRequest varchar(32000);
 
@@ -255,7 +212,7 @@ dcl-proc test_getQueryParam_notFound export;
 end-proc;
 
 dcl-proc test_getHeader export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s result varchar(1024);
    dcl-s rawRequest varchar(32000);
 
@@ -272,7 +229,7 @@ dcl-proc test_getHeader export;
 end-proc;
 
 dcl-proc test_getHeader_caseInsensitive export;
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s result varchar(1024);
    dcl-s rawRequest varchar(32000);
 
@@ -292,8 +249,8 @@ end-proc;
 // ============================================
 
 dcl-proc test_setResponse_200 export;
-   dcl-ds request likeds(RPGAPIRQST);
-   dcl-ds response likeds(RPGAPIRSP);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-ds response likeds(RPGAPI_Response);
 
    clear request;
    response = RPGAPI_setResponse(request : 200);
@@ -301,8 +258,8 @@ dcl-proc test_setResponse_200 export;
 end-proc;
 
 dcl-proc test_setResponse_404 export;
-   dcl-ds request likeds(RPGAPIRQST);
-   dcl-ds response likeds(RPGAPIRSP);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-ds response likeds(RPGAPI_Response);
 
    clear request;
    response = RPGAPI_setResponse(request : 404);
@@ -310,8 +267,8 @@ dcl-proc test_setResponse_404 export;
 end-proc;
 
 dcl-proc test_setResponse_500 export;
-   dcl-ds request likeds(RPGAPIRQST);
-   dcl-ds response likeds(RPGAPIRSP);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-ds response likeds(RPGAPI_Response);
 
    clear request;
    response = RPGAPI_setResponse(request : 500);
@@ -319,7 +276,7 @@ dcl-proc test_setResponse_500 export;
 end-proc;
 
 dcl-proc test_setHeader export;
-   dcl-ds response likeds(RPGAPIRSP);
+   dcl-ds response likeds(RPGAPI_Response);
 
    clear response;
    RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
@@ -329,7 +286,7 @@ dcl-proc test_setHeader export;
 end-proc;
 
 dcl-proc test_setHeader_multiple export;
-   dcl-ds response likeds(RPGAPIRSP);
+   dcl-ds response likeds(RPGAPI_Response);
 
    clear response;
    RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
@@ -346,7 +303,7 @@ end-proc;
 // ============================================
 
 dcl-proc test_setRoute export;
-   dcl-ds config likeds(RPGAPIAPP);
+   dcl-ds config likeds(RPGAPI_App);
 
    clear config;
    RPGAPI_setRoute(config : 'GET' : '/api/users' : %paddr(dummyHandler));
@@ -356,7 +313,7 @@ dcl-proc test_setRoute export;
 end-proc;
 
 dcl-proc test_get_route export;
-   dcl-ds config likeds(RPGAPIAPP);
+   dcl-ds config likeds(RPGAPI_App);
 
    clear config;
    RPGAPI_get(config : '/api/users' : %paddr(dummyHandler));
@@ -366,7 +323,7 @@ dcl-proc test_get_route export;
 end-proc;
 
 dcl-proc test_post_route export;
-   dcl-ds config likeds(RPGAPIAPP);
+   dcl-ds config likeds(RPGAPI_App);
 
    clear config;
    RPGAPI_post(config : '/api/users' : %paddr(dummyHandler));
@@ -376,7 +333,7 @@ dcl-proc test_post_route export;
 end-proc;
 
 dcl-proc test_put_route export;
-   dcl-ds config likeds(RPGAPIAPP);
+   dcl-ds config likeds(RPGAPI_App);
 
    clear config;
    RPGAPI_put(config : '/api/users/{id}' : %paddr(dummyHandler));
@@ -386,7 +343,7 @@ dcl-proc test_put_route export;
 end-proc;
 
 dcl-proc test_delete_route export;
-   dcl-ds config likeds(RPGAPIAPP);
+   dcl-ds config likeds(RPGAPI_App);
 
    clear config;
    RPGAPI_delete(config : '/api/users/{id}' : %paddr(dummyHandler));
@@ -396,7 +353,7 @@ dcl-proc test_delete_route export;
 end-proc;
 
 dcl-proc test_multiple_routes export;
-   dcl-ds config likeds(RPGAPIAPP);
+   dcl-ds config likeds(RPGAPI_App);
 
    clear config;
    RPGAPI_get(config : '/api/users' : %paddr(dummyHandler));
@@ -417,8 +374,8 @@ end-proc;
 // ============================================
 
 dcl-proc test_routeMatches_exact export;
-   dcl-ds config likeds(RPGAPIAPP);
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s matches ind;
 
    clear config;
@@ -435,8 +392,8 @@ dcl-proc test_routeMatches_exact export;
 end-proc;
 
 dcl-proc test_routeMatches_withParam export;
-   dcl-ds config likeds(RPGAPIAPP);
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s matches ind;
    dcl-s paramValue varchar(1024);
 
@@ -457,8 +414,8 @@ dcl-proc test_routeMatches_withParam export;
 end-proc;
 
 dcl-proc test_routeMatches_multipleParams export;
-   dcl-ds config likeds(RPGAPIAPP);
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s matches ind;
    dcl-s paramValue varchar(1024);
 
@@ -482,8 +439,8 @@ dcl-proc test_routeMatches_multipleParams export;
 end-proc;
 
 dcl-proc test_routeMatches_noMatch export;
-   dcl-ds config likeds(RPGAPIAPP);
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s matches ind;
 
    clear config;
@@ -500,8 +457,8 @@ dcl-proc test_routeMatches_noMatch export;
 end-proc;
 
 dcl-proc test_routeMatches_wrongMethod export;
-   dcl-ds config likeds(RPGAPIAPP);
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s matches ind;
 
    clear config;
@@ -522,7 +479,7 @@ end-proc;
 // ============================================
 
 dcl-proc test_setMiddleware export;
-   dcl-ds config likeds(RPGAPIAPP);
+   dcl-ds config likeds(RPGAPI_App);
 
    clear config;
    RPGAPI_setMiddleware(config : '/api/*' : %paddr(dummyMiddleware));
@@ -531,8 +488,8 @@ dcl-proc test_setMiddleware export;
 end-proc;
 
 dcl-proc test_mwMatches_global export;
-   dcl-ds config likeds(RPGAPIAPP);
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s matches ind;
 
    clear config;
@@ -548,8 +505,8 @@ dcl-proc test_mwMatches_global export;
 end-proc;
 
 dcl-proc test_mwMatches_specific export;
-   dcl-ds config likeds(RPGAPIAPP);
-   dcl-ds request likeds(RPGAPIRQST);
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
    dcl-s matches ind;
 
    clear config;
@@ -569,10 +526,10 @@ end-proc;
 // ============================================
 
 dcl-proc dummyHandler;
-   dcl-pi *n likeds(RPGAPIRSP);
-      request likeds(RPGAPIRQST) const;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
    end-pi;
-   dcl-ds response likeds(RPGAPIRSP);
+   dcl-ds response likeds(RPGAPI_Response);
 
    clear response;
    response.status = 200;
@@ -582,8 +539,8 @@ end-proc;
 
 dcl-proc dummyMiddleware;
    dcl-pi *n ind;
-      request likeds(RPGAPIRQST) const;
-      response likeds(RPGAPIRSP);
+      request likeds(RPGAPI_Request) const;
+      response likeds(RPGAPI_Response);
    end-pi;
 
    return *on;
