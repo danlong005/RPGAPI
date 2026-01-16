@@ -9,32 +9,42 @@ REGEXP_INSTR
 * 7.2 TR1
 
 ## Installation
-In QShell
-```
-cd /
-git clone ....
+
+1. Clone the repository in QShell:
+```bash
+cd /home/[youruser]
+git clone git@github.com:danlong005/RPGAPI.git
 ```
 
-Then exit QShell and run the following CL command
-```
-QSYS/CRTBNDCL PGM([YOURLIB]/BUILD)                        
-              SRCSTMF('/downloaded/location/RPGAPI/build.clle')
-              DBGVIEW(*SOURCE)                         
-```
-
-If you cannot compile CL's from the IFS on your machine, use the following command to copy the build program to a source member. Then use the CHGPFM command to make it a CL. Then compile as normal.
-```
-CPYFRMSTMF FROMSTMF('/downloaded/location/RPGAPI/BUILD.CLLE')
-           TOMBR('/QSYS.LIB/[YOURLIB].LIB/QCLSRC.FILE/BUILD.MBR')
-
-CHGPFM FILE([YOURLIB]/QCLSRC) MBR(BUILD) SRCTYPE(CLLE)
+2. Update the `IFS_PATH` variable in the Makefile to match your clone location:
+```bash
+cd RPGAPI
+# Edit the Makefile and set IFS_PATH to your actual path
 ```
 
-Then you can run the build script to create the RPGAPI library, and all of the 
-programs, and include files.
+3. Build the project:
+```bash
+make all
 ```
-CALL [YOURLIB]/BUILD PARM('/downloaded/location')
+
+This will:
+- Create the RPGAPI library
+- Create the binding directory
+- Set the proper CCSID on source files
+- Compile the RPGAPI module
+- Create the service program
+- Add it to the binding directory
+
+4. (Optional) Run tests:
+```bash
+make test
 ```
+
+5. (Optional) Clean/remove the library:
+```bash
+make clean
+```
+
 
 That's it!!! Now you are ready to write completely RPGLE web api's. Check the 
 Quick start guide for a quick intro.
