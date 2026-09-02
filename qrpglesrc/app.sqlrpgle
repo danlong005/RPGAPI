@@ -1,14 +1,17 @@
 **free
 
-ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI':'YAJL')
+ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI')
               dftactgrp(*no);
 
 /copy './qrpglesrc/rpgapi_h.rpgle'
-/include yajl/qrpglesrc,YAJL_H
 
 dcl-ds request likeds(RPGAPI_Request);
 dcl-ds response likeds(RPGAPI_Response);
 dcl-ds app likeds(RPGAPI_App);
+
+dcl-pr JSON_escape varchar(1000);
+   value varchar(1000) const;
+end-pr;
 
 clear app;
 app.port = 3012;
@@ -29,7 +32,7 @@ return;
 dcl-proc CHECK_AUTH;
    dcl-pi *n ind;
       request likeds(RPGAPI_Request) const;
-      response likeds(RPGAPI_Response) const;
+      response likeds(RPGAPI_Response);
    end-pi;
 
    return *on;
@@ -39,15 +42,12 @@ dcl-proc MBR_show;
    dcl-pi *n likeds(RPGAPI_Response);
       request likeds(RPGAPI_Request) const;
    end-pi;
-   dcl-s Length Int(10:0) Inz;
-   dcl-s CCSID Int(10:0) Inz;
    dcl-s id_number zoned(11:0) inz;
    dcl-ds row qualified;
       id zoned(11:0);
       first_name char(25);
       last_name char(25);
    end-ds;
-   dcl-s data char(500);
 
    clear row;
    id_number = %dec(RPGAPI_getParam(request: 'id') : 11 : 0);
@@ -58,24 +58,34 @@ dcl-proc MBR_show;
                   where id = :id_number;
 
    clear response;
-   clear data;
    response.status = HTTP_OK;
    RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
          
    if row.id <> *zeros;
-      YAJL_genOpen( *off );
-      YAJL_beginObj();
-      YAJL_addNum('id' : %trim(%char(row.id)));
-      YAJL_addChar('first_name' : %trim(row.first_name));
-      YAJL_addChar('last_name' : %trim(row.last_name));
-      YAJL_endObj();
-      YAJL_copyBuf(CCSID : %addr(data) : %size(data) : 
-                        length);
-      YAJL_genClose();
-      response.body = data;
+      response.body = '{"id":' + %trim(%char(row.id)) +
+                      ',"first_name":"' +
+                            JSON_escape(%trim(row.first_name)) + '"' +
+                      ',"last_name":"' +
+                            JSON_escape(%trim(row.last_name)) + '"' +
+                      '}';
    else;
       response.status = HTTP_NOT_FOUND;
    endif;
 
    return response;
+end-proc;
+
+
+       // Escapes the characters JSON requires to be escaped, so that a value
+       // containing a quote or a backslash cannot break the string it is
+       // concatenated into.
+dcl-proc JSON_escape;
+   dcl-pi *n varchar(1000);
+      value varchar(1000) const;
+   end-pi;
+
+         // backslashes first: escaping them afterwards would double the
+         // backslashes introduced when escaping the quotes
+   return %scanrpl('"' : '\"' :
+                %scanrpl('\' : '\\' : value));
 end-proc;

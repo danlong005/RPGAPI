@@ -5,13 +5,13 @@
         //
         // the request data structure
         //
-        dcl-ds RPGAPIRQST qualified template;
+        dcl-ds RPGAPI_Request qualified template;
           body varchar(32000);
           headers likeds(RPGAPI_header_ds) dim(100);
           hostname char(250);
           method char(10);
           params likeds(RPGAPI_param_ds) dim(100);
-          protocol char(250);
+          protocol char(8);
           query_params likeds(RPGAPI_param_ds) dim(100);
           query_string char(1024);
           route char(250);
@@ -20,7 +20,7 @@
         //
         // the response data structure
         //
-        dcl-ds RPGAPIRSP qualified template;
+        dcl-ds RPGAPI_Response qualified template;
           body varchar(32000);
           headers likeds(RPGAPI_header_ds) dim(100);
           status int(10:0);
@@ -29,11 +29,12 @@
         //
         // the application data structure
         //
-        dcl-ds RPGAPIAPP qualified template;
+        dcl-ds RPGAPI_App qualified template;
           port int(10:0);                          // default is 3000
           socket_descriptor int(10:0);
           return_socket_descriptor int(10:0);
-          routes likeds(RPGAPI_route_ds) dim(500);
+          routes likeds(RPGAPI_route_ds) dim(250);
+          middlewares likeds(RPGAPI_route_ds) dim(100);
         end-ds;
 
         dcl-ds RPGAPI_header_ds qualified template;
@@ -61,17 +62,17 @@ To create web application in RPGAPI you have to follow a simple pattern on your 
 
 ```
 dcl-proc index;
-  dcl-pi *n likeds(RPGAPIRSP);
-    request likeds(RPGAPIRQST) const;
+  dcl-pi *n likeds(RPGAPI_Response);
+    request likeds(RPGAPI_Request) const;
   end-pi;
-  dcl-ds response likeds(RPGAPIRSP);
+  dcl-ds response likeds(RPGAPI_Response);
   
   ...your code...
   
   return response;
 end-proc;
 ```
-You will notice that the procedure takes a RPGAPIRQST(RPGAPI request) and returns a RPGAPIRSP(RPGAPI response). That's it! Inside of the method you can create whatever you need and load it into the response before you return it. We will dive more into this later.
+You will notice that the procedure takes a RPGAPI_Request(RPGAPI request) and returns a RPGAPI_Response(RPGAPI response). That's it! Inside of the method you can create whatever you need and load it into the response before you return it. We will dive more into this later.
 
 #### Kicking off the application
 Once you have registered some routes in the app data structure you can start the application so that your app can start handling request. You can start the application using the following api call
@@ -159,8 +160,8 @@ and the defintion of the middleware callback is as follows
 ```
   dcl-proc CHECK_AUTH;
     dcl-pi *n ind;
-      request likeds(RPGAPIRQST) const;
-      response likeds(RPGAPIRSP);
+      request likeds(RPGAPI_Request) const;
+      response likeds(RPGAPI_Response);
     end-pi;
 
     return *on;
@@ -243,7 +244,7 @@ route = request.route;
 ### Responses
 The response object is something you will create in the callback methods. Inside the callback method you will define the response and return it from your callback. 
 ```
-  dcl-ds response likeds(RPGAPIRSP);
+  dcl-ds response likeds(RPGAPI_Response);
 
   return response;
 ```
@@ -252,7 +253,7 @@ The response object is something you will create in the callback methods. Inside
 You can set response headers very easily. The following is an example. 
 
 ```
-RPGAPI_getHeader(response : 'Connection' : 'close');
+RPGAPI_setHeader(response : 'Connection' : 'close');
 ```
 
 #### Body

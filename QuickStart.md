@@ -2,11 +2,11 @@
        ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI')
               dftactgrp(*no);
 
-      /copy RPGAPI/qrpglesrc,RPGAPI_H
+      /include '/home/[youruser]/RPGAPI/qrpglesrc/rpgapi_h.rpgle'
 
-       dcl-ds request likeds(RPGAPIRQST);
-       dcl-ds response likeds(RPGAPIRSP);
-       dcl-ds app likeds(RPGAPIAPP);
+       dcl-ds request likeds(RPGAPI_Request);
+       dcl-ds response likeds(RPGAPI_Response);
+       dcl-ds app likeds(RPGAPI_App);
 
        clear app;
 
@@ -19,8 +19,8 @@
 
 
        dcl-proc test_proc;
-         dcl-pi *n likeds(RPGAPIRSP);
-           request likeds(RPGAPIRQST) const;
+         dcl-pi *n likeds(RPGAPI_Response);
+           request likeds(RPGAPI_Request) const;
          end-pi;
 
          response.body = 'hello';
