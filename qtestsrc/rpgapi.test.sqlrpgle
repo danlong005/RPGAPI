@@ -718,6 +718,54 @@ dcl-proc test_mwMatches_wildcardSegment export;
 end-proc;
 
 // ============================================
+// RESPONSE HEAD TESTS
+// ============================================
+
+dcl-proc test_buildHead_statusAndLength export;
+   dcl-ds response likeds(RPGAPI_Response);
+
+   RPGAPI_initHttp();
+   clear response;
+   response.status = HTTP_OK;
+
+   aEqual('HTTP/1.1 200 OK' + CRLF +
+          'Connection: close' + CRLF +
+          'Content-Length: 5' + DBL_CRLF :
+          RPGAPI_buildHead(response : 5));
+end-proc;
+
+dcl-proc test_buildHead_headers export;
+   dcl-ds response likeds(RPGAPI_Response);
+
+   RPGAPI_initHttp();
+   clear response;
+   response.status = HTTP_CREATED;
+   RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+   RPGAPI_setHeader(response : 'X-Test' : 'one two');
+
+   aEqual('HTTP/1.1 201 Created' + CRLF +
+          'Connection: close' + CRLF +
+          'Content-Type: application/json' + CRLF +
+          'X-Test: one two' + CRLF +
+          'Content-Length: 0' + DBL_CRLF :
+          RPGAPI_buildHead(response : 0));
+end-proc;
+
+dcl-proc test_buildHead_skipsConnection export;
+   dcl-ds response likeds(RPGAPI_Response);
+
+   RPGAPI_initHttp();
+   clear response;
+   response.status = HTTP_ACCEPTED;
+   RPGAPI_setHeader(response : 'Connection' : 'keep-alive');
+
+   aEqual('HTTP/1.1 202 Accepted' + CRLF +
+          'Connection: close' + CRLF +
+          'Content-Length: 0' + DBL_CRLF :
+          RPGAPI_buildHead(response : 0));
+end-proc;
+
+// ============================================
 // DUMMY HANDLERS FOR TESTING
 // ============================================
 

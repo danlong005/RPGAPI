@@ -553,43 +553,16 @@ dcl-proc RPGAPI_sendResponse export;
       config likeds(RPGAPI_App) const;
       response likeds(RPGAPI_Response) const;
    end-pi;
-   dcl-s data char(32766);
-   dcl-s body varchar(32000);
    dcl-s return_code int(10:0) inz(0);
-   dcl-s index int(10:0) inz;
    dcl-s head varchar(96000);
    dcl-s utf8_body varchar(96000);
 
-   data = 'HTTP/1.1 ' + %char(response.status) + ' ' +
-                  %trim(RPGAPI_getMessage(response.status)) + RPGAPI_CRLF;
-   data = %trim(data) + 'Connection: close' + RPGAPI_CRLF;
-
-   for index = 1 to %elem(response.headers) by 1;
-      if response.headers(index).name <> *blanks;
-            // the connection is always closed after the response, and the
-            // Connection header saying so is sent above
-         if %upper(%trim(response.headers(index).name)) = 'CONNECTION';
-            iter;
-         endif;
-
-         data = %trim(data) +
-                              %trim(response.headers(index).name) + ': ' +
-                              %trim(response.headers(index).value) + 
-                              RPGAPI_CRLF;
-      else;
-         index = %elem(response.headers) + 1;
-      endif;
-   endfor;
-
-         // Content-Length is the size of the body alone, in UTF-8 bytes,
-         // which is more than its length in EBCDIC for any character outside ASCII.
-         // The CRLF that ends this header plus one more CRLF make the blank
-         // line before the body
-   body = %trim(response.body);
-   utf8_body = RPGAPI_convert(body : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
-   data = %trim(data) + 'Content-Length: ' + %char(%len(utf8_body)) +
-                    RPGAPI_DBL_CRLF;
-   head = RPGAPI_convert(%trimr(data) : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+      // Content-Length counts UTF-8 bytes, which is more than the length in
+      // EBCDIC for any character outside ASCII, so convert the body first
+   utf8_body = RPGAPI_convert(%trim(response.body) :
+                              RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+   head = RPGAPI_convert(RPGAPI_buildHead(response : %len(utf8_body)) :
+                         RPGAPI_JOB_CCSID : RPGAPI_UTF8);
 
    return_code = write( config.return_socket_descriptor :
                                 %addr(head : *data) :
@@ -600,6 +573,42 @@ dcl-proc RPGAPI_sendResponse export;
                                    %len(utf8_body) );
    endif;
    close_port( config.return_socket_descriptor );
+end-proc;
+
+
+   // the status line and headers of a response, up to and including the blank
+   // line before the body, in the job's CCSID. body_length is the size of the
+   // body as it is sent, for Content-Length
+dcl-proc RPGAPI_buildHead export;
+   dcl-pi *n varchar(32766);
+      response likeds(RPGAPI_Response) const;
+      body_length int(10:0) const;
+   end-pi;
+   dcl-s head varchar(32766);
+   dcl-s index int(10:0);
+
+   head = 'HTTP/1.1 ' + %char(response.status) + ' ' +
+          %trim(RPGAPI_getMessage(response.status)) + RPGAPI_CRLF +
+          'Connection: close' + RPGAPI_CRLF;
+
+   for index = 1 to %elem(response.headers) by 1;
+      if response.headers(index).name = *blanks;
+         leave;
+      endif;
+
+         // the connection is always closed after the response, and the
+         // Connection header saying so is sent above
+      if %upper(%trim(response.headers(index).name)) = 'CONNECTION';
+         iter;
+      endif;
+
+      head += %trim(response.headers(index).name) + ': ' +
+              %trim(response.headers(index).value) + RPGAPI_CRLF;
+   endfor;
+
+      // the CRLF that ends this header plus one more make the blank line
+   head += 'Content-Length: ' + %char(body_length) + RPGAPI_DBL_CRLF;
+   return head;
 end-proc;
 
 

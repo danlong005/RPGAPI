@@ -121,6 +121,11 @@
   `rpgapi_h.rpgle` through `INCDIR`, and a comment gives the build command.
   Verified on PUB400 (2026-09-25): compiled from `/home/LONGDM` it used to fail
   with a severity 40 error, now the program is created
+- [x] The status line and headers are built by `RPGAPI_buildHead` (exported
+  from the module, not the service program) instead of inside
+  `RPGAPI_sendResponse`, and have unit tests (not run). Verified on PUB400
+  (2026-09-25): five raw responses (custom and `Connection` headers, UTF-8
+  body, 202, CR/LF, 404) are byte for byte the same before and after
 
 ## Features
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
@@ -135,7 +140,6 @@
   to stop being shared state).
 
 ## Cleanup
-- [ ] Move the response builder out of `RPGAPI_sendResponse` so the tests can reach it
 
 ## PUB400
 - [ ] `BUILD`, `QRPGLESRC` and `RPGWEB` in library `RPGAPI` survive `CLRLIB`

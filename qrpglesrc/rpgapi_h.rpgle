@@ -117,6 +117,11 @@ dcl-pr RPGAPI_sendResponse;
    response likeds(RPGAPI_Response) const;
 end-pr;
 
+dcl-pr RPGAPI_buildHead varchar(32766);
+   response likeds(RPGAPI_Response) const;
+   body_length int(10:0) const;
+end-pr;
+
 dcl-pr RPGAPI_setup;
    config likeds(RPGAPI_App);
 end-pr;
