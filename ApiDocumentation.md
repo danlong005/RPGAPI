@@ -351,6 +351,41 @@ endif;
   your procedure has to clean up.
 - A body your procedure does not read is dropped.
 
+#### Forms with files (multipart/form-data)
+Browsers send a form with a file input, and `curl -F`, as
+`multipart/form-data`: a body of parts, one per field or file. Go through them
+with `RPGAPI_nextPart`, which describes each part in an `RPGAPI_Part`:
+
+```
+dcl-ds part likeds(RPGAPI_Part);      // name, filename, content_type
+
+dow RPGAPI_nextPart(request : part);
+   if part.filename = '';
+         // a form field: its text, in pieces for long values
+      value = RPGAPI_readPart(request);
+   else;
+         // a file: save it, or read it with RPGAPI_readPartBytes
+      size = RPGAPI_savePart(request : '/uploads/' + %char(%timestamp()));
+   endif;
+enddo;
+```
+
+- Parts are read from the body as you go, never all at once, so the size of
+  the files is only bounded by the request and upload limits above. Allow
+  larger uploads with `RPGAPI_setMaxUploadSize`.
+- `RPGAPI_readPart` returns the next piece of the part as text in the job's
+  CCSID and `''` at its end; `RPGAPI_readPartBytes` copies raw bytes, and
+  `RPGAPI_savePart` writes the rest of the part to an IFS file and returns
+  its size (-1 when the file cannot be created).
+- Whatever you do not read of a part is skipped when you move to the next.
+- `RPGAPI_nextPart` returns `*off` at the end, and for a body that is not
+  `multipart/form-data`. A body that is not valid multipart ends your
+  procedure with an escape message and a 400, like the other body errors.
+- `part.filename` is what the client sent. Never use it as a path: build the
+  file name yourself, as above.
+- Use either the parts or `RPGAPI_readBody` / `RPGAPI_readBodyBytes` for a
+  request, not both.
+
 Requests that are refused before your procedures are called:
 | Status | When |
 | --- | --- |
@@ -548,6 +583,10 @@ fails when the app is bound.
 | `RPGAPI_readBody(request)` | The next piece of the body as text |
 | `RPGAPI_readBodyBytes(request : buffer : size)` | The next piece of the body as bytes |
 | `RPGAPI_saveBody(request : path)` | Write the body to an IFS file |
+| `RPGAPI_nextPart(request : part)` | Move to the next part of a multipart/form-data body |
+| `RPGAPI_readPart(request)` | The next piece of the current part as text |
+| `RPGAPI_readPartBytes(request : buffer : size)` | The next piece of the current part as bytes |
+| `RPGAPI_savePart(request : path)` | Write the rest of the current part to an IFS file |
 | `RPGAPI_beginResponse(response : length?)` | Send the status and headers of a streamed response |
 | `RPGAPI_write(text)` | Add text to a streamed response |
 | `RPGAPI_writeBytes(buffer : length)` | Add bytes to a streamed response |

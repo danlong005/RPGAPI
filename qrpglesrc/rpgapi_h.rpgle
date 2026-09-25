@@ -45,6 +45,14 @@ dcl-ds RPGAPI_Response qualified template;
    status int(10:0);
 end-ds;
 
+   // a part of a multipart/form-data body, from RPGAPI_nextPart
+dcl-ds RPGAPI_Part qualified template;
+   name varchar(256);
+      // blank for a form field; the name of the file the client sent
+   filename varchar(1024);
+   content_type varchar(256);
+end-ds;
+
 dcl-ds RPGAPI_App qualified template;
    port int(10:0);
    socket_descriptor int(10:0);
@@ -235,6 +243,38 @@ end-pr;
    // writes the request body, unconverted, to an IFS file, replacing it.
    // *off when the file cannot be created
 dcl-pr RPGAPI_saveBody ind;
+   request likeds(RPGAPI_Request) const;
+   path varchar(1024) const;
+end-pr;
+
+   // multipart/form-data (forms with files): moves to the next part of the
+   // body and describes it in part, skipping what was not read of the one
+   // before. *off when there are no more parts, or the body is not
+   // multipart/form-data. A body that is not valid ends the procedure with
+   // an escape message, and the request is answered with 400
+dcl-pr RPGAPI_nextPart ind;
+   request likeds(RPGAPI_Request) const;
+   part likeds(RPGAPI_Part);
+end-pr;
+
+   // the next piece of the current part as text in the job's CCSID, '' at
+   // its end
+dcl-pr RPGAPI_readPart varchar(32000);
+   request likeds(RPGAPI_Request) const;
+end-pr;
+
+   // copies up to size bytes of the current part, unconverted, to buffer.
+   // Returns how many, 0 at its end
+dcl-pr RPGAPI_readPartBytes int(10:0);
+   request likeds(RPGAPI_Request) const;
+   buffer pointer value;
+   size int(10:0) const;
+end-pr;
+
+   // writes the rest of the current part, unconverted, to an IFS file,
+   // replacing it. Returns the bytes written, -1 when the file cannot be
+   // created
+dcl-pr RPGAPI_savePart int(10:0);
    request likeds(RPGAPI_Request) const;
    path varchar(1024) const;
 end-pr;

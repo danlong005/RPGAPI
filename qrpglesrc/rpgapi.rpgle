@@ -76,6 +76,20 @@ dcl-s RPGAPI_body_crlf_due ind inz(*off);
 dcl-s RPGAPI_body_streamed_bytes int(10:0) inz(0);
 dcl-s RPGAPI_body_declared int(10:0) inz(0);
 dcl-s RPGAPI_continue_pending ind inz(*off);
+   // reading a multipart/form-data body: state is RPGAPI_MP_..., delimiter
+   // the CR LF -- boundary line between parts in UTF-8, and buffer bytes of
+   // the body read ahead to find it
+dcl-s RPGAPI_mp_state int(10:0) inz(0);
+dcl-c RPGAPI_MP_NOT_STARTED 0;
+dcl-c RPGAPI_MP_IN_PART 1;
+dcl-c RPGAPI_MP_AT_DELIMITER 2;
+dcl-c RPGAPI_MP_DONE 3;
+dcl-s RPGAPI_mp_delimiter varchar(80);
+dcl-s RPGAPI_mp_buffer char(65536);
+dcl-s RPGAPI_mp_start int(10:0) inz(1);
+dcl-s RPGAPI_mp_end int(10:0) inz(0);
+dcl-s RPGAPI_mp_carry char(4);
+dcl-s RPGAPI_mp_carry_length int(10:0) inz(0);
    // the start of a UTF-8 character RPGAPI_readBody could not convert yet
 dcl-s RPGAPI_carry char(4);
 dcl-s RPGAPI_carry_length int(10:0) inz(0);
@@ -484,6 +498,10 @@ dcl-proc RPGAPI_acceptRequest export;
    RPGAPI_continue_pending = *off;
    RPGAPI_carry_length = 0;
    RPGAPI_linger = *off;
+   RPGAPI_mp_state = RPGAPI_MP_NOT_STARTED;
+   RPGAPI_mp_start = 1;
+   RPGAPI_mp_end = 0;
+   RPGAPI_mp_carry_length = 0;
 
       // the whole request has to arrive within the timeout. Read until the
       // blank line after the headers; they have to fit in RPGAPI_input
@@ -907,13 +925,6 @@ dcl-proc RPGAPI_readBody export;
    dcl-s raw char(16004);
    dcl-s length int(10:0);
    dcl-s count int(10:0);
-   dcl-s continuation int(10:0);
-   dcl-s lead int(10:0);
-   dcl-s needed int(10:0);
-   dcl-ds one_byte;
-      character char(1);
-      number uns(3:0) overlay(character);
-   end-ds;
 
    dow *on;
       length = RPGAPI_carry_length;
@@ -921,50 +932,72 @@ dcl-proc RPGAPI_readBody export;
          %subst(raw : 1 : length) = %subst(RPGAPI_carry : 1 : length);
       endif;
       RPGAPI_carry_length = 0;
-      count = RPGAPI_readBodyBytes(request : %addr(raw) + length : 16000);
+      count = RPGAPI_nextBodyBytes(%addr(raw) + length : 16000);
       length += count;
       if length = 0;
          return '';
       endif;
-
-         // do not split a UTF-8 character: when the piece ends inside one,
-         // keep its bytes for the next piece. Continuation bytes are
-         // 10xxxxxx, and the lead byte says how many bytes there are
       if count > 0;
-         continuation = 0;
-         dow continuation < 3 and continuation < length;
-            character = %subst(raw : length - continuation : 1);
-            if number < 128 or number > 191;
-               leave;
-            endif;
-            continuation += 1;
-         enddo;
-         lead = length - continuation;
-         if lead >= 1;
-            character = %subst(raw : lead : 1);
-            select;
-            when number >= 240;
-               needed = 4;
-            when number >= 224;
-               needed = 3;
-            when number >= 192;
-               needed = 2;
-            other;
-               needed = 1;
-            endsl;
-            if needed > continuation + 1;
-               RPGAPI_carry_length = length - lead + 1;
-               RPGAPI_carry = %subst(raw : lead : RPGAPI_carry_length);
-               length = lead - 1;
-            endif;
-         endif;
+         length = RPGAPI_holdPartialUtf8(%addr(raw) : length :
+                                         RPGAPI_carry : RPGAPI_carry_length);
       endif;
-
       if length > 0;
          return RPGAPI_convert(%subst(raw : 1 : length) :
                                RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
       endif;
    enddo;
+end-proc;
+
+
+   // when the length bytes at raw end inside a UTF-8 character, moves that
+   // character's bytes to carry, to go in front of the next piece, and
+   // returns how many bytes are left. Continuation bytes are 10xxxxxx, and a
+   // lead byte says how many bytes its character has
+dcl-proc RPGAPI_holdPartialUtf8;
+   dcl-pi *n int(10:0);
+      raw pointer value;
+      length int(10:0) const;
+      carry char(4);
+      carry_length int(10:0);
+   end-pi;
+   dcl-s bytes char(16004) based(raw);
+   dcl-s continuation int(10:0) inz(0);
+   dcl-s lead int(10:0);
+   dcl-s needed int(10:0);
+   dcl-ds one_byte;
+      character char(1);
+      number uns(3:0) overlay(character);
+   end-ds;
+
+   dow continuation < 3 and continuation < length;
+      character = %subst(bytes : length - continuation : 1);
+      if number < 128 or number > 191;
+         leave;
+      endif;
+      continuation += 1;
+   enddo;
+   lead = length - continuation;
+   if lead < 1;
+      return length;
+   endif;
+
+   character = %subst(bytes : lead : 1);
+   select;
+   when number >= 240;
+      needed = 4;
+   when number >= 224;
+      needed = 3;
+   when number >= 192;
+      needed = 2;
+   other;
+      needed = 1;
+   endsl;
+   if needed <= continuation + 1;
+      return length;
+   endif;
+   carry_length = length - lead + 1;
+   carry = %subst(bytes : lead : carry_length);
+   return lead - 1;
 end-proc;
 
 
@@ -974,11 +1007,21 @@ dcl-proc RPGAPI_readBodyBytes export;
       buffer pointer value;
       size int(10:0) const;
    end-pi;
+
+   return RPGAPI_nextBodyBytes(buffer : size);
+end-proc;
+
+
+   // up to size bytes of the body: what was read before routing first, then
+   // what is left on the connection. 0 at its end
+dcl-proc RPGAPI_nextBodyBytes;
+   dcl-pi *n int(10:0);
+      buffer pointer value;
+      size int(10:0) const;
+   end-pi;
    dcl-s target char(16000000) based(buffer);
    dcl-s count int(10:0);
 
-      // what was read before routing first, then what is left on the
-      // connection
    count = %min(size : RPGAPI_body_length - RPGAPI_body_position);
    if count > 0;
       %subst(target : 1 : count) =
@@ -1131,7 +1174,7 @@ dcl-proc RPGAPI_saveBody export;
    endif;
 
    monitor;
-      count = RPGAPI_readBodyBytes(request : %addr(buffer) : %size(buffer));
+      count = RPGAPI_nextBodyBytes(%addr(buffer) : %size(buffer));
       dow count > 0 and not failed;
          done = 0;
          dow done < count;
@@ -1142,7 +1185,7 @@ dcl-proc RPGAPI_saveBody export;
             endif;
             done += written;
          enddo;
-         count = RPGAPI_readBodyBytes(request : %addr(buffer) : %size(buffer));
+         count = RPGAPI_nextBodyBytes(%addr(buffer) : %size(buffer));
       enddo;
    on-error;
       failed = *on;
@@ -1162,6 +1205,380 @@ dcl-proc RPGAPI_saveBody export;
                             message_key : error_code );
    endif;
    return *on;
+end-proc;
+
+
+dcl-proc RPGAPI_nextPart export;
+   dcl-pi *n ind;
+      request likeds(RPGAPI_Request) const;
+      part likeds(RPGAPI_Part);
+   end-pi;
+   dcl-s scratch char(8192);
+   dcl-s line varchar(8192);
+   dcl-s text varchar(8192);
+   dcl-s eof ind;
+
+   clear part;
+   if RPGAPI_mp_state = RPGAPI_MP_NOT_STARTED and not RPGAPI_startMultipart(request);
+      RPGAPI_mp_state = RPGAPI_MP_DONE;
+   endif;
+   if RPGAPI_mp_state = RPGAPI_MP_DONE;
+      return *off;
+   endif;
+
+      // skip what is left of the part before, or of the preamble
+   dow RPGAPI_partBytes(%addr(scratch) : %size(scratch)) > 0;
+   enddo;
+
+      // the rest of the delimiter line: -- after the last part, else nothing
+      // but perhaps spaces
+   eof = RPGAPI_partLine(line);
+   if %len(line) >= 2 and %subst(line : 1 : 2) = x'2d2d';
+      RPGAPI_mp_state = RPGAPI_MP_DONE;
+      return *off;
+   endif;
+   if eof or %len(%trim(line : x'2009')) > 0;
+      RPGAPI_multipartFailed('a boundary line is not followed by CR LF');
+   endif;
+
+      // the part's headers, up to an empty line
+   dow *on;
+      if RPGAPI_partLine(line);
+         RPGAPI_multipartFailed('the body ends in the headers of a part');
+      endif;
+      if line = '';
+         leave;
+      endif;
+      text = RPGAPI_convert(line : RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
+      select;
+      when RPGAPI_startsWith(text : 'content-disposition:');
+         part.name = RPGAPI_headerParam(text : 'name');
+         part.filename = RPGAPI_headerParam(text : 'filename');
+      when RPGAPI_startsWith(text : 'content-type:');
+         part.content_type = %trim(%subst(text : 14));
+      endsl;
+   enddo;
+
+   RPGAPI_mp_state = RPGAPI_MP_IN_PART;
+   RPGAPI_mp_carry_length = 0;
+   return *on;
+end-proc;
+
+
+dcl-proc RPGAPI_readPart export;
+   dcl-pi *n varchar(32000);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+      // at most 16000 bytes, as for RPGAPI_readBody
+   dcl-s raw char(16004);
+   dcl-s length int(10:0);
+   dcl-s count int(10:0);
+
+   dow *on;
+      length = RPGAPI_mp_carry_length;
+      if length > 0;
+         %subst(raw : 1 : length) = %subst(RPGAPI_mp_carry : 1 : length);
+      endif;
+      RPGAPI_mp_carry_length = 0;
+      count = RPGAPI_partBytes(%addr(raw) + length : 16000);
+      length += count;
+      if length = 0;
+         return '';
+      endif;
+      if count > 0;
+         length = RPGAPI_holdPartialUtf8(%addr(raw) : length :
+                                         RPGAPI_mp_carry : RPGAPI_mp_carry_length);
+      endif;
+      if length > 0;
+         return RPGAPI_convert(%subst(raw : 1 : length) :
+                               RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
+      endif;
+   enddo;
+end-proc;
+
+
+dcl-proc RPGAPI_readPartBytes export;
+   dcl-pi *n int(10:0);
+      request likeds(RPGAPI_Request) const;
+      buffer pointer value;
+      size int(10:0) const;
+   end-pi;
+
+   return RPGAPI_partBytes(buffer : size);
+end-proc;
+
+
+dcl-proc RPGAPI_savePart export;
+   dcl-pi *n int(10:0);
+      request likeds(RPGAPI_Request) const;
+      path varchar(1024) const;
+   end-pi;
+   dcl-s descriptor int(10:0);
+   dcl-s buffer char(65536);
+   dcl-s count int(10:0);
+   dcl-s written int(10:0);
+   dcl-s done int(10:0);
+   dcl-s total int(10:0) inz(0);
+   dcl-s failed ind inz(*off);
+   dcl-s error_text varchar(512);
+   dcl-s message_key char(4);
+      // bytes provided 0: a failure to send is signalled as an exception
+   dcl-s error_code char(8) inz(*allx'00');
+      // rw-r--r--
+   dcl-c FILE_MODE 420;
+
+   descriptor = open(%trim(path) : O_WRONLY + O_CREAT + O_TRUNC : FILE_MODE);
+   if descriptor < 0;
+      return -1;
+   endif;
+
+   monitor;
+      count = RPGAPI_partBytes(%addr(buffer) : %size(buffer));
+      dow count > 0 and not failed;
+         done = 0;
+         dow done < count;
+            written = write(descriptor : %addr(buffer) + done : count - done);
+            if written <= 0;
+               failed = *on;
+               leave;
+            endif;
+            done += written;
+         enddo;
+         total += count;
+         count = RPGAPI_partBytes(%addr(buffer) : %size(buffer));
+      enddo;
+   on-error;
+      failed = *on;
+   endmon;
+
+   close_port(descriptor);
+   if failed;
+         // no half-written file left behind
+      unlink(%trim(path));
+      if RPGAPI_reject_status = 0;
+         RPGAPI_reject_status = HTTP_INTERNAL_SERVER;
+      endif;
+      error_text = 'RPGAPI_savePart: the part could not be saved to ' +
+                   %trim(path);
+      send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                            %len(error_text) : '*ESCAPE' : '*' : 1 :
+                            message_key : error_code );
+   endif;
+   return total;
+end-proc;
+
+
+   // sets up reading the body as multipart/form-data from the boundary in
+   // its Content-Type. *off when it is not multipart/form-data
+dcl-proc RPGAPI_startMultipart;
+   dcl-pi *n ind;
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-s content_type varchar(1024);
+   dcl-s boundary varchar(256);
+
+   content_type = RPGAPI_getHeader(request : 'Content-Type');
+   if not RPGAPI_startsWith(content_type : 'multipart/form-data');
+      return *off;
+   endif;
+   boundary = RPGAPI_headerParam(content_type : 'boundary');
+   if boundary = '' or %len(boundary) > 70;
+      return *off;
+   endif;
+
+      // the body starts with --boundary, and every other delimiter is CR LF
+      // --boundary: put a CR LF in front so the first is found the same way,
+      // and whatever is before it (the preamble) is the data of no part
+   RPGAPI_mp_delimiter = x'0d0a' + RPGAPI_convert('--' + boundary :
+                                                  RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+   %subst(RPGAPI_mp_buffer : 1 : 2) = x'0d0a';
+   RPGAPI_mp_start = 1;
+   RPGAPI_mp_end = 2;
+   RPGAPI_mp_state = RPGAPI_MP_IN_PART;
+   return *on;
+end-proc;
+
+
+   // up to size bytes of the current part, up to the next delimiter, which
+   // is then passed over. 0 at the end of the part
+dcl-proc RPGAPI_partBytes;
+   dcl-pi *n int(10:0);
+      buffer pointer value;
+      size int(10:0) const;
+   end-pi;
+   dcl-s target char(16000000) based(buffer);
+   dcl-s available int(10:0);
+   dcl-s found int(10:0);
+   dcl-s count int(10:0);
+
+   if RPGAPI_mp_state <> RPGAPI_MP_IN_PART or size <= 0;
+      return 0;
+   endif;
+
+   dow *on;
+      available = RPGAPI_mp_end - RPGAPI_mp_start + 1;
+      found = 0;
+      if available >= %len(RPGAPI_mp_delimiter);
+         found = %scan(RPGAPI_mp_delimiter :
+                       %subst(RPGAPI_mp_buffer : RPGAPI_mp_start : available));
+      endif;
+      if found = 1;
+         RPGAPI_mp_start += %len(RPGAPI_mp_delimiter);
+         RPGAPI_mp_state = RPGAPI_MP_AT_DELIMITER;
+         return 0;
+      endif;
+
+         // without a delimiter in sight, the last bytes could be the start
+         // of one: keep them until more has arrived
+      if found > 1;
+         count = %min(size : found - 1);
+      else;
+         count = %min(size : available - %len(RPGAPI_mp_delimiter) + 1);
+      endif;
+      if count > 0;
+         %subst(target : 1 : count) =
+            %subst(RPGAPI_mp_buffer : RPGAPI_mp_start : count);
+         RPGAPI_mp_start += count;
+         return count;
+      endif;
+
+      if RPGAPI_fillMultipart() = 0;
+         RPGAPI_multipartFailed('the body ends inside a part');
+      endif;
+   enddo;
+end-proc;
+
+
+   // the next line of the body, without its CR LF. *on when the body ended
+   // before a CR LF: line then has what was left
+dcl-proc RPGAPI_partLine;
+   dcl-pi *n ind;
+      line varchar(8192);
+   end-pi;
+   dcl-s found int(10:0);
+   dcl-s available int(10:0);
+
+   dow *on;
+      available = RPGAPI_mp_end - RPGAPI_mp_start + 1;
+      found = 0;
+      if available > 0;
+         found = %scan(x'0d0a' :
+                       %subst(RPGAPI_mp_buffer : RPGAPI_mp_start : available));
+      endif;
+      if found > 0;
+         if found - 1 > 8192;
+            RPGAPI_multipartFailed('has a header line over 8192 bytes');
+         endif;
+         line = %subst(RPGAPI_mp_buffer : RPGAPI_mp_start : found - 1);
+         RPGAPI_mp_start += found + 1;
+         return *off;
+      endif;
+      if available > 8192;
+         RPGAPI_multipartFailed('has a header line over 8192 bytes');
+      endif;
+      if RPGAPI_fillMultipart() = 0;
+         line = '';
+         if available > 0;
+            line = %subst(RPGAPI_mp_buffer : RPGAPI_mp_start : available);
+         endif;
+         RPGAPI_mp_start = RPGAPI_mp_end + 1;
+         return *on;
+      endif;
+   enddo;
+end-proc;
+
+
+   // reads more of the body into the multipart buffer, after moving what is
+   // left to its front. 0 at the end of the body
+dcl-proc RPGAPI_fillMultipart;
+   dcl-pi *n int(10:0);
+   end-pi;
+   dcl-s count int(10:0);
+
+   count = RPGAPI_mp_end - RPGAPI_mp_start + 1;
+   if count > 0 and RPGAPI_mp_start > 1;
+      %subst(RPGAPI_mp_buffer : 1 : count) =
+         %subst(RPGAPI_mp_buffer : RPGAPI_mp_start : count);
+   endif;
+   RPGAPI_mp_start = 1;
+   RPGAPI_mp_end = %max(count : 0);
+
+   count = RPGAPI_nextBodyBytes(%addr(RPGAPI_mp_buffer) + RPGAPI_mp_end :
+                                %size(RPGAPI_mp_buffer) - RPGAPI_mp_end);
+   RPGAPI_mp_end += count;
+   return count;
+end-proc;
+
+
+dcl-proc RPGAPI_multipartFailed;
+   dcl-pi *n;
+      problem varchar(200) const;
+   end-pi;
+
+   RPGAPI_mp_state = RPGAPI_MP_DONE;
+   RPGAPI_reject_status = HTTP_BAD_REQUEST;
+   RPGAPI_bodyFailed('is not valid multipart/form-data: ' + problem);
+end-proc;
+
+
+   // whether text starts with prefix, in any case
+dcl-proc RPGAPI_startsWith;
+   dcl-pi *n ind;
+      text varchar(8192) const;
+      prefix varchar(100) const;
+   end-pi;
+
+   return %len(text) >= %len(prefix) and
+          %lower(%subst(text : 1 : %len(prefix))) = %lower(prefix);
+end-proc;
+
+
+   // the value of a parameter such as name="x" in a header value such as
+   // form-data; name="x"; filename="a.txt", without its quotes. '' when it
+   // is not there. The parameter name is matched in any case, and only as a
+   // whole word, so name does not find the one in filename
+dcl-proc RPGAPI_headerParam;
+   dcl-pi *n varchar(1024);
+      text varchar(8192) const;
+      parameter varchar(50) const;
+   end-pi;
+   dcl-s lower varchar(8192);
+   dcl-s position int(10:0) inz(0);
+   dcl-s start int(10:0);
+   dcl-s stop int(10:0);
+   dcl-s before char(1);
+
+   lower = %lower(text);
+   dow *on;
+      position = %scan(%lower(parameter) + '=' : lower : position + 1);
+      if position = 0;
+         return '';
+      endif;
+      if position = 1;
+         leave;
+      endif;
+      before = %subst(lower : position - 1 : 1);
+      if before = ' ' or before = ';' or before = x'05';
+         leave;
+      endif;
+   enddo;
+
+   start = position + %len(parameter) + 1;
+   if start > %len(text);
+      return '';
+   endif;
+   if %subst(text : start : 1) = '"';
+      stop = %scan('"' : text : start + 1);
+      if stop = 0;
+         stop = %len(text) + 1;
+      endif;
+      return %subst(text : start + 1 : stop - start - 1);
+   endif;
+   stop = %scan(';' : text : start);
+   if stop = 0;
+      stop = %len(text) + 1;
+   endif;
+   return %trim(%subst(text : start : stop - start));
 end-proc;
 
 

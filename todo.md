@@ -235,10 +235,22 @@
   `[::1]:41731` `[::1]`, `[2001:db8::1]` itself, a lower-case `host:` header
   works, the case is kept, and no Host gives blank. Unit test added (not run).
   Earlier tests pass and raw responses are unchanged
+- [x] `multipart/form-data`: `RPGAPI_nextPart` walks the parts of the body
+  (name, filename, content type in `RPGAPI_Part`), and `RPGAPI_readPart`
+  (text) / `RPGAPI_readPartBytes` / `RPGAPI_savePart` (IFS file) read the
+  current one; unread data is skipped. Parts stream over the body readers, so
+  in-memory, streamed and chunked bodies all work, with a lookahead buffer
+  that finds delimiters split across reads. Not multipart gives no parts;
+  invalid multipart a 400. Verified on PUB400 (2026-09-25): curl -F with a
+  UTF-8 field, a 2MB file, a PNG and an empty field (files match); a body by
+  hand with preamble, epilogue, quoted boundary, a field with CR LF and
+  near-boundaries, and 3MB with fake delimiters, sent whole and in 40 pieces
+  (file matches, readPartBytes checksum matches, `Gruesse;1.txt` name with its
+  u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
+  closing boundary and no boundary give 400; a 30MB file through curl -F,
+  streamed, matches. All earlier tests pass and raw responses are unchanged
 
 ## Features
-- [ ] Parse `multipart/form-data` (browser file upload forms) on top of the
-  streamed body: parts, their headers and file names
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
   APIs (`gsk_*`) wrapped around the accepted socket, with the certificate coming
   from a DCM application ID or a keystore. Plain HTTP should still work.
