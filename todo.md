@@ -216,6 +216,10 @@
   unchanged
 
 ## Features
+- [ ] URL-decode route params and query values (`%20`, `+`), as Express does.
+  They are handed over as sent
+- [ ] Fill in `request.hostname` from the `Host` header, or drop the field;
+  it is never set
 - [ ] Parse `multipart/form-data` (browser file upload forms) on top of the
   streamed body: parts, their headers and file names
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets

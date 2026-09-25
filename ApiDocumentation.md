@@ -65,14 +65,19 @@ dcl-proc index;
   dcl-pi *n likeds(RPGAPI_Response);
     request likeds(RPGAPI_Request) const;
   end-pi;
-  dcl-ds response likeds(RPGAPI_Response);
-  
+  dcl-ds response likeds(RPGAPI_Response) inz;
+
   ...your code...
-  
+
+  response.status = HTTP_OK;
   return response;
 end-proc;
 ```
 You will notice that the procedure takes a RPGAPI_Request(RPGAPI request) and returns a RPGAPI_Response(RPGAPI response). That's it! Inside of the method you can create whatever you need and load it into the response before you return it. We will dive more into this later.
+
+Declare the response with `inz`, in the procedure. Without it, RPG fills the
+data structure with blanks, which leaves `status` a meaningless number, and a
+response declared outside the procedure keeps the headers of earlier requests.
 
 #### Kicking off the application
 Once you have registered some routes in the app data structure you can start the application so that your app can start handling request. You can start the application using the following api call
@@ -92,6 +97,10 @@ app.port = 3000;
 RPGAPI_start(app);
 ```
 _NOTE:_ The default port is 3000.
+
+`RPGAPI_start` serves requests until its job ends, so start your program in a
+job of its own (`SBMJOB CMD(CALL PGM(MYLIB/MYAPP))`) and end that job to stop
+the server. The [Quick Start](QuickStart.md) shows the whole cycle.
 
 #### Handling several requests at once
 By default one job handles one request at a time. Pass the number of jobs to
@@ -142,7 +151,10 @@ First up is the setRoute method. This can be used for all types of routes. POST,
 
 ```
 RPGAPI_setRoute(app : METHOD : url : %paddr(procedure));
+RPGAPI_setRoute(app : HTTP_PUT : '/api/users/{id}' : %paddr(USR_update));
 ```
+The method is compared as it is sent, so give it in upper case. `HTTP_GET`,
+`HTTP_POST`, `HTTP_PUT`, `HTTP_PATCH` and `HTTP_DELETE` are defined for you.
 
 There are also the following methods that are more descriptive that you may want to use for creating your routes.
 
@@ -173,11 +185,17 @@ matches `/api/users` and `/api/users/`, but not `/api/users/1` or
 `/x/api/users`. A `{name}` segment matches any one segment and captures it as a
 param, and `*` matches any one segment without capturing it.
 
-When defining routes it is the same as other api frameworks. Define specific routes before more general routes.
+Routes are tried in the order they were added, and the first that matches
+handles the request. Since a route matches the whole path, order only matters
+when two routes match the same one, such as a fixed segment and a param in the
+same place: add the fixed one first.
 ```
+RPGAPI_get(app : '/api/v1/memberships/new' : %paddr(MBR_new));
 RPGAPI_get(app : '/api/v1/memberships/{id}' : %paddr(MBR_show));
 RPGAPI_get(app : '/api/v1/memberships' : %paddr(MBR_index));
 ```
+A request that matches no route gets `404 Not Found`. An app can have up to
+250 routes and 100 middleware.
 
 ### Middleware
 
@@ -224,6 +242,9 @@ If you want to continue the request after the middleware method has ran then
 return *on, else you can return *off and the request will be cancelled. You of 
 course will need to set the response accordingly in the middleware.
 
+Every middleware that matches runs once per request, in the order it was
+added, before the route. It runs even when no route matches the request.
+
 
 ### Requests
 Given that you followed the outline specs for your callback procedures the request datastructure will be passed into the method that is handing the current request. You can find everything out about the request by looking in the request data structure. 
@@ -234,6 +255,10 @@ These are the headers that came in on the request. You can access those headers 
 ```
 header_value = RPGAPI_getHeader(request : 'Content-Type');
 ```
+The name is matched in any case, and `''` is returned for a header that was
+not sent. The first 100 headers are kept, with values of up to 1,024
+characters. The host the client asked for is in the `Host` header:
+`RPGAPI_getHeader(request : 'Host')` (`request.hostname` is not filled in).
 
 #### Params
 These are the route params that came in on the request. To define route params in your route see the section on routing. You can access the params using the following api method
@@ -241,6 +266,8 @@ These are the route params that came in on the request. To define route params i
 ```
 id_value = RPGAPI_getParam(request : 'id');
 ```
+Params and query values are handed over as they were sent: they are not URL
+decoded, so `%20` or `+` in them stays as it is.
 
 #### Body
 To access the body of the request you can use the following variable in the 
@@ -323,6 +350,10 @@ Requests that are refused before your procedures are called:
 | 400 Bad Request | `Content-Length` is not a number, or a chunk is not valid |
 | 501 Not Implemented | a `Transfer-Encoding` other than `chunked` |
 
+A streamed upload that is too large, not valid or stops arriving is answered
+with 413, 400 or 408 once your procedure reads it (see above). A procedure that
+fails with an error it does not handle gets `500 Internal Server Error`.
+
 #### QueryString/QueryParams
 The query string can be accessed in two different ways.
 
@@ -369,17 +400,22 @@ route = request.route;
 ### Responses
 The response object is something you will create in the callback methods. Inside the callback method you will define the response and return it from your callback. 
 ```
-  dcl-ds response likeds(RPGAPI_Response);
+  dcl-ds response likeds(RPGAPI_Response) inz;
 
   return response;
 ```
+The connection is closed after every response: RPGAPI sends
+`Connection: close` and does not keep connections open for further requests.
 
 #### Headers
 You can set response headers very easily. The following is an example. 
 
 ```
-RPGAPI_setHeader(response : 'Connection' : 'close');
+RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
 ```
+Up to 100 headers can be set. `Connection`, `Content-Length` and
+`Transfer-Encoding` are set by RPGAPI from how the body is sent; values you set
+for them are left out.
 
 #### Body
 Setting the body of the response can be done like so.
@@ -387,17 +423,44 @@ Setting the body of the response can be done like so.
 ```
 response.body = 'Here is the body!';
 ```
+The body is sent with blanks at its start and end removed. `response.body`
+holds up to 32,000 characters; for more, see Large responses and streaming.
 
 #### Status
 Once again setting the status is a simple thing to to do.
 
 ```
 response.status = 200;
+response.status = HTTP_CREATED;          // 201
 
-// some http codes are mapped into constants. We are working to map more of them.
-response.status = HTTP_OK;      // 200
-response.status = HTTP_CREATED; // 201
+// a redirect
+response.status = HTTP_FOUND;            // 302
+RPGAPI_setHeader(response : 'Location' : '/api/v1/memberships/5');
 ```
+
+These statuses have constants, and are sent with their reason phrase. Any other
+status is sent with an empty one, which clients accept.
+
+| Constant | Status |
+| --- | --- |
+| `HTTP_OK` | 200 OK |
+| `HTTP_CREATED` | 201 Created |
+| `HTTP_ACCEPTED` | 202 Accepted |
+| `HTTP_NO_CONTENT` | 204 No Content |
+| `HTTP_PARTIAL_CONTENT` | 206 Partial Content |
+| `HTTP_MOVED_PERMANENTLY` | 301 Moved Permanently |
+| `HTTP_FOUND` | 302 Found |
+| `HTTP_NOT_MODIFIED` | 304 Not Modified |
+| `HTTP_BAD_REQUEST` | 400 Bad Request |
+| `HTTP_UNAUTHORIZED` | 401 Unauthorized |
+| `HTTP_FORBIDDEN` | 403 Forbidden |
+| `HTTP_NOT_FOUND` | 404 Not Found |
+| `HTTP_REQUEST_TIMEOUT` | 408 Request Timeout |
+| `HTTP_CONTENT_TOO_LARGE` | 413 Content Too Large |
+| `HTTP_RANGE_NOT_SATISFIABLE` | 416 Range Not Satisfiable |
+| `HTTP_HEADERS_TOO_LARGE` | 431 Request Header Fields Too Large |
+| `HTTP_INTERNAL_SERVER` | 500 Internal Server Error |
+| `HTTP_NOT_IMPLEMENTED` | 501 Not Implemented |
 
 #### Large responses and streaming
 `response.body` holds up to 32,000 characters. For anything larger, or to send
@@ -454,3 +517,30 @@ for a GET it answers:
   bytes, or **416 Range Not Satisfiable** when the range is outside the file.
   Several ranges get the whole file, and so does a range whose `If-Range`
   names an older version of the file
+
+### Procedure reference
+These are the procedures the service program exports. `rpgapi_h.rpgle` also
+declares procedures RPGAPI uses internally; calling one of those from an app
+fails when the app is bound.
+
+| Procedure | Purpose |
+| --- | --- |
+| `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
+| `RPGAPI_get` / `post` / `put` / `patch` / `delete(app : url : %paddr(proc))` | Add a route for that method |
+| `RPGAPI_setRoute(app : method : url : %paddr(proc))` | Add a route for any method |
+| `RPGAPI_setMiddleware(app : url : %paddr(proc))` | Add middleware for a path and everything below it, or `*` for all |
+| `RPGAPI_getParam(request : name)` | A route param |
+| `RPGAPI_getQueryParam(request : name)` | A query string value |
+| `RPGAPI_getHeader(request : name)` | A request header |
+| `RPGAPI_setHeader(response : name : value)` | Add a response header |
+| `RPGAPI_setMaxRequestSize(bytes)` | The largest body read into memory (1MB) |
+| `RPGAPI_setMaxUploadSize(bytes)` | The largest body streamed from the connection (0, off) |
+| `RPGAPI_bodyLength(request)` | The body's size in bytes, -1 while unknown |
+| `RPGAPI_readBody(request)` | The next piece of the body as text |
+| `RPGAPI_readBodyBytes(request : buffer : size)` | The next piece of the body as bytes |
+| `RPGAPI_saveBody(request : path)` | Write the body to an IFS file |
+| `RPGAPI_beginResponse(response : length?)` | Send the status and headers of a streamed response |
+| `RPGAPI_write(text)` | Add text to a streamed response |
+| `RPGAPI_writeBytes(buffer : length)` | Add bytes to a streamed response |
+| `RPGAPI_endResponse()` | Finish a streamed response |
+| `RPGAPI_sendFile(response : path)` | Send an IFS file |
