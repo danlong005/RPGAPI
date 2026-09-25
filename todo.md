@@ -74,14 +74,18 @@
   `Content-Length` counted it. The length is now taken before translating.
   Verified on PUB400 (2026-09-25): a body `user@example.com @@` used to arrive
   as 17 bytes against `Content-Length: 19`; now all 19 arrive
-
-## Small fixes (independent)
-- [ ] `RPGAPI_parse` passes the body through `RPGAPI_cleanString`, which removes
-  every CR and LF and trims it, so a multi-line JSON body loses its line breaks
-  (seen in the code, not yet reproduced). Take the body after the blank line
-  as it is
+- [x] `RPGAPI_parse` passed the body through `RPGAPI_cleanString`, which removed
+  every CR and LF and trimmed it. The body is now everything after the blank
+  line, as sent. Verified on PUB400 (2026-09-25): a 35-byte multi-line JSON
+  body used to arrive as 30 bytes on one line, and `  two spaces each side  `
+  lost its edge spaces; both now arrive unchanged. Unit test added but not run
 
 ## Larger fixes
+- [ ] Requests and responses are translated with `QDCXLATE` tables `QTCPEBC` /
+  `QTCPASC`, which assume CCSID 37. In a job with another CCSID the variant
+  characters in an app's literals go out wrong: on PUB400 (CCSID 273) a `[` in
+  a response body was sent as x'9B', and `{ } [ ] @ \ |` in JSON are all
+  affected. Convert between the job CCSID and UTF-8 instead (e.g. `iconv`)
 - [ ] No read timeout: a client that sends less than its `Content-Length`, or
   nothing at all, blocks the server (one connection at a time) until it goes away
 

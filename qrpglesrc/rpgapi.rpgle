@@ -276,8 +276,11 @@ dcl-proc RPGAPI_parse export;
       endif;
    endfor;
 
-   start = stop + 1;
-   request.body = RPGAPI_cleanString(%subst(raw_request : start ));
+      // the body is everything after the blank line, exactly as sent
+   start = stop + %len(RPGAPI_DBL_CRLF);
+   if start <= %len(raw_request);
+      request.body = %subst(raw_request : start);
+   endif;
 
    return request;
 end-proc;

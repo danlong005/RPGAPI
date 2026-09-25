@@ -149,6 +149,20 @@ dcl-proc test_parse_withBody export;
    aEqual('{"name":"john","age":30}' : %trim(request.body));
 end-proc;
 
+dcl-proc test_parse_bodyKeepsLineBreaks export;
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s rawRequest varchar(32000);
+   dcl-s body varchar(100);
+
+   body = '{' + CRLF + '  "name": "john"' + CRLF + '}  ';
+   rawRequest = 'POST /api/users HTTP/1.1' + CRLF +
+                'Host: localhost' + DBL_CRLF + body;
+
+   request = RPGAPI_parse(rawRequest);
+
+   aEqual(body : request.body);
+end-proc;
+
 dcl-proc test_parse_postRequest export;
    dcl-ds request likeds(RPGAPI_Request);
    dcl-s rawRequest varchar(32000);
@@ -160,6 +174,7 @@ dcl-proc test_parse_postRequest export;
 
    aEqual('POST' : %trim(request.method));
    aEqual('/api/users' : %trim(request.route));
+   aEqual('' : request.body);
 end-proc;
 
 // ============================================
