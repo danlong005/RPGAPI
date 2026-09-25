@@ -134,6 +134,11 @@ You can gain access to that param using the following code. This will be a strin
 RPGAPI_getParam(request: 'id');
 ```
 
+A route has to match the whole path, one `/` segment at a time. `/api/users`
+matches `/api/users` and `/api/users/`, but not `/api/users/1` or
+`/x/api/users`. A `{name}` segment matches any one segment and captures it as a
+param, and `*` matches any one segment without capturing it.
+
 When defining routes it is the same as other api frameworks. Define specific routes before more general routes.
 ```
 RPGAPI_get(app : '/api/v1/memberships/{id}' : %paddr(MBR_show));
@@ -162,6 +167,11 @@ To create middleware on your routes you can use the following method.
 ```
   RPGAPI_setMiddleware(app : '/api/v1/memberships' : %paddr(CHECK_AUTH));
 ```
+
+Route middleware runs for its own path and every path below it, so the one
+above also runs for `/api/v1/memberships/5`, but not for
+`/api/v1/membershipsX` or `/x/api/v1/memberships`. `{name}` and `*` segments
+work the same as in routes.
 
 and the defintion of the middleware callback is as follows
 

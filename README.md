@@ -4,9 +4,9 @@
 A small RPGLE web framework for building web api's on the IBM i.
 
 ## Dependencies
-REGEXP_INSTR 
-* 7.1 TR9 
-* 7.2 TR1
+%SPLIT
+* 7.3 TR7
+* 7.4 TR1
 
 ## Installation
 

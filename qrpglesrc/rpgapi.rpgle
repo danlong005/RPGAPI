@@ -297,58 +297,14 @@ dcl-proc RPGAPI_routeMatches export;
       route likeds(RPGAPI_route_ds);
       request likeds(RPGAPI_Request);
    end-pi;
-   dcl-s position int(10:0);
-   dcl-s url varchar(32000);
-   dcl-s start int(10:0);
-   dcl-s new_start int(10:0);
-   dcl-s stop int(10:0);
-   dcl-s quit ind inz;
-   dcl-s index int(10:0);
-   dcl-s route_comparison varchar(32000);
 
-   clear request.params;
-   url = request.route;
-   route_comparison = route.url;
+   if request.method <> route.method;
+      clear request.params;
+      return *off;
+   endif;
 
-   start = 0;
-   new_start = 1;
-   quit = *off;
-   dow not quit;
-      start = %scan('{' : route_comparison);
-      if start > 0;
-         stop = %scan('}' : route_comparison : start);
-
-         for index = 1 to %elem(request.params) by 1;
-            if request.params(index).name = *blanks;
-               request.params(index).name = %subst( route_comparison :
-                                                        start + 1 :
-                                                        stop - start - 1 );
-               stop = %scan('/' : request.route : start + 1);
-               if stop = 0;
-                  request.params(index).value = %subst( request.route :
-                                                            start);
-               else;
-                  request.params(index).value = %subst( request.route :
-                                                            start :
-                                                            stop - start);
-               endif;
-
-               route_comparison = %scanrpl('{' + 
-                              %trim(request.params(index).name) + '}' : 
-                              %trim(request.params(index).value) :
-                              route_comparison );
-               index = %elem(request.params) + 1;
-            endif;
-         endfor;
-      else;
-         quit = *on;
-      endif;
-   enddo;
-
-   position = 0;
-   exec sql set :position = regexp_instr(:url, :route_comparison);
-
-   return position > 0 and request.method = route.method;
+   return RPGAPI_pathMatches(route.url : request.route : *off :
+                             request.params);
 end-proc;
 
 
@@ -357,63 +313,76 @@ dcl-proc RPGAPI_mwMatches export;
       route likeds(RPGAPI_route_ds);
       request likeds(RPGAPI_Request);
    end-pi;
-   dcl-s position int(10:0);
-   dcl-s url varchar(32000);
-   dcl-s start int(10:0);
-   dcl-s new_start int(10:0);
-   dcl-s stop int(10:0);
-   dcl-s quit ind inz;
-   dcl-s index int(10:0);
-   dcl-s route_comparison varchar(32000);
-
-   clear request.params;
-   url = request.route;
-   route_comparison = route.url;
-
-   start = 0;
-   new_start = 1;
-   quit = *off;
-   dow not quit;
-      start = %scan('{' : route_comparison);
-      if start > 0;
-         stop = %scan('}' : route_comparison : start);
-
-         for index = 1 to %elem(request.params) by 1;
-            if request.params(index).name = *blanks;
-               request.params(index).name = %subst( route_comparison :
-                                                        start + 1 :
-                                                        stop - start - 1 );
-               stop = %scan('/' : request.route : start + 1);
-               if stop = 0;
-                  request.params(index).value = %subst( request.route :
-                                                            start);
-               else;
-                  request.params(index).value = %subst( request.route :
-                                                            start :
-                                                            stop - start);
-               endif;
-
-               route_comparison = %scanrpl('{' + 
-                              %trim(request.params(index).name) + '}' : 
-                              %trim(request.params(index).value) :
-                              route_comparison );
-               index = %elem(request.params) + 1;
-            endif;
-         endfor;
-      else;
-         quit = *on;
-      endif;
-   enddo;
-
-   position = 0;
-   exec sql set :position = regexp_instr(:url, :route_comparison);
 
             // allowing middlewares for all routes
-   if (%trim(route_comparison) = RPGAPI_GLOBAL_MIDDLEWARE);
-      position = 1;
+   if %trim(route.url) = RPGAPI_GLOBAL_MIDDLEWARE;
+      clear request.params;
+      return *on;
    endif;
 
-   return position > 0;
+   return RPGAPI_pathMatches(route.url : request.route : *on :
+                             request.params);
+end-proc;
+
+
+   // compares a route pattern with a request path one '/' segment at a time.
+   // A '{name}' segment matches any segment and captures it as param 'name',
+   // '*' matches any segment. With prefix on, the pattern only has to match
+   // the leading segments of the path, so '/api' also matches '/api/users'.
+   // params gets the captured values on a match and is cleared otherwise
+dcl-proc RPGAPI_pathMatches;
+   dcl-pi *n ind;
+      pattern varchar(32000) const;
+      path varchar(32000) const;
+      prefix ind const;
+      params likeds(RPGAPI_param_ds) dim(100);
+   end-pi;
+   dcl-s pattern_parts varchar(1024) dim(100);
+   dcl-s path_parts varchar(1024) dim(100);
+   dcl-s pattern_count int(10:0);
+   dcl-s path_count int(10:0);
+   dcl-s index int(10:0);
+   dcl-s param_count int(10:0) inz;
+   dcl-s part varchar(1024);
+   dcl-ds found likeds(RPGAPI_param_ds) dim(100) inz;
+
+   clear params;
+
+      // %split drops empty segments, so '/api/users/' is '/api/users'
+      // and '/' has no segments at all
+   pattern_parts = %split(%trim(pattern) : '/');
+   path_parts = %split(%trim(path) : '/');
+   pattern_count = %lookup('' : pattern_parts) - 1;
+   if pattern_count < 0;
+      pattern_count = %elem(pattern_parts);
+   endif;
+   path_count = %lookup('' : path_parts) - 1;
+   if path_count < 0;
+      path_count = %elem(path_parts);
+   endif;
+
+   if path_count < pattern_count or
+      (not prefix and path_count <> pattern_count);
+      return *off;
+   endif;
+
+   for index = 1 to pattern_count;
+      part = pattern_parts(index);
+
+      if %len(part) > 2 and %subst(part : 1 : 1) = '{' and
+         %subst(part : %len(part) : 1) = '}';
+         if param_count < %elem(found);
+            param_count += 1;
+            found(param_count).name = %subst(part : 2 : %len(part) - 2);
+            found(param_count).value = path_parts(index);
+         endif;
+      elseif part <> '*' and part <> path_parts(index);
+         return *off;
+      endif;
+   endfor;
+
+   params = found;
+   return *on;
 end-proc;
 
 

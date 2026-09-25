@@ -550,6 +550,158 @@ dcl-proc test_mwMatches_specific export;
    assert(matches : 'Specific middleware should match route');
 end-proc;
 
+dcl-proc test_routeMatches_notInsidePath export;
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s matches ind;
+
+   clear config;
+   clear request;
+
+   config.routes(1).method = 'GET';
+   config.routes(1).url = '/api/users';
+
+   request.method = 'GET';
+   request.route = '/x/api/users/1';
+
+   matches = RPGAPI_routeMatches(config.routes(1) : request);
+   assert(not matches : 'Route should not match inside a longer path');
+end-proc;
+
+dcl-proc test_routeMatches_extraSegment export;
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s matches ind;
+
+   clear config;
+   clear request;
+
+   config.routes(1).method = 'GET';
+   config.routes(1).url = '/api/users/{id}';
+
+   request.method = 'GET';
+   request.route = '/api/users/1/orders';
+
+   matches = RPGAPI_routeMatches(config.routes(1) : request);
+   assert(not matches : 'Route should not match a path with more segments');
+   aEqual('' : RPGAPI_getParam(request : 'id'));
+end-proc;
+
+dcl-proc test_routeMatches_paramWithRegexChars export;
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s matches ind;
+
+   clear config;
+   clear request;
+
+   config.routes(1).method = 'GET';
+   config.routes(1).url = '/api/users/{id}';
+
+   request.method = 'GET';
+   request.route = '/api/users/a(b.c';
+
+   matches = RPGAPI_routeMatches(config.routes(1) : request);
+   assert(matches : 'Route should match a param with regex characters');
+   aEqual('a(b.c' : RPGAPI_getParam(request : 'id'));
+end-proc;
+
+dcl-proc test_routeMatches_trailingSlash export;
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s matches ind;
+
+   clear config;
+   clear request;
+
+   config.routes(1).method = 'GET';
+   config.routes(1).url = '/api/users';
+
+   request.method = 'GET';
+   request.route = '/api/users/';
+
+   matches = RPGAPI_routeMatches(config.routes(1) : request);
+   assert(matches : 'Route should match with a trailing slash');
+end-proc;
+
+dcl-proc test_routeMatches_rootOnlyMatchesRoot export;
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s matches ind;
+
+   clear config;
+   clear request;
+
+   config.routes(1).method = 'GET';
+   config.routes(1).url = '/';
+
+   request.method = 'GET';
+   request.route = '/';
+   matches = RPGAPI_routeMatches(config.routes(1) : request);
+   assert(matches : 'Root route should match /');
+
+   request.route = '/nothing';
+   matches = RPGAPI_routeMatches(config.routes(1) : request);
+   assert(not matches : 'Root route should not match /nothing');
+end-proc;
+
+dcl-proc test_mwMatches_prefix export;
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s matches ind;
+
+   clear config;
+   clear request;
+
+   config.middlewares(1).url = '/api/users';
+
+   request.method = 'GET';
+   request.route = '/api/users/1';
+
+   matches = RPGAPI_mwMatches(config.middlewares(1) : request);
+   assert(matches : 'Middleware should match paths below its own');
+end-proc;
+
+dcl-proc test_mwMatches_notPartialSegment export;
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s matches ind;
+
+   clear config;
+   clear request;
+
+   config.middlewares(1).url = '/admin';
+
+   request.method = 'GET';
+   request.route = '/administrator';
+   matches = RPGAPI_mwMatches(config.middlewares(1) : request);
+   assert(not matches : 'Middleware should not match part of a segment');
+
+   request.route = '/x/admin';
+   matches = RPGAPI_mwMatches(config.middlewares(1) : request);
+   assert(not matches : 'Middleware should not match inside a longer path');
+end-proc;
+
+dcl-proc test_mwMatches_wildcardSegment export;
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s matches ind;
+
+   clear config;
+   clear request;
+
+   config.middlewares(1).url = '/api/*';
+
+   request.method = 'GET';
+   request.route = '/api/users';
+   matches = RPGAPI_mwMatches(config.middlewares(1) : request);
+   assert(matches : '* should match any one segment');
+
+   request.route = '/api';
+   matches = RPGAPI_mwMatches(config.middlewares(1) : request);
+   assert(not matches : '* should need a segment to match');
+end-proc;
+
 // ============================================
 // DUMMY HANDLERS FOR TESTING
 // ============================================

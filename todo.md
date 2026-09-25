@@ -49,12 +49,19 @@
   second server on a port already in use used to stay active with nothing in
   its job log; it now ends at once with `bind() failed for port 41731: Address
   already in use. (errno 3420).` and the first server keeps serving
+- [x] Route matching used an unanchored `REGEXP_INSTR` pattern with request
+  values put into it. `RPGAPI_routeMatches` / `RPGAPI_mwMatches` now compare
+  `/` segments (`{name}` captures one, `*` matches one): routes must match the
+  whole path, middleware its leading segments. No SQL is left, so the module is
+  now `rpgapi.rpgle` built with `CRTRPGMOD`; built with `CRTSQLRPGI` it read
+  `{`/`}` differently from a `CRTBNDRPG` app in CCSID 273, and `{name}` never
+  matched. Verified on PUB400 (2026-09-25): `/api/users` used to answer
+  `/x/api/users/1`, `/api/users/1`, `/api/usersX` and the `{id}` routes, an
+  `/admin` middleware blocked `/administrator` and `/x/admin`, and a `/` route
+  answered every path. Now each goes to the right route or 404s, params with
+  `(` or `.` work, `/admin/x` still gets the 401. Unit tests added but not run
 
 ## Larger fixes
-- [ ] Route matching: the `REGEXP_INSTR` pattern is not anchored (`/api/users` matches
-  `/x/api/users/1`), and request values are put into the pattern before matching.
-  Match segment by segment instead, which also removes the need for SQL
-  (`RPGAPI_routeMatches` / `RPGAPI_mwMatches`)
 - [ ] Only one `read()` per request, so anything larger than one packet is cut off.
   Read until the end of the headers, then `Content-Length` bytes of body
   (`RPGAPI_acceptRequest`)
