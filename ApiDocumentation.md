@@ -101,6 +101,12 @@ bind() failed for port 3000: Address already in use. (errno 3420).
 ```
 Monitor for it if your program should handle this itself.
 
+Requests are converted from UTF-8 to the job's CCSID before your procedures see
+them, and responses from the job's CCSID to UTF-8, so `Content-Length` counts
+UTF-8 bytes. Compile your application with `TGTCCSID(*JOB)`, as described in
+the README under Character sets, so that its literals are in the job's CCSID
+as well.
+
 
 #### Routing
 To create routes in your application we have given you several ways to create those. 

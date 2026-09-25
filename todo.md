@@ -4,6 +4,8 @@
 - [ ] Run `make test` (needs iRPGUnit in library `RPGUNIT`). iRPGUnit is not
   installed on PUB400. Needs another IBM i that has it, or iRPGUnit installed into
   a library we own on PUB400 (the Makefile hard-codes `RPGUNIT`)
+  The test program is compiled with the default `TGTCCSID`, so on a system
+  whose job CCSID is not 37 it probably needs `TGTCCSID(*JOB)` as well
 
 ## Done
 - [x] Socket buffers: `data` in `RPGAPI_acceptRequest` / `RPGAPI_sendResponse` and
@@ -79,13 +81,20 @@
   line, as sent. Verified on PUB400 (2026-09-25): a 35-byte multi-line JSON
   body used to arrive as 30 bytes on one line, and `  two spaces each side  `
   lost its edge spaces; both now arrive unchanged. Unit test added but not run
+- [x] Requests and responses were translated byte for byte with the `QDCXLATE`
+  tables `QTCPEBC` / `QTCPASC`: no UTF-8, `Content-Length` counted EBCDIC
+  characters, and `[ ] |` came out wrong. They are now converted between UTF-8
+  and the job's CCSID with `iconv` (`RPGAPI_convert`), and `Content-Length` is
+  the UTF-8 byte count. The library is compiled with `TGTCCSID(*JOB)`, and apps
+  have to be too (README, Character sets): from an IFS file the default gives
+  CCSID 37 literals whatever the job CCSID. Verified on PUB400 (2026-09-25, job
+  CCSID 273): a JSON literal with `[ ] { } @ \ |` and `ü` used to go out with
+  `[` as x'9B', `]` as `!`, `|` as x'D9' and `ü` as x'F5'; now it is exact
+  UTF-8 with a matching `Content-Length`, and a UTF-8 `Jürgen` in a request
+  arrives as 6 characters, not 7. The earlier request, `@` and route tests still
+  pass. A default-compiled app on a 273 system now loses `{name}` routes (seen)
 
 ## Larger fixes
-- [ ] Requests and responses are translated with `QDCXLATE` tables `QTCPEBC` /
-  `QTCPASC`, which assume CCSID 37. In a job with another CCSID the variant
-  characters in an app's literals go out wrong: on PUB400 (CCSID 273) a `[` in
-  a response body was sent as x'9B', and `{ } [ ] @ \ |` in JSON are all
-  affected. Convert between the job CCSID and UTF-8 instead (e.g. `iconv`)
 - [ ] No read timeout: a client that sends less than its `Content-Length`, or
   nothing at all, blocks the server (one connection at a time) until it goes away
 

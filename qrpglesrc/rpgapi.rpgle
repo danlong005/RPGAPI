@@ -4,6 +4,55 @@ ctl-opt option(*nodebugio:*srcstmt) nomain;
 /include 'rpgapi_h.rpgle'
 /include 'socket_h.rpgle'
 
+   // HTTP text is UTF-8 on the wire and the job's CCSID in the program
+dcl-c RPGAPI_UTF8 1208;
+dcl-c RPGAPI_JOB_CCSID 0;
+
+   // every field has to start as zeros: declare it with inz(*likeds)
+dcl-ds RPGAPI_QtqCode_T qualified template inz;
+   ccsid int(10:0);
+   conversion_alternative int(10:0);
+   substitution_alternative int(10:0);
+   shift_state_alternative int(10:0);
+   input_length_option int(10:0);
+   error_option int(10:0);
+   reserved char(8) inz(*allx'00');
+end-ds;
+
+dcl-ds RPGAPI_iconv_t qualified template;
+   return_value int(10:0);
+   cd int(10:0) dim(12);
+end-ds;
+
+dcl-pr iconv_open likeds(RPGAPI_iconv_t) extproc('QtqIconvOpen');
+   to_code likeds(RPGAPI_QtqCode_T) const;
+   from_code likeds(RPGAPI_QtqCode_T) const;
+end-pr;
+
+dcl-pr iconv int(10:0) extproc('iconv');
+   converter likeds(RPGAPI_iconv_t) value;
+   input pointer value;
+   input_left pointer value;
+   output pointer value;
+   output_left pointer value;
+end-pr;
+
+dcl-pr iconv_close int(10:0) extproc('iconv_close');
+   converter likeds(RPGAPI_iconv_t) value;
+end-pr;
+
+dcl-pr send_program_message extpgm('QMHSNDPM');
+   message_id char(7) const;
+   message_file char(20) const;
+   message_data char(512) const;
+   message_data_length int(10:0) const;
+   message_type char(10) const;
+   call_stack_entry char(10) const;
+   call_stack_counter int(10:0) const;
+   message_key char(4);
+   error_code char(8);
+end-pr;
+
 dcl-proc RPGAPI_start export;
    dcl-pi *n;
       config likeds(RPGAPI_App);
@@ -110,6 +159,7 @@ dcl-proc RPGAPI_acceptRequest export;
    dcl-s header_end int(10:0) inz(0);
    dcl-s expected int(10:0) inz(0);
    dcl-ds request likeds(RPGAPI_Request);
+   dcl-s text varchar(32000);
 
    clear socket_address;
    socket_address.sin_family = AF_INET;
@@ -152,8 +202,9 @@ dcl-proc RPGAPI_acceptRequest export;
       return request;
    endif;
 
-   RPGAPI_translate( received : data : 'QTCPEBC');
-   return RPGAPI_parse(%subst(data : 1 : received));
+   text = RPGAPI_convert(%subst(data : 1 : received) :
+                         RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
+   return RPGAPI_parse(text);
 end-proc;
 
 
@@ -163,15 +214,14 @@ dcl-proc RPGAPI_contentLength;
    dcl-pi *n int(10:0);
       ascii_headers varchar(32000) const;
    end-pi;
-   dcl-s headers char(32000);
+   dcl-s headers varchar(32000);
    dcl-s length int(10:0) inz(0);
    dcl-s start int(10:0);
    dcl-s stop int(10:0);
    dcl-c NAME 'CONTENT-LENGTH:';
 
-   headers = ascii_headers;
-   RPGAPI_translate( %len(ascii_headers) : headers : 'QTCPEBC');
-   headers = %upper(%subst(headers : 1 : %len(ascii_headers)));
+   headers = %upper(RPGAPI_convert(ascii_headers :
+                                   RPGAPI_UTF8 : RPGAPI_JOB_CCSID));
 
       // headers start after the request line, each after a CRLF
    start = %scan(RPGAPI_CRLF + NAME : headers);
@@ -181,7 +231,7 @@ dcl-proc RPGAPI_contentLength;
    start += %len(RPGAPI_CRLF) + %len(NAME);
    stop = %scan(RPGAPI_CRLF : headers : start);
    if stop = 0;
-      stop = %len(ascii_headers) + 1;
+      stop = %len(headers) + 1;
    endif;
 
    monitor;
@@ -473,7 +523,8 @@ dcl-proc RPGAPI_sendResponse export;
    dcl-s body varchar(32000);
    dcl-s return_code int(10:0) inz(0);
    dcl-s index int(10:0) inz;
-   dcl-s length int(10:0);
+   dcl-s head varchar(96000);
+   dcl-s utf8_body varchar(96000);
 
    data = 'HTTP/1.1 ' + %char(response.status) + ' ' +
                   %trim(RPGAPI_getMessage(response.status)) + RPGAPI_CRLF;
@@ -496,20 +547,24 @@ dcl-proc RPGAPI_sendResponse export;
       endif;
    endfor;
 
-         // Content-Length is the size of the body alone; the CRLF that ends
-         // this header plus one more CRLF make the blank line before the body
+         // Content-Length is the size of the body alone, in UTF-8 bytes,
+         // which is more than its length in EBCDIC for any character outside ASCII.
+         // The CRLF that ends this header plus one more CRLF make the blank
+         // line before the body
    body = %trim(response.body);
-   data = %trim(data) + 'Content-Length: ' + %char(%len(body)) +
-                    RPGAPI_DBL_CRLF + body;
-
-      // measure while the data is EBCDIC: in ASCII a trailing '@' is x'40',
-      // the EBCDIC blank, and %trim would cut it off
-   length = %len(%trimr(data));
-   RPGAPI_translate( length : data : 'QTCPASC');
+   utf8_body = RPGAPI_convert(body : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+   data = %trim(data) + 'Content-Length: ' + %char(%len(utf8_body)) +
+                    RPGAPI_DBL_CRLF;
+   head = RPGAPI_convert(%trimr(data) : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
 
    return_code = write( config.return_socket_descriptor :
-                                %addr(data) :
-                                length );
+                                %addr(head : *data) :
+                                %len(head) );
+   if %len(utf8_body) > 0;
+      return_code = write( config.return_socket_descriptor :
+                                   %addr(utf8_body : *data) :
+                                   %len(utf8_body) );
+   endif;
    close_port( config.return_socket_descriptor );
 end-proc;
 
@@ -589,17 +644,6 @@ dcl-proc RPGAPI_socketFailed;
       config likeds(RPGAPI_App);
       call_name varchar(20) const;
    end-pi;
-   dcl-pr send_program_message extpgm('QMHSNDPM');
-      message_id char(7) const;
-      message_file char(20) const;
-      message_data char(512) const;
-      message_data_length int(10:0) const;
-      message_type char(10) const;
-      call_stack_entry char(10) const;
-      call_stack_counter int(10:0) const;
-      message_key char(4);
-      error_code char(8);
-   end-pr;
    dcl-s error_number int(10:0) based(error_number_ptr);
    dcl-s error_text varchar(512);
    dcl-s message_key char(4);
@@ -619,6 +663,70 @@ dcl-proc RPGAPI_socketFailed;
    send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
                          %len(error_text) : '*ESCAPE' : '*' : 2 :
                          message_key : error_code );
+end-proc;
+
+
+   // converts text between two CCSIDs, e.g. RPGAPI_UTF8 and RPGAPI_JOB_CCSID
+   // (0, the job's CCSID).
+   // Ends with an escape message naming the CCSIDs if that is not possible
+dcl-proc RPGAPI_convert;
+   dcl-pi *n varchar(96000);
+      text varchar(32766) const;
+      from_ccsid int(10:0) const;
+      to_ccsid int(10:0) const;
+   end-pi;
+   dcl-ds from_code likeds(RPGAPI_QtqCode_T) inz(*likeds);
+   dcl-ds to_code likeds(RPGAPI_QtqCode_T) inz(*likeds);
+   dcl-ds converter likeds(RPGAPI_iconv_t);
+      // UTF-8 takes up to 3 bytes for a character that is 1 in EBCDIC
+   dcl-s input varchar(32766);
+   dcl-s output char(96000);
+   dcl-s input_ptr pointer;
+   dcl-s output_ptr pointer;
+   dcl-s input_left uns(10:0);
+   dcl-s output_left uns(10:0);
+   dcl-s return_code int(10:0);
+   dcl-s call_name varchar(20);
+   dcl-s error_number int(10:0) based(error_number_ptr);
+   dcl-s error_text varchar(512);
+   dcl-s message_key char(4);
+      // bytes provided 0: a failure to send is signalled as an exception
+   dcl-s error_code char(8) inz(*allx'00');
+
+   if %len(text) = 0;
+      return '';
+   endif;
+
+   from_code.ccsid = from_ccsid;
+   to_code.ccsid = to_ccsid;
+   converter = iconv_open(to_code : from_code);
+   if converter.return_value = -1;
+      return_code = -1;
+      call_name = 'QtqIconvOpen';
+   else;
+      call_name = 'iconv';
+      input = text;
+      input_ptr = %addr(input : *data);
+      input_left = %len(input);
+      output_ptr = %addr(output);
+      output_left = %size(output);
+      return_code = iconv(converter : %addr(input_ptr) : %addr(input_left) :
+                          %addr(output_ptr) : %addr(output_left));
+      iconv_close(converter);
+   endif;
+
+   if return_code = -1;
+      error_number_ptr = get_errno();
+      error_text = 'Converting from CCSID ' + %char(from_ccsid) + ' to ' +
+                   %char(to_ccsid) + ' failed in ' + call_name + ': ' +
+                   %str(strerror(error_number)) +
+                   ' (errno ' + %char(error_number) + ')';
+      send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                            %len(error_text) : '*ESCAPE' : '*' : 1 :
+                            message_key : error_code );
+   endif;
+
+   return %subst(output : 1 : %size(output) - output_left);
 end-proc;
 
 

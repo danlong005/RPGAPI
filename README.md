@@ -71,6 +71,18 @@ with `DLTLIB` if you really mean to.
 | `BNDDIR` | `RPGAPI` | Binding directory name. Kept separate from `LIB` so building into a shared library does not create a binding directory named after it |
 | `IFS_PATH` | `/home/longdm/builds/RPGAPI` | Absolute IFS path of your clone |
 
+### Character sets
+RPGAPI sends and receives UTF-8, and converts it to and from the CCSID of the
+job the server runs in. The library is compiled with `TGTCCSID(*JOB)` so that
+its own text is in that CCSID too. Compile your application the same way:
+```
+CRTBNDRPG PGM(MYLIB/MYAPP) SRCSTMF('/home/[youruser]/myapp.rpgle') TGTCCSID(*JOB)
+```
+For SQL RPG use `CRTSQLRPGI ... CVTCCSID(*JOB) COMPILEOPT('TGTCCSID(*JOB)')`.
+Without it, the literals of a program compiled from an IFS file are in CCSID 37
+whatever the job's CCSID is. In a job that is not CCSID 37 (for example 273),
+characters such as `[ ] { } @ \ |` and accented letters in those literals are
+then sent wrong, and `{name}` route params do not match.
 
 That's it!!! Now you are ready to write completely RPGLE web api's. Check the 
 Quick start guide for a quick intro.
