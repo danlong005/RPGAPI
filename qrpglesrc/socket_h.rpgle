@@ -138,4 +138,11 @@ dcl-pr get_host_by_addr pointer extproc('gethostbyaddr');
    address_type int(10:0) value;
 end-pr;
 
+dcl-pr get_errno pointer extproc('__errno');
+end-pr;
+
+dcl-pr strerror pointer extproc('strerror');
+   error_number int(10:0) value;
+end-pr;
+
 /endif

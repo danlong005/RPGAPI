@@ -93,6 +93,14 @@ RPGAPI_start(app);
 ```
 _NOTE:_ The default port is 3000.
 
+If the server cannot listen on the port, such as when another job is
+already using it, `RPGAPI_start` ends with escape message `CPF9898` naming the
+failed call and the reason, for example:
+```
+bind() failed for port 3000: Address already in use. (errno 3420).
+```
+Monitor for it if your program should handle this itself.
+
 
 #### Routing
 To create routes in your application we have given you several ways to create those. 

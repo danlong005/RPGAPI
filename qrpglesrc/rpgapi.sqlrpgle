@@ -500,11 +500,18 @@ dcl-proc RPGAPI_setup;
    RPGAPI_initHttp();
 
    config.socket_descriptor = socket(AF_INET : SOCK_STREAM : 0);
+   if config.socket_descriptor < 0;
+      RPGAPI_socketFailed(config : 'socket');
+   endif;
+
    return_code = set_socket_options( config.socket_descriptor :
                                               SOL_SOCKET :
                                               SO_REUSEADDR :
                                               %addr(reuse_address) :
                                               %size(reuse_address) );
+   if return_code < 0;
+      RPGAPI_socketFailed(config : 'setsockopt');
+   endif;
 
    clear socket_address;
    socket_address.sin_family = AF_INET;
@@ -513,7 +520,54 @@ dcl-proc RPGAPI_setup;
    return_code = bind( config.socket_descriptor :
                                 %addr(socket_address) :
                                 %size(socket_address) );
+   if return_code < 0;
+      RPGAPI_socketFailed(config : 'bind');
+   endif;
+
    return_code = listen( config.socket_descriptor : 1 );
+   if return_code < 0;
+      RPGAPI_socketFailed(config : 'listen');
+   endif;
+end-proc;
+
+
+   // closes the listening socket and ends the server with an escape message
+   // naming the call that failed and why, e.g. when the port is already in use
+dcl-proc RPGAPI_socketFailed;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      call_name varchar(20) const;
+   end-pi;
+   dcl-pr send_program_message extpgm('QMHSNDPM');
+      message_id char(7) const;
+      message_file char(20) const;
+      message_data char(512) const;
+      message_data_length int(10:0) const;
+      message_type char(10) const;
+      call_stack_entry char(10) const;
+      call_stack_counter int(10:0) const;
+      message_key char(4);
+      error_code char(8);
+   end-pr;
+   dcl-s error_number int(10:0) based(error_number_ptr);
+   dcl-s error_text varchar(512);
+   dcl-s message_key char(4);
+      // bytes provided 0: a failure to send is signalled as an exception
+   dcl-s error_code char(8) inz(*allx'00');
+
+   error_number_ptr = get_errno();
+   error_text = call_name + '() failed for port ' + %char(config.port) +
+                ': ' + %str(strerror(error_number)) +
+                ' (errno ' + %char(error_number) + ')';
+
+   if config.socket_descriptor >= 0;
+      close_port( config.socket_descriptor );
+   endif;
+
+      // counter 2 sends it past RPGAPI_setup to the procedure that called it
+   send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                         %len(error_text) : '*ESCAPE' : '*' : 2 :
+                         message_key : error_code );
 end-proc;
 
 

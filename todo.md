@@ -42,11 +42,13 @@
   (2026-09-25): with 6 routes, a global middleware ran 6 times for a request to
   the 6th route and 250 times for a 404; it now runs once per request, and a
   middleware returning `*off` still ends the request with its 401
-
-## Small fixes (independent)
-- [ ] `RPGAPI_setup` ignores the return codes of `socket`, `bind` and `listen`. When
-  `bind` failed on PUB400 the job kept running but never listened, and every
-  request was refused. It should fail loudly (or retry) instead
+- [x] `RPGAPI_setup` ignored the return codes of `socket`, `setsockopt`, `bind`
+  and `listen`, so a server whose port was taken kept running without listening.
+  Each failure now closes the socket and ends `RPGAPI_start` with `CPF9898`
+  naming the call, port and `errno` text. Verified on PUB400 (2026-09-25): a
+  second server on a port already in use used to stay active with nothing in
+  its job log; it now ends at once with `bind() failed for port 41731: Address
+  already in use. (errno 3420).` and the first server keeps serving
 
 ## Larger fixes
 - [ ] Route matching: the `REGEXP_INSTR` pattern is not anchored (`/api/users` matches
