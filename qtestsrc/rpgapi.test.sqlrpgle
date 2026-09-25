@@ -772,6 +772,19 @@ dcl-proc test_parse_noHeaders export;
 
    aEqual('GET' : %trim(request.method));
    aEqual('/status' : %trim(request.route));
+   aEqual('' : %trim(request.hostname));
+end-proc;
+
+dcl-proc test_parse_hostname export;
+   dcl-ds request likeds(RPGAPI_Request);
+
+   request = RPGAPI_parse('GET / HTTP/1.1' + CRLF +
+                          'Host: api.example.com:8080' + DBL_CRLF);
+   aEqual('api.example.com' : %trim(request.hostname));
+
+   request = RPGAPI_parse('GET / HTTP/1.1' + CRLF +
+                          'host: [::1]:3000' + DBL_CRLF);
+   aEqual('[::1]' : %trim(request.hostname));
 end-proc;
 
 // ============================================

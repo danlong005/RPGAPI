@@ -257,8 +257,12 @@ header_value = RPGAPI_getHeader(request : 'Content-Type');
 ```
 The name is matched in any case, and `''` is returned for a header that was
 not sent. The first 100 headers are kept, with values of up to 1,024
-characters. The host the client asked for is in the `Host` header:
-`RPGAPI_getHeader(request : 'Host')` (`request.hostname` is not filled in).
+characters.
+
+`request.hostname` is the host the client asked for: the `Host` header without
+its port, as Express's `req.hostname`. For `Host: api.example.com:8080` it is
+`api.example.com`, for `Host: [::1]:3000` it is `[::1]`, and it is blank when
+the request has no `Host` header.
 
 #### Params
 These are the route params that came in on the request. To define route params in your route see the section on routing. You can access the params using the following api method

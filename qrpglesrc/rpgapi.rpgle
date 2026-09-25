@@ -1205,6 +1205,7 @@ dcl-proc RPGAPI_parse export;
    dcl-s stop int(10:0);
    dcl-s position int(10:0);
    dcl-s raw_headers char(32000);
+   dcl-s host varchar(1024);
    dcl-s parts char(1024) dim(50);
    dcl-s index int(10:0);
 
@@ -1280,6 +1281,23 @@ dcl-proc RPGAPI_parse export;
          index = %elem(parts) + 1;
       endif;
    endfor;
+
+      // the host the client asked for, as Express's req.hostname: the Host
+      // header without its port. An IPv6 address is in brackets: [::1]:3000
+   host = RPGAPI_getHeader(request : 'Host');
+   if %len(host) > 0 and %subst(host : 1 : 1) = '[';
+      position = %scan(']' : host);
+   else;
+      position = %scan(':' : host);
+      if position > 0;
+         position -= 1;
+      endif;
+   endif;
+   if position > 0;
+      request.hostname = %subst(host : 1 : position);
+   else;
+      request.hostname = host;
+   endif;
 
       // the body is everything after the blank line, exactly as sent
    start = stop + %len(RPGAPI_DBL_CRLF);

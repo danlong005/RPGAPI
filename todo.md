@@ -228,10 +228,15 @@
   got a 500: `RPGAPI_parse` cut the headers out with a negative length. It now
   takes them as empty. Verified on PUB400 (2026-09-25): 500 before, 200 now.
   Unit test added (not run)
+- [x] `request.hostname` was never filled in. It is now the `Host` header
+  without its port, as Express's `req.hostname`, keeping an IPv6 address in
+  its brackets. Verified on PUB400 (2026-09-25): blank before for every Host;
+  now `127.0.0.1:41731` gives `127.0.0.1`, `example.com:8080` `example.com`,
+  `[::1]:41731` `[::1]`, `[2001:db8::1]` itself, a lower-case `host:` header
+  works, the case is kept, and no Host gives blank. Unit test added (not run).
+  Earlier tests pass and raw responses are unchanged
 
 ## Features
-- [ ] Fill in `request.hostname` from the `Host` header, or drop the field;
-  it is never set
 - [ ] Parse `multipart/form-data` (browser file upload forms) on top of the
   streamed body: parts, their headers and file names
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
