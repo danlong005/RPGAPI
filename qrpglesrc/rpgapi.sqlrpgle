@@ -97,7 +97,7 @@ dcl-proc RPGAPI_acceptRequest export;
       config likeds(RPGAPI_App);
    end-pi;
    dcl-ds socket_address likeds(socketaddr);
-   dcl-s data varchar(32766);
+   dcl-s data char(32766);
    dcl-s return_code int(10:0) inz(0);
 
    clear socket_address;
@@ -398,7 +398,8 @@ dcl-proc RPGAPI_sendResponse export;
       config likeds(RPGAPI_App) const;
       response likeds(RPGAPI_Response) const;
    end-pi;
-   dcl-s data varchar(32766);
+   dcl-s data char(32766);
+   dcl-s body varchar(32000);
    dcl-s return_code int(10:0) inz(0);
    dcl-s index int(10:0) inz;
 
@@ -417,16 +418,11 @@ dcl-proc RPGAPI_sendResponse export;
       endif;
    endfor;
 
-   if %len(%trim(response.body)) > 0;
-      data = %trim(data) + 'Content-Length: ' +
-                    %char(%len(%trim(data) + RPGAPI_DBL_CRLF + 
-                    %trim(response.body))) + RPGAPI_CRLF;
-
-      data = %trim(data) + RPGAPI_DBL_CRLF + %trim(response.body);
-   else;
-      data = %trim(data) + 'Content-Length: ' +
-                    %char(%len(%trim(data))) + RPGAPI_DBL_CRLF;
-   endif;
+         // Content-Length is the size of the body alone; the CRLF that ends
+         // this header plus one more CRLF make the blank line before the body
+   body = %trim(response.body);
+   data = %trim(data) + 'Content-Length: ' + %char(%len(body)) +
+                    RPGAPI_DBL_CRLF + body;
 
    RPGAPI_translate( %len(%trim(data)) : data : 'QTCPASC');
 

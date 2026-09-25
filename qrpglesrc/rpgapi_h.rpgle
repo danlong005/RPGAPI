@@ -175,7 +175,7 @@ end-pr;
 
 dcl-pr RPGAPI_translate ExtPgm('QDCXLATE');
    length packed(5:0) const;
-   data varchar(32766) options(*varsize);
+   data char(32766) options(*varsize);
    table char(10) const;
 end-pr;
 
