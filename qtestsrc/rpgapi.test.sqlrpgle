@@ -244,6 +244,35 @@ dcl-proc test_getHeader_caseInsensitive export;
    aEqual('application/json' : result);
 end-proc;
 
+dcl-proc test_getHeader_valueWithColon export;
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s result varchar(1024);
+   dcl-s rawRequest varchar(32000);
+
+   rawRequest = 'GET /api/users HTTP/1.1' + CRLF +
+                'Host: localhost:3000' + DBL_CRLF;
+   request = RPGAPI_parse(rawRequest);
+
+   result = RPGAPI_getHeader(request : 'Host');
+   aEqual('localhost:3000' : result);
+end-proc;
+
+dcl-proc test_getQueryParam_valueWithEquals export;
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s result varchar(1024);
+   dcl-s rawRequest varchar(32000);
+
+   rawRequest = 'GET /api/users?filter=a=b&name=john HTTP/1.1' + CRLF +
+                'Host: localhost' + DBL_CRLF;
+   request = RPGAPI_parse(rawRequest);
+
+   result = RPGAPI_getQueryParam(request : 'filter');
+   aEqual('a=b' : result);
+
+   result = RPGAPI_getQueryParam(request : 'name');
+   aEqual('john' : result);
+end-proc;
+
 // ============================================
 // RESPONSE TESTS
 // ============================================

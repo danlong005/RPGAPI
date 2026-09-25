@@ -31,11 +31,13 @@ request/response was off by two bytes.
   just closes the socket if sending fails too. Verified on PUB400 (2026-09-25):
   a divide-by-zero handler used to time out the client after 10s, now returns
   `500 Internal Server Error` and the server keeps serving
+- [x] Header and query values were cut off after a second `:` or `=`.
+  `RPGAPI_parse` now splits on the first separator only. Verified on PUB400
+  (2026-09-25): `?x=a=b` with `Host: 127.0.0.1:41731` used to give `x=a` and
+  `host=127.0.0.1`, now gives `x=a=b` and `host=127.0.0.1:41731`. Unit tests
+  added but not run (no iRPGUnit on PUB400)
 
 ## Small fixes (independent)
-- [ ] Header and query values are cut off after a second `:` or `=`
-  (`Host: localhost:3000` becomes `localhost`, `a=b=c` becomes `b`); split on the
-  first separator only (`RPGAPI_parse`)
 - [ ] `SO_REUSEADDR` is sent with `option_val` = 0, so it is off (`RPGAPI_setup`).
   Seen on PUB400: restarting the server right after a run left it not listening
   at all (every request refused), because `bind` failed and its return code is

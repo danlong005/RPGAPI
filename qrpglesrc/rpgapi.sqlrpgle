@@ -135,7 +135,6 @@ dcl-proc RPGAPI_parse export;
    dcl-s position int(10:0);
    dcl-s raw_headers char(32000);
    dcl-s parts char(1024) dim(50);
-   dcl-s pieces char(1024) dim(2);
    dcl-s index int(10:0);
 
    clear request;
@@ -161,9 +160,18 @@ dcl-proc RPGAPI_parse export;
    parts = %split(request.query_string : '&');
    for index = 1 to %elem(parts) by 1;
       if parts(index) <> *blanks;
-         pieces = %split(parts(index) : '=');
-         request.query_params(index).name = pieces(1);
-         request.query_params(index).value = %trim(pieces(2));
+            // split on the first '=' only, a value may contain more of them
+         position = %scan('=' : parts(index));
+         if position = 0;
+            request.query_params(index).name = parts(index);
+         else;
+            request.query_params(index).name =
+                                    %subst(parts(index) : 1 : position - 1);
+            if position < %len(parts(index));
+               request.query_params(index).value =
+                                    %trim(%subst(parts(index) : position + 1));
+            endif;
+         endif;
       else;
          index = %elem(parts) + 1;
       endif;
@@ -176,9 +184,19 @@ dcl-proc RPGAPI_parse export;
 
    for index = 1 to %elem(parts) by 1;
       if parts(index) <> *blanks;
-         pieces = %split(parts(index) : ':');
-         request.headers(index).name = pieces(1);
-         request.headers(index).value = %trim(pieces(2));
+            // split on the first ':' only, a value such as host:port may
+            // contain more of them
+         position = %scan(':' : parts(index));
+         if position = 0;
+            request.headers(index).name = parts(index);
+         else;
+            request.headers(index).name =
+                                    %subst(parts(index) : 1 : position - 1);
+            if position < %len(parts(index));
+               request.headers(index).value =
+                                    %trim(%subst(parts(index) : position + 1));
+            endif;
+         endif;
       else;
          index = %elem(parts) + 1;
       endif;
