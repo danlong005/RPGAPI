@@ -31,43 +31,42 @@ dcl-proc RPGAPI_start export;
 
          clear response;
          clear route_found;
-         for index = 1 to %elem(config.routes) by 1;
-            middleware_completed = *on;
 
-            for index2 = 1 to %elem(config.middlewares) by 1;
-               if middleware_completed and 
-                      RPGAPI_mwMatches(config.middlewares(index2) : request);
-                      
-                  if config.middlewares(index2).url = *blanks;
-                     index2 = %elem(config.middlewares) + 1;
-                     iter;
-                  endif;
+            // run the matching middleware once, in the order it was added.
+            // One that returns *off ends the request with the response it set
+         middleware_completed = *on;
+         for index2 = 1 to %elem(config.middlewares) by 1;
+            if config.middlewares(index2).url = *blanks;
+               leave;
+            endif;
 
-                  RPGAPI_mwCallback_ptr = 
-                        config.middlewares(index2).procedure;
-                  middleware_completed = 
-                        RPGAPI_mwCallback(request : response);
+            if RPGAPI_mwMatches(config.middlewares(index2) : request);
+               RPGAPI_mwCallback_ptr = config.middlewares(index2).procedure;
+               middleware_completed = RPGAPI_mwCallback(request : response);
 
-                  if middleware_completed = *off;
-                     index2 = %elem(config.middlewares) + 1;
-                  endif;
+               if middleware_completed = *off;
+                  leave;
                endif;
-            endfor;
+            endif;
+         endfor;
 
-            if middleware_completed = *on;
+         if middleware_completed = *on;
+            for index = 1 to %elem(config.routes) by 1;
+               if config.routes(index).url = *blanks;
+                  leave;
+               endif;
+
                if RPGAPI_routeMatches(config.routes(index) : request);
                   RPGAPI_callback_ptr = config.routes(index).procedure;
                   response = RPGAPI_callback(request);
                   route_found = *on;
-                  index = %elem(config.routes) + 1;
+                  leave;
                endif;
-            else;
-               index = %elem(config.routes) + 1;
+            endfor;
+
+            if not route_found;
+               response = RPGAPI_setResponse(request :  HTTP_NOT_FOUND);
             endif;
-         endfor;
-                
-         if not route_found and middleware_completed = *on;
-            response = RPGAPI_setResponse(request :  HTTP_NOT_FOUND);
          endif;
 
          RPGAPI_sendResponse(config : response);

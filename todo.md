@@ -1,21 +1,16 @@
 # TODO
 
-## In progress: socket buffer bug
-`data` in `RPGAPI_acceptRequest` / `RPGAPI_sendResponse` and the `QDCXLATE`
-prototype were `varchar`, so `%addr(data)` pointed at the length prefix and every
-request/response was off by two bytes.
-- [x] Change them back to `char(32766)`
-- [x] Compiles on PUB400
-- [x] Verified at runtime on PUB400 (2026-09-25): `GET /hello` returns
-  a clean `HTTP/1.1 200 OK` status line and the handler's headers and body, and
-  an unknown route returns `404 Not Found`. The body still has an extra CRLF in
-  front of it, a separate bug (fixed below)
-- [ ] Run `make test` (needs iRPGUnit in library `RPGUNIT`). Blocked: iRPGUnit is
-  not installed on PUB400. Needs another IBM i that has it, or iRPGUnit installed
-  into a library we own on PUB400 (the Makefile hard-codes `RPGUNIT`)
-- [x] Committed (438fbd8)
+## Blocked
+- [ ] Run `make test` (needs iRPGUnit in library `RPGUNIT`). iRPGUnit is not
+  installed on PUB400. Needs another IBM i that has it, or iRPGUnit installed into
+  a library we own on PUB400 (the Makefile hard-codes `RPGUNIT`)
 
 ## Done
+- [x] Socket buffers: `data` in `RPGAPI_acceptRequest` / `RPGAPI_sendResponse` and
+  the `QDCXLATE` prototype were `varchar`, so `%addr(data)` pointed at the length
+  prefix and every request/response was off by two bytes. Changed back to
+  `char(32766)`. Verified on PUB400 (2026-09-25): clean `HTTP/1.1 200 OK` and
+  `404 Not Found` responses. Committed (438fbd8)
 - [x] `Content-Length` counted the status line and headers, not just the body, and
   an extra CRLF was sent before the body (`\r\nhello`). Both fixed in
   `RPGAPI_sendResponse`. Verified on PUB400 (2026-09-25): `GET /hello` sends
@@ -41,6 +36,12 @@ request/response was off by two bytes.
   local variable, and `option_val` is gone from the public header. Verified on
   PUB400 (2026-09-25): restarting right after serving requests used to leave the
   server not listening; it now serves normally
+- [x] Middleware re-ran for every route checked before a match, up to 250 times
+  per request. `RPGAPI_start` now runs the matching middleware once, then looks
+  for the route, and both loops stop at the first empty slot. Verified on PUB400
+  (2026-09-25): with 6 routes, a global middleware ran 6 times for a request to
+  the 6th route and 250 times for a 404; it now runs once per request, and a
+  middleware returning `*off` still ends the request with its 401
 
 ## Small fixes (independent)
 - [ ] `RPGAPI_setup` ignores the return codes of `socket`, `bind` and `listen`. When
@@ -48,8 +49,6 @@ request/response was off by two bytes.
   request was refused. It should fail loudly (or retry) instead
 
 ## Larger fixes
-- [ ] Middleware re-runs for every route checked before a match, up to 250 times per
-  request. Run middleware once, then match the route (`RPGAPI_start`)
 - [ ] Route matching: the `REGEXP_INSTR` pattern is not anchored (`/api/users` matches
   `/x/api/users/1`), and request values are put into the pattern before matching.
   Match segment by segment instead, which also removes the need for SQL
