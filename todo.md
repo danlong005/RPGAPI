@@ -102,6 +102,9 @@
   with each kind of stalled client, a GET queued behind it got no answer in 65s
   (the dripping client held the server 65s); now it is answered 29s after it
   connects. Earlier request, CCSID and route tests still pass
+- [x] `RPGAPI_CR` was x'25' (LF) and `RPGAPI_LF` x'0D' (CR). Swapped. Verified
+  on PUB400 (2026-09-25): a body `'a' + RPGAPI_CR + RPGAPI_LF + 'b'` used to go
+  out as `a\n\rb`, now `a\r\nb`
 
 ## Features
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
@@ -116,7 +119,6 @@
   to stop being shared state).
 
 ## Cleanup
-- [ ] `RPGAPI_CR` / `RPGAPI_LF` names are swapped (`rpgapi_h.rpgle`)
 - [ ] `RPGAPI_setRoute` is documented but not exported in `RPGAPI_b.bnd`
 - [ ] Add `RPGAPI_patch` (`HTTP_PATCH` exists but has no helper)
 - [ ] Add a reason phrase for 202 `HTTP_ACCEPTED` in `RPGAPI_initHttp`

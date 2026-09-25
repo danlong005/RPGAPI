@@ -5,8 +5,8 @@
 
 /include 'http_h.rpgle'
 
-dcl-c RPGAPI_LF x'0d';
-dcl-c RPGAPI_CR x'25';
+dcl-c RPGAPI_CR x'0d';
+dcl-c RPGAPI_LF x'25';
 dcl-c RPGAPI_CRLF x'0d25';
 dcl-c RPGAPI_DBL_CRLF x'0d250d25';
 dcl-c RPGAPI_GLOBAL_MIDDLEWARE '*';
