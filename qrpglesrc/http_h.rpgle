@@ -19,11 +19,14 @@ dcl-c HTTP_BAD_REQUEST 400;
 dcl-c HTTP_UNAUTHORIZED 401;
 dcl-c HTTP_FORBIDDEN 403;
 dcl-c HTTP_NOT_FOUND 404;   
+dcl-c HTTP_CONTENT_TOO_LARGE 413;
+dcl-c HTTP_HEADERS_TOO_LARGE 431;
 dcl-c HTTP_INTERNAL_SERVER 500;
+dcl-c HTTP_NOT_IMPLEMENTED 501;
 
 dcl-ds HTTP_messages qualified dim(100);
    status zoned(3:0);
-   text char(25);
+   text char(40);
 end-ds;
 
 /endif                        

@@ -45,6 +45,25 @@ dcl-pr iconv_close int(10:0) extproc('iconv_close');
    converter likeds(RPGAPI_iconv_t) value;
 end-pr;
 
+   // the request being read. One job handles one connection at a time, so
+   // this is kept here rather than in RPGAPI_Request, whose layout apps use
+dcl-s RPGAPI_max_request_size int(10:0) inz(1048576);
+   // raw bytes read from the connection and not used yet, still ASCII/UTF-8
+dcl-s RPGAPI_input char(32000);
+dcl-s RPGAPI_input_start int(10:0);
+dcl-s RPGAPI_input_end int(10:0);
+dcl-s RPGAPI_input_deadline timestamp;
+   // the request body, as sent, on the heap
+dcl-s RPGAPI_body_ptr pointer inz(*null);
+dcl-s RPGAPI_body_capacity int(10:0) inz(0);
+dcl-s RPGAPI_body_length int(10:0) inz(0);
+dcl-s RPGAPI_body_position int(10:0) inz(0);
+dcl-s RPGAPI_body_bytes char(16000000) based(RPGAPI_body_ptr);
+   // the status to answer with when a request is refused before routing
+dcl-s RPGAPI_reject_status int(10:0) inz(0);
+   // the most setMaxRequestSize allows: what %alloc can hand out in one piece
+dcl-c RPGAPI_MAX_BODY_LIMIT 16000000;
+
    // a worker job finds the listening socket it inherited in this variable
 dcl-c RPGAPI_WORKER_VAR 'RPGAPI_LISTEN_FD';
    // how often, in milliseconds, a worker checks that the main job still runs
@@ -145,9 +164,15 @@ dcl-proc RPGAPI_start export;
          clear request;
          request = RPGAPI_acceptRequest(config);
 
-            // no complete request arrived in time: nothing to answer
+            // refused (413, 431, ...): answer with that status. Otherwise no
+            // complete request arrived in time, and there is nothing to answer
          if request.method = *blanks;
-            close_port( config.return_socket_descriptor );
+            if RPGAPI_reject_status > 0;
+               response = RPGAPI_setResponse(request : RPGAPI_reject_status);
+               RPGAPI_sendResponse(config : response);
+            else;
+               close_port( config.return_socket_descriptor );
+            endif;
             iter;
          endif;
 
@@ -360,114 +385,412 @@ dcl-proc RPGAPI_acceptRequest export;
    dcl-pi *n likeds(RPGAPI_Request);
       config likeds(RPGAPI_App);
    end-pi;
-      // RPGAPI_parse takes at most 32000 bytes, so that is all that is read
-   dcl-s data char(32000);
-   dcl-s return_code int(10:0) inz(0);
-   dcl-s received int(10:0) inz(0);
-   dcl-s header_end int(10:0) inz(0);
-   dcl-s expected int(10:0) inz(0);
    dcl-ds request likeds(RPGAPI_Request);
-   dcl-s text varchar(32000);
-   dcl-ds poll_fds likeds(PollFd) dim(1);
-   dcl-s deadline timestamp;
-   dcl-s wait_ms int(20:0);
+   dcl-ds refused likeds(RPGAPI_Request);
+   dcl-s header_end int(10:0) inz(0);
+   dcl-s headers varchar(32000);
+   dcl-s transfer_encoding varchar(1024);
+   dcl-s content_length varchar(1024);
+   dcl-s length int(10:0) inz(0);
+   dcl-s chunked ind inz(*off);
+   dcl-s continue_text varchar(40);
+   dcl-s continue_utf8 varchar(120);
 
-      // a request can arrive in several pieces: read until the blank line
-      // after the headers, then until Content-Length bytes of body are in.
-      // Stop early if the client closes the connection or the buffer is full,
-      // and give up if the whole request takes longer than the timeout
-   deadline = %timestamp() + %seconds(RPGAPI_READ_TIMEOUT);
-   dow received < %size(data);
-         // *mseconds are microseconds; poll wants milliseconds
-      wait_ms = %diff(deadline : %timestamp() : *mseconds) / 1000;
-      if wait_ms <= 0;
-         clear request;
-         return request;
-      endif;
+   clear refused;
+   RPGAPI_reject_status = 0;
+   RPGAPI_input_start = 1;
+   RPGAPI_input_end = 0;
+   RPGAPI_body_length = 0;
+   RPGAPI_body_position = 0;
 
-      poll_fds(1).fd = config.return_socket_descriptor;
-      poll_fds(1).events = POLLIN;
-      poll_fds(1).revents = 0;
-      return_code = poll(poll_fds : 1 : wait_ms);
-      if return_code = 0;
-         clear request;
-         return request;
-      elseif return_code < 0;
-         leave;
+      // the whole request has to arrive within the timeout. Read until the
+      // blank line after the headers; they have to fit in RPGAPI_input
+   RPGAPI_input_deadline = %timestamp() + %seconds(RPGAPI_READ_TIMEOUT);
+   dou header_end > 0;
+      if RPGAPI_input_end = %size(RPGAPI_input);
+         RPGAPI_reject_status = HTTP_HEADERS_TOO_LARGE;
+         return refused;
       endif;
-
-      return_code = read( config.return_socket_descriptor :
-                                   %addr(data) + received :
-                                   %size(data) - received );
-      if return_code <= 0;
-         leave;
+      if RPGAPI_fillInput(config) <= 0;
+         return refused;
       endif;
-      received += return_code;
-
-      if header_end = 0;
-            // the request is still ASCII here: CR LF CR LF. header_end is
-            // where it starts, so the headers are the bytes before it
-         header_end = %scan(x'0d0a0d0a' : %subst(data : 1 : received));
-         if header_end > 0;
-            expected = header_end + 3 +
-                       RPGAPI_contentLength(%subst(data : 1 : header_end - 1));
-         endif;
-      endif;
-
-      if header_end > 0 and received >= expected;
-         leave;
-      endif;
+         // still ASCII here: CR LF CR LF
+      header_end = %scan(x'0d0a0d0a' : %subst(RPGAPI_input : 1 : RPGAPI_input_end));
    enddo;
 
-      // the headers never all arrived: the client closed, the read failed
-      // or they do not fit in the buffer
-   if header_end = 0;
-      clear request;
-      return request;
+   request = RPGAPI_parse(RPGAPI_convert(%subst(RPGAPI_input : 1 : header_end + 3) :
+                                         RPGAPI_UTF8 : RPGAPI_JOB_CCSID));
+   RPGAPI_input_start = header_end + 4;
+   headers = %upper(RPGAPI_convert(%subst(RPGAPI_input : 1 : header_end - 1) :
+                                   RPGAPI_UTF8 : RPGAPI_JOB_CCSID));
+
+      // the body is either chunked or Content-Length bytes long
+   transfer_encoding = RPGAPI_headerValue(headers : 'TRANSFER-ENCODING');
+   content_length = RPGAPI_headerValue(headers : 'CONTENT-LENGTH');
+   if transfer_encoding <> '';
+      if transfer_encoding <> 'CHUNKED';
+         RPGAPI_reject_status = HTTP_NOT_IMPLEMENTED;
+         return refused;
+      endif;
+      chunked = *on;
+   elseif content_length <> '';
+      monitor;
+         length = %int(content_length);
+      on-error;
+         length = -1;
+      endmon;
+      if length < 0;
+         RPGAPI_reject_status = HTTP_BAD_REQUEST;
+         return refused;
+      endif;
+         // refuse before reading it, or before the client even sends it
+      if length > RPGAPI_max_request_size;
+         RPGAPI_reject_status = HTTP_CONTENT_TOO_LARGE;
+         return refused;
+      endif;
    endif;
 
-   text = RPGAPI_convert(%subst(data : 1 : received) :
-                         RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
-   return RPGAPI_parse(text);
+      // a client that sent Expect: 100-continue waits for this before
+      // sending the body
+   if RPGAPI_headerValue(headers : 'EXPECT') = '100-CONTINUE' and
+      (chunked or length > 0) and RPGAPI_input_start > RPGAPI_input_end;
+      continue_text = 'HTTP/1.1 100 Continue' + RPGAPI_DBL_CRLF;
+      continue_utf8 = RPGAPI_convert(continue_text :
+                                     RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+         // callp: on its own, write( is read as the WRITE operation
+      callp write( config.return_socket_descriptor :
+                   %addr(continue_utf8 : *data) : %len(continue_utf8) );
+   endif;
+
+   if chunked;
+      if not RPGAPI_readChunkedBody(config);
+         return refused;
+      endif;
+   elseif length > 0;
+      if not RPGAPI_readInputToBody(config : length);
+         return refused;
+      endif;
+   endif;
+
+      // a body that fits is also handed over in request.body (a varchar,
+      // so its size includes a 2-byte length)
+   if RPGAPI_body_length > 0 and
+      RPGAPI_body_length <= %size(request.body) - 2;
+      request.body = RPGAPI_convert(%subst(RPGAPI_body_bytes : 1 :
+                                           RPGAPI_body_length) :
+                                    RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
+   endif;
+   return request;
 end-proc;
 
 
-   // the Content-Length of a request from its headers, still in ASCII.
-   // 0 when there is none or it is not a valid number
-dcl-proc RPGAPI_contentLength;
+   // reads more of the request into RPGAPI_input, waiting until the deadline.
+   // Returns how many bytes arrived: 0 when the client closed, -1 on timeout
+   // or error
+dcl-proc RPGAPI_fillInput;
    dcl-pi *n int(10:0);
-      ascii_headers varchar(32000) const;
+      config likeds(RPGAPI_App);
    end-pi;
-   dcl-s headers varchar(32000);
-   dcl-s length int(10:0) inz(0);
+   dcl-ds poll_fds likeds(PollFd) dim(1);
+   dcl-s wait_ms int(20:0);
+   dcl-s count int(10:0);
+
+      // move what is left to the front, to make room after it
+   if RPGAPI_input_start > 1;
+      count = RPGAPI_input_end - RPGAPI_input_start + 1;
+      if count > 0;
+         %subst(RPGAPI_input : 1 : count) =
+            %subst(RPGAPI_input : RPGAPI_input_start : count);
+      endif;
+      RPGAPI_input_start = 1;
+      RPGAPI_input_end = count;
+   endif;
+
+      // *mseconds are microseconds; poll wants milliseconds
+   wait_ms = %diff(RPGAPI_input_deadline : %timestamp() : *mseconds) / 1000;
+   if wait_ms <= 0;
+      return -1;
+   endif;
+   poll_fds(1).fd = config.return_socket_descriptor;
+   poll_fds(1).events = POLLIN;
+   poll_fds(1).revents = 0;
+   if poll(poll_fds : 1 : wait_ms) <= 0;
+      return -1;
+   endif;
+
+   count = read( config.return_socket_descriptor :
+                 %addr(RPGAPI_input) + RPGAPI_input_end :
+                 %size(RPGAPI_input) - RPGAPI_input_end );
+   if count < 0;
+      return -1;
+   endif;
+   RPGAPI_input_end += count;
+   return count;
+end-proc;
+
+
+   // moves count bytes of the request into the body, reading as needed.
+   // *off when the client closed or the time ran out first
+dcl-proc RPGAPI_readInputToBody;
+   dcl-pi *n ind;
+      config likeds(RPGAPI_App);
+      count int(10:0) const;
+   end-pi;
+   dcl-s needed int(10:0);
+   dcl-s available int(10:0);
+   dcl-s capacity int(10:0);
+
+   needed = RPGAPI_body_length + count;
+   if needed > RPGAPI_body_capacity;
+         // at least double, so a chunked body is not copied for every chunk
+      capacity = %max(needed : RPGAPI_body_capacity * 2);
+      capacity = %min(capacity : %max(needed : RPGAPI_max_request_size));
+      if RPGAPI_body_ptr = *null;
+         RPGAPI_body_ptr = %alloc(capacity);
+      else;
+         RPGAPI_body_ptr = %realloc(RPGAPI_body_ptr : capacity);
+      endif;
+      RPGAPI_body_capacity = capacity;
+   endif;
+
+   dow RPGAPI_body_length < needed;
+      if RPGAPI_input_start > RPGAPI_input_end;
+         if RPGAPI_fillInput(config) <= 0;
+            return *off;
+         endif;
+      endif;
+      available = %min(RPGAPI_input_end - RPGAPI_input_start + 1 :
+                       needed - RPGAPI_body_length);
+      %subst(RPGAPI_body_bytes : RPGAPI_body_length + 1 : available) =
+         %subst(RPGAPI_input : RPGAPI_input_start : available);
+      RPGAPI_body_length += available;
+      RPGAPI_input_start += available;
+   enddo;
+   return *on;
+end-proc;
+
+
+   // reads one line of the request, up to CR LF, still ASCII. *off when the
+   // client closed or the time ran out, and with a 400 when the line is too long
+dcl-proc RPGAPI_readInputLine;
+   dcl-pi *n ind;
+      config likeds(RPGAPI_App);
+      line varchar(1024);
+   end-pi;
+   dcl-s stop int(10:0) inz(0);
+   dcl-c LINE_MAX 1024;
+
+   dou stop > 0;
+      if RPGAPI_input_start <= RPGAPI_input_end;
+         stop = %scan(x'0d0a' : %subst(RPGAPI_input : 1 : RPGAPI_input_end) :
+                      RPGAPI_input_start);
+      endif;
+      if stop = 0;
+         if RPGAPI_input_end - RPGAPI_input_start + 1 > LINE_MAX;
+            RPGAPI_reject_status = HTTP_BAD_REQUEST;
+            return *off;
+         endif;
+         if RPGAPI_fillInput(config) <= 0;
+            return *off;
+         endif;
+      endif;
+   enddo;
+
+   if stop - RPGAPI_input_start > LINE_MAX;
+      RPGAPI_reject_status = HTTP_BAD_REQUEST;
+      return *off;
+   endif;
+   line = %subst(RPGAPI_input : RPGAPI_input_start : stop - RPGAPI_input_start);
+   RPGAPI_input_start = stop + 2;
+   return *on;
+end-proc;
+
+
+   // reads a Transfer-Encoding: chunked body into the body buffer: chunks of
+   // a hex size line, the data and CR LF, then a 0 size chunk and trailer
+   // lines up to an empty one. Sets RPGAPI_reject_status when it is too large
+   // or not valid. *off when the body could not be read
+dcl-proc RPGAPI_readChunkedBody;
+   dcl-pi *n ind;
+      config likeds(RPGAPI_App);
+   end-pi;
+   dcl-s line varchar(1024);
+   dcl-s size int(10:0);
+   dcl-s index int(10:0);
+   dcl-s digit int(10:0);
+   dcl-s stop int(10:0);
+   dcl-c HEX_DIGITS '0123456789ABCDEF';
+
+   dow *on;
+      if not RPGAPI_readInputLine(config : line);
+         return *off;
+      endif;
+
+         // the size is hex, optionally followed by ;extensions. The line is
+         // ASCII: letters and digits are converted to compare them
+      line = %upper(RPGAPI_convert(line : RPGAPI_UTF8 : RPGAPI_JOB_CCSID));
+      stop = %scan(';' : line);
+      if stop > 0;
+         line = %subst(line : 1 : stop - 1);
+      endif;
+      line = %trim(line);
+      if line = '';
+         RPGAPI_reject_status = HTTP_BAD_REQUEST;
+         return *off;
+      endif;
+
+      size = 0;
+      for index = 1 to %len(line);
+         digit = %scan(%subst(line : index : 1) : HEX_DIGITS) - 1;
+         if digit < 0;
+            RPGAPI_reject_status = HTTP_BAD_REQUEST;
+            return *off;
+         endif;
+         size = size * 16 + digit;
+         if size > RPGAPI_max_request_size;
+            RPGAPI_reject_status = HTTP_CONTENT_TOO_LARGE;
+            return *off;
+         endif;
+      endfor;
+
+      if size = 0;
+         leave;
+      endif;
+      if RPGAPI_body_length + size > RPGAPI_max_request_size;
+         RPGAPI_reject_status = HTTP_CONTENT_TOO_LARGE;
+         return *off;
+      endif;
+      if not RPGAPI_readInputToBody(config : size);
+         return *off;
+      endif;
+
+         // every chunk's data is followed by CR LF
+      if not RPGAPI_readInputLine(config : line);
+         return *off;
+      endif;
+      if line <> '';
+         RPGAPI_reject_status = HTTP_BAD_REQUEST;
+         return *off;
+      endif;
+   enddo;
+
+      // trailer fields, ignored, up to the empty line that ends the request
+   dou line = '';
+      if not RPGAPI_readInputLine(config : line);
+         return *off;
+      endif;
+   enddo;
+   return *on;
+end-proc;
+
+
+   // the value of a header, from the headers of a request converted to the
+   // job's CCSID and in upper case. '' when it is not there
+dcl-proc RPGAPI_headerValue;
+   dcl-pi *n varchar(1024);
+      headers varchar(32000) const;
+      name varchar(50) const;
+   end-pi;
    dcl-s start int(10:0);
    dcl-s stop int(10:0);
-   dcl-c NAME 'CONTENT-LENGTH:';
-
-   headers = %upper(RPGAPI_convert(ascii_headers :
-                                   RPGAPI_UTF8 : RPGAPI_JOB_CCSID));
 
       // headers start after the request line, each after a CRLF
-   start = %scan(RPGAPI_CRLF + NAME : headers);
+   start = %scan(RPGAPI_CRLF + name + ':' : headers);
    if start = 0;
-      return 0;
+      return '';
    endif;
-   start += %len(RPGAPI_CRLF) + %len(NAME);
+   start += %len(RPGAPI_CRLF) + %len(name) + 1;
    stop = %scan(RPGAPI_CRLF : headers : start);
    if stop = 0;
       stop = %len(headers) + 1;
    endif;
+   return %trim(%subst(headers : start : stop - start));
+end-proc;
 
-   monitor;
-      length = %int(%subst(headers : start : stop - start));
-   on-error;
-      length = 0;
-   endmon;
 
-   if length < 0;
-      length = 0;
+dcl-proc RPGAPI_setMaxRequestSize export;
+   dcl-pi *n;
+      bytes int(10:0) const;
+   end-pi;
+   dcl-s error_text varchar(512);
+   dcl-s message_key char(4);
+      // bytes provided 0: a failure to send is signalled as an exception
+   dcl-s error_code char(8) inz(*allx'00');
+
+   if bytes < 0 or bytes > RPGAPI_MAX_BODY_LIMIT;
+      error_text = 'RPGAPI_setMaxRequestSize: ' + %char(bytes) +
+                   ' is not between 0 and ' + %char(RPGAPI_MAX_BODY_LIMIT);
+      send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                            %len(error_text) : '*ESCAPE' : '*' : 1 :
+                            message_key : error_code );
    endif;
-   return length;
+   RPGAPI_max_request_size = bytes;
+end-proc;
+
+
+dcl-proc RPGAPI_bodyLength export;
+   dcl-pi *n int(10:0);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+
+   return RPGAPI_body_length;
+end-proc;
+
+
+dcl-proc RPGAPI_readBody export;
+   dcl-pi *n varchar(32000);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-s count int(10:0);
+   dcl-s next_byte char(1);
+
+      // at most 16000 bytes, so the text fits even if the job's CCSID needs
+      // more bytes per character than UTF-8
+   count = %min(16000 : RPGAPI_body_length - RPGAPI_body_position);
+   if count <= 0;
+      return '';
+   endif;
+
+      // do not split a UTF-8 character: while the next byte continues one
+      // (10xxxxxx), end this piece before the character starts
+   if RPGAPI_body_position + count < RPGAPI_body_length;
+      dow count > 0;
+         next_byte = %subst(RPGAPI_body_bytes :
+                            RPGAPI_body_position + count + 1 : 1);
+         if next_byte < x'80' or next_byte > x'BF';
+            leave;
+         endif;
+         count -= 1;
+      enddo;
+      if count = 0;
+         count = %min(16000 : RPGAPI_body_length - RPGAPI_body_position);
+      endif;
+   endif;
+
+   RPGAPI_body_position += count;
+   return RPGAPI_convert(%subst(RPGAPI_body_bytes :
+                                RPGAPI_body_position - count + 1 : count) :
+                         RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
+end-proc;
+
+
+dcl-proc RPGAPI_readBodyBytes export;
+   dcl-pi *n int(10:0);
+      request likeds(RPGAPI_Request) const;
+      buffer pointer value;
+      size int(10:0) const;
+   end-pi;
+   dcl-s target char(16000000) based(buffer);
+   dcl-s count int(10:0);
+
+   count = %min(size : RPGAPI_body_length - RPGAPI_body_position);
+   if count <= 0;
+      return 0;
+   endif;
+   %subst(target : 1 : count) =
+      %subst(RPGAPI_body_bytes : RPGAPI_body_position + 1 : count);
+   RPGAPI_body_position += count;
+   return count;
 end-proc;
 
 
@@ -825,6 +1148,12 @@ dcl-proc RPGAPI_initHttp export;
    HTTP_messages(10).text = 'Forbidden';
    HTTP_messages(11).status = HTTP_ACCEPTED;
    HTTP_messages(11).text = 'Accepted';
+   HTTP_messages(12).status = HTTP_CONTENT_TOO_LARGE;
+   HTTP_messages(12).text = 'Content Too Large';
+   HTTP_messages(13).status = HTTP_HEADERS_TOO_LARGE;
+   HTTP_messages(13).text = 'Request Header Fields Too Large';
+   HTTP_messages(14).status = HTTP_NOT_IMPLEMENTED;
+   HTTP_messages(14).text = 'Not Implemented';
 end-proc;
 
 
@@ -1107,11 +1436,11 @@ end-proc;
 
 
 dcl-proc RPGAPI_getMessage export;
-   dcl-pi *n char(25);
+   dcl-pi *n char(40);
       status zoned(3:0) const;
    end-pi;
    dcl-s index int(10:0);
-   dcl-s message char(25) inz;
+   dcl-s message char(40) inz;
 
    for index = 1 to %elem(HTTP_messages) by 1;
       if HTTP_messages(index).status = status;

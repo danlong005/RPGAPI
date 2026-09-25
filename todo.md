@@ -140,8 +140,32 @@
   sending 1 byte every 2s, other requests were answered in 3.0s; all 4 jobs had
   the main job's name and library list; ending the main job ended the rest and
   freed the port. Request, route, timeout and backlog tests still pass with 1
+- [x] Phase A, larger requests: requests over 32,000 bytes were cut off
+  silently, chunked bodies arrived empty and `Expect: 100-continue` was never
+  answered. The body is now read into the heap up to a limit (1MB,
+  `RPGAPI_setMaxRequestSize`), from `Content-Length` or chunked encoding, and
+  read with `RPGAPI_readBody` (text, never splitting a UTF-8 character) or
+  `RPGAPI_readBodyBytes` (raw); `request.body` still has it when it fits. Too
+  large gets 413 (before the body is sent, with 100-continue), headers over
+  32,000 bytes 431, bad lengths or chunks 400, other transfer encodings 501.
+  Verified on PUB400 (2026-09-25): a declared 2MB body used to reach the
+  handler cut to 31,943 bytes with a 200, a chunked body arrived as `len=0`,
+  and 100-continue went unanswered for 3s. Now: 500,000 and 256,000-byte
+  binary bodies and a 300,000-byte chunked body (also sent in 3 pieces)
+  arrive with matching checksums, 100,000 u-umlauts read as 100,000
+  characters in 13 pieces, 100 Continue is immediate, and 413/431/400/501 go
+  out where due, also with a 1,000-byte limit. All earlier tests pass, raw
+  responses are unchanged and the service program keeps both earlier
+  signatures
 
 ## Features
+- [ ] Phase B: streaming responses. `RPGAPI_beginResponse` / `RPGAPI_write` /
+  `RPGAPI_writeBytes` / `RPGAPI_endResponse` with chunked encoding (or
+  `Content-Length` when it is known), and `RPGAPI_sendFile(path)` for IFS files
+  with a Content-Type from the extension. For large JSON built from SQL, files
+  and binary content. Later: ranges and caching headers for sendFile
+- [ ] Phase C (rest): requests larger than the in-memory limit, streamed from
+  the socket instead of buffered (large uploads, multipart)
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
   APIs (`gsk_*`) wrapped around the accepted socket, with the certificate coming
   from a DCM application ID or a keystore. Plain HTTP should still work.

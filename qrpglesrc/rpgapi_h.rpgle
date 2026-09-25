@@ -170,6 +170,31 @@ dcl-pr RPGAPI_patch;
    procedure pointer(*proc) const;
 end-pr;
 
+   // the largest request body accepted, in bytes; 1MB unless set. Larger
+   // requests are answered with 413. Call it before RPGAPI_start
+dcl-pr RPGAPI_setMaxRequestSize;
+   bytes int(10:0) const;
+end-pr;
+
+   // the size of the request body in bytes, as it was sent
+dcl-pr RPGAPI_bodyLength int(10:0);
+   request likeds(RPGAPI_Request) const;
+end-pr;
+
+   // the next piece of the request body as text in the job's CCSID, '' at the
+   // end. Works for any body; request.body only holds one that fits in it
+dcl-pr RPGAPI_readBody varchar(32000);
+   request likeds(RPGAPI_Request) const;
+end-pr;
+
+   // copies up to size bytes of the request body, unconverted, to buffer.
+   // Returns how many, 0 at the end. For binary bodies
+dcl-pr RPGAPI_readBodyBytes int(10:0);
+   request likeds(RPGAPI_Request) const;
+   buffer pointer value;
+   size int(10:0) const;
+end-pr;
+
 dcl-pr RPGAPI_setResponse likeds(RPGAPI_Response);
    request likeds(RPGAPI_Request);
    status zoned(3:0) const;
@@ -179,7 +204,7 @@ dcl-pr RPGAPI_cleanString varchar(32000);
    dirty_string varchar(32000) const;
 end-pr;
 
-dcl-pr RPGAPI_getMessage char(25);
+dcl-pr RPGAPI_getMessage char(40);
    status zoned(3:0) const;
 end-pr;
 

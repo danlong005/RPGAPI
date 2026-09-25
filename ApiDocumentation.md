@@ -245,6 +245,49 @@ request data structure.
 body_value = request.body;
 ```
 
+`request.body` holds a body of up to 32,000 characters. Bodies can be larger:
+up to 1MB by default, sent with a `Content-Length` or with
+`Transfer-Encoding: chunked`. Any body, whatever its size, can be read in
+pieces:
+
+```
+size = RPGAPI_bodyLength(request);          // bytes, as sent
+
+piece = RPGAPI_readBody(request);           // text in the job's CCSID
+dow piece <> '';
+  ...
+  piece = RPGAPI_readBody(request);
+enddo;
+```
+
+For binary content (images, PDFs, ...) read the bytes as they were sent,
+without conversion, into a buffer of your own:
+
+```
+count = RPGAPI_readBodyBytes(request : %addr(buffer) : %size(buffer));
+dow count > 0;
+  ...
+  count = RPGAPI_readBodyBytes(request : %addr(buffer) : %size(buffer));
+enddo;
+```
+
+Both read from the same position, so use one or the other for a request.
+
+Change the limit, up to 16,000,000 bytes, before starting the app:
+
+```
+RPGAPI_setMaxRequestSize(5000000);
+RPGAPI_start(app);
+```
+
+Requests that are refused before your procedures are called:
+| Status | When |
+| --- | --- |
+| 413 Content Too Large | the body is larger than the limit. With `Expect: 100-continue` this is answered before the client sends it |
+| 431 Request Header Fields Too Large | the request line and headers are over 32,000 bytes |
+| 400 Bad Request | `Content-Length` is not a number, or a chunk is not valid |
+| 501 Not Implemented | a `Transfer-Encoding` other than `chunked` |
+
 #### QueryString/QueryParams
 The query string can be accessed in two different ways.
 
