@@ -184,6 +184,22 @@ dcl-pr RPGAPI_setMaxRequestSize;
    bytes int(10:0) const;
 end-pr;
 
+   // HTTPS: serve TLS with the certificate assigned in Digital Certificate
+   // Manager to this application ID. Call before RPGAPI_start
+dcl-pr RPGAPI_setTlsApplication;
+   application_id varchar(100) const;
+end-pr;
+
+   // HTTPS: serve TLS with a certificate from a keystore file (such as the
+   // *SYSTEM store, /QIBM/USERDATA/ICSS/CERT/SERVER/DEFAULT.KDB), its
+   // password, and the label of the certificate (its default one when left
+   // out). Call before RPGAPI_start
+dcl-pr RPGAPI_setTlsKeystore;
+   path varchar(1024) const;
+   password varchar(128) const;
+   label varchar(128) const options(*nopass);
+end-pr;
+
    // lets bodies larger than the request size limit through, up to bytes,
    // for procedures that read them with RPGAPI_readBody, readBodyBytes or
    // saveBody: they are read from the connection as the procedure asks for

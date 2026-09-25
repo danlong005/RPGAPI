@@ -249,11 +249,23 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] TLS (HTTPS) through GSKit: `RPGAPI_setTlsApplication` (DCM application
+  ID) or `RPGAPI_setTlsKeystore` (store, password, label) before
+  `RPGAPI_start`; each job opens a server environment, each connection gets a
+  handshake (30s limit, failures dropped), and all reads and writes go through
+  `RPGAPI_connectionRead` / `Write`, which use GSKit for TLS. Verified on
+  PUB400 (2026-09-25) as far as it allows: builds and binds against GSKit;
+  setup failures end `RPGAPI_start` with GSKit's reason (unregistered ID:
+  6002, missing keystore: 202, a .p12: 406 with the errno text); without TLS
+  every earlier test passes, over the new read/write layer, and raw responses
+  are unchanged. The README has the DCM setup steps
 
 ## Features
-- [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
-  APIs (`gsk_*`) wrapped around the accepted socket, with the certificate coming
-  from a DCM application ID or a keystore. Plain HTTP should still work.
+- [ ] Run HTTPS end to end on a system with DCM access: assign a certificate to
+  an application ID, `RPGAPI_setTlsApplication`, then the request, upload,
+  streaming, file and worker tests over `https://` (curl, a browser). PUB400
+  gives no DCM access, and GSKit there refuses a PKCS#12 file made with
+  OpenSSL (GSKit 406, errno 3474), so this has not been run
 
 ## Cleanup
 

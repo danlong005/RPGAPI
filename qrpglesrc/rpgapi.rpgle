@@ -14,6 +14,8 @@ dcl-c RPGAPI_READ_TIMEOUT 30;
    // seconds a client may take no response data before it is given up on,
    // so a client that stops reading does not hold its job
 dcl-c RPGAPI_WRITE_TIMEOUT 30;
+   // RPGAPI_connectionRead / Write: nothing can be read or written right now
+dcl-c RPGAPI_WOULD_BLOCK -2;
 
    // every field has to start as zeros: declare it with inz(*likeds)
 dcl-ds RPGAPI_QtqCode_T qualified template inz;
@@ -180,6 +182,86 @@ dcl-pr retrieve_call_stack extpgm('QWVRCSTK');
    error_code char(8);
 end-pr;
 
+   // TLS through the Global Security Kit (GSKit) in QSYS/QSOSSLSR
+dcl-c GSK_OK 0;
+dcl-c GSK_ERROR_IO 406;
+dcl-c GSK_ERROR_SOCKET_CLOSED 420;
+dcl-c GSK_WOULD_BLOCK 502;
+dcl-c GSK_KEYRING_FILE 201;
+dcl-c GSK_KEYRING_PW 202;
+dcl-c GSK_KEYRING_LABEL 203;
+dcl-c GSK_IBMI_APPLICATION_ID 6999;
+dcl-c GSK_FD 300;
+dcl-c GSK_HANDSHAKE_TIMEOUT 6998;
+dcl-c GSK_SESSION_TYPE 402;
+dcl-c GSK_SERVER_SESSION 508;
+
+dcl-pr gsk_environment_open int(10:0) extproc('gsk_environment_open');
+   environment pointer;
+end-pr;
+dcl-pr gsk_environment_init int(10:0) extproc('gsk_environment_init');
+   environment pointer value;
+end-pr;
+dcl-pr gsk_environment_close int(10:0) extproc('gsk_environment_close');
+   environment pointer;
+end-pr;
+dcl-pr gsk_attribute_set_buffer int(10:0) extproc('gsk_attribute_set_buffer');
+   handle pointer value;
+   id int(10:0) value;
+   buffer pointer value options(*string);
+   length int(10:0) value;
+end-pr;
+dcl-pr gsk_attribute_set_enum int(10:0) extproc('gsk_attribute_set_enum');
+   handle pointer value;
+   id int(10:0) value;
+   value int(10:0) value;
+end-pr;
+dcl-pr gsk_attribute_set_numeric_value int(10:0)
+       extproc('gsk_attribute_set_numeric_value');
+   handle pointer value;
+   id int(10:0) value;
+   value int(10:0) value;
+end-pr;
+dcl-pr gsk_secure_soc_open int(10:0) extproc('gsk_secure_soc_open');
+   environment pointer value;
+   session pointer;
+end-pr;
+dcl-pr gsk_secure_soc_init int(10:0) extproc('gsk_secure_soc_init');
+   session pointer value;
+end-pr;
+dcl-pr gsk_secure_soc_read int(10:0) extproc('gsk_secure_soc_read');
+   session pointer value;
+   buffer pointer value;
+   size int(10:0) value;
+   received int(10:0);
+end-pr;
+dcl-pr gsk_secure_soc_write int(10:0) extproc('gsk_secure_soc_write');
+   session pointer value;
+   buffer pointer value;
+   size int(10:0) value;
+   written int(10:0);
+end-pr;
+dcl-pr gsk_secure_soc_close int(10:0) extproc('gsk_secure_soc_close');
+   session pointer;
+end-pr;
+dcl-pr gsk_strerror pointer extproc('gsk_strerror');
+   return_code int(10:0) value;
+end-pr;
+
+   // how the certificate for TLS is found: RPGAPI_TLS_..., and the
+   // application ID or keystore it is found in. The environment is opened
+   // once per job, a session per connection
+dcl-s RPGAPI_tls int(10:0) inz(0);
+dcl-c RPGAPI_TLS_OFF 0;
+dcl-c RPGAPI_TLS_APPLICATION 1;
+dcl-c RPGAPI_TLS_KEYSTORE 2;
+dcl-s RPGAPI_tls_app_id varchar(100);
+dcl-s RPGAPI_tls_keystore_path varchar(1024);
+dcl-s RPGAPI_tls_password varchar(128);
+dcl-s RPGAPI_tls_label varchar(128);
+dcl-s RPGAPI_tls_environment pointer inz(*null);
+dcl-s RPGAPI_tls_session pointer inz(*null);
+
 dcl-pr send_program_message extpgm('QMHSNDPM');
    message_id char(7) const;
    message_file char(20) const;
@@ -220,6 +302,7 @@ dcl-proc RPGAPI_start export;
       // a worker job was started by RPGAPI_startWorkers from the main job, and
       // serves the socket the main job opened
    worker_env = getenv(RPGAPI_WORKER_VAR);
+   RPGAPI_tlsSetup();
    if worker_env <> *null;
       config.socket_descriptor = %int(%str(worker_env));
       main_job_pid = getppid();
@@ -359,6 +442,13 @@ dcl-proc RPGAPI_acceptConnection;
          // fails with EWOULDBLOCK when another job accepted it first
       descriptor = accept( config.socket_descriptor : *null : *null );
       if descriptor < 0;
+         iter;
+      endif;
+
+         // with TLS, a client that does not complete the handshake, such as
+         // one sending plain HTTP, is closed and not answered
+      if RPGAPI_tls <> RPGAPI_TLS_OFF and not RPGAPI_tlsHandshake(descriptor);
+         close_port(descriptor);
          iter;
       endif;
 
@@ -621,24 +711,30 @@ dcl-proc RPGAPI_fillInput;
       RPGAPI_input_end = count;
    endif;
 
-      // *mseconds are microseconds; poll wants milliseconds
-   wait_ms = %diff(RPGAPI_input_deadline : %timestamp() : *mseconds) / 1000;
-   if wait_ms <= 0;
-      return -1;
-   endif;
-   poll_fds(1).fd = RPGAPI_connection;
-   poll_fds(1).events = POLLIN;
-   poll_fds(1).revents = 0;
-   if poll(poll_fds : 1 : wait_ms) <= 0;
-      return -1;
-   endif;
+      // read what is there; wait only when nothing is. With TLS, GSKit can
+      // hold data it has already decrypted, which poll() does not see
+   dow *on;
+      count = RPGAPI_connectionRead(%addr(RPGAPI_input) + RPGAPI_input_end :
+                                    %size(RPGAPI_input) - RPGAPI_input_end);
+      if count >= 0;
+         leave;
+      endif;
+      if count <> RPGAPI_WOULD_BLOCK;
+         return -1;
+      endif;
 
-   count = read( RPGAPI_connection :
-                 %addr(RPGAPI_input) + RPGAPI_input_end :
-                 %size(RPGAPI_input) - RPGAPI_input_end );
-   if count < 0;
-      return -1;
-   endif;
+         // *mseconds are microseconds; poll wants milliseconds
+      wait_ms = %diff(RPGAPI_input_deadline : %timestamp() : *mseconds) / 1000;
+      if wait_ms <= 0;
+         return -1;
+      endif;
+      poll_fds(1).fd = RPGAPI_connection;
+      poll_fds(1).events = POLLIN;
+      poll_fds(1).revents = 0;
+      if poll(poll_fds : 1 : wait_ms) <= 0;
+         return -1;
+      endif;
+   enddo;
    RPGAPI_input_end += count;
    return count;
 end-proc;
@@ -1582,6 +1678,246 @@ dcl-proc RPGAPI_headerParam;
 end-proc;
 
 
+dcl-proc RPGAPI_setTlsApplication export;
+   dcl-pi *n;
+      application_id varchar(100) const;
+   end-pi;
+
+   RPGAPI_tls = RPGAPI_TLS_APPLICATION;
+   RPGAPI_tls_app_id = %trim(application_id);
+end-proc;
+
+
+dcl-proc RPGAPI_setTlsKeystore export;
+   dcl-pi *n;
+      path varchar(1024) const;
+      password varchar(128) const;
+      label varchar(128) const options(*nopass);
+   end-pi;
+
+   RPGAPI_tls = RPGAPI_TLS_KEYSTORE;
+   RPGAPI_tls_keystore_path = %trim(path);
+   RPGAPI_tls_password = password;
+   RPGAPI_tls_label = '';
+   if %parms >= 3;
+      RPGAPI_tls_label = %trim(label);
+   endif;
+end-proc;
+
+
+   // opens this job's GSKit environment for serving TLS, when TLS is set.
+   // A certificate that cannot be used ends RPGAPI_start with an escape
+   // message giving GSKit's reason
+dcl-proc RPGAPI_tlsSetup;
+   dcl-s return_code int(10:0);
+
+   if RPGAPI_tls = RPGAPI_TLS_OFF or RPGAPI_tls_environment <> *null;
+      return;
+   endif;
+
+   return_code = gsk_environment_open(RPGAPI_tls_environment);
+   if return_code <> GSK_OK;
+      RPGAPI_tlsFailed('gsk_environment_open' : return_code);
+   endif;
+   return_code = gsk_attribute_set_enum(RPGAPI_tls_environment :
+                                        GSK_SESSION_TYPE : GSK_SERVER_SESSION);
+   if return_code <> GSK_OK;
+      RPGAPI_tlsFailed('setting the session type' : return_code);
+   endif;
+
+   if RPGAPI_tls = RPGAPI_TLS_APPLICATION;
+      return_code = gsk_attribute_set_buffer(RPGAPI_tls_environment :
+                       GSK_IBMI_APPLICATION_ID : RPGAPI_tls_app_id :
+                       %len(RPGAPI_tls_app_id));
+      if return_code <> GSK_OK;
+         RPGAPI_tlsFailed('setting the application ID' : return_code);
+      endif;
+   else;
+      return_code = gsk_attribute_set_buffer(RPGAPI_tls_environment :
+                       GSK_KEYRING_FILE : RPGAPI_tls_keystore_path :
+                       %len(RPGAPI_tls_keystore_path));
+      if return_code = GSK_OK;
+         return_code = gsk_attribute_set_buffer(RPGAPI_tls_environment :
+                          GSK_KEYRING_PW : RPGAPI_tls_password :
+                          %len(RPGAPI_tls_password));
+      endif;
+      if return_code = GSK_OK and RPGAPI_tls_label <> '';
+         return_code = gsk_attribute_set_buffer(RPGAPI_tls_environment :
+                          GSK_KEYRING_LABEL : RPGAPI_tls_label :
+                          %len(RPGAPI_tls_label));
+      endif;
+      if return_code <> GSK_OK;
+         RPGAPI_tlsFailed('setting the keystore' : return_code);
+      endif;
+   endif;
+
+   return_code = gsk_environment_init(RPGAPI_tls_environment);
+   if return_code <> GSK_OK;
+      RPGAPI_tlsFailed('gsk_environment_init' : return_code);
+   endif;
+end-proc;
+
+
+dcl-proc RPGAPI_tlsFailed;
+   dcl-pi *n;
+      step varchar(50) const;
+      return_code int(10:0) const;
+   end-pi;
+   dcl-s error_number int(10:0) based(error_number_ptr);
+   dcl-s error_text varchar(512);
+   dcl-s message_key char(4);
+      // bytes provided 0: a failure to send is signalled as an exception
+   dcl-s error_code char(8) inz(*allx'00');
+
+   if RPGAPI_tls_environment <> *null;
+      gsk_environment_close(RPGAPI_tls_environment);
+      RPGAPI_tls_environment = *null;
+   endif;
+   error_text = 'TLS could not be set up, ' + step + ' failed: ' +
+                %str(gsk_strerror(return_code)) +
+                ' (GSKit ' + %char(return_code) + ')';
+      // an I/O error's GSKit text only says to look at errno, when it is set
+   if return_code = GSK_ERROR_IO;
+      error_number_ptr = get_errno();
+      if error_number <> 0;
+         error_text += ' ' + %str(strerror(error_number)) +
+                       ' (errno ' + %char(error_number) + ')';
+      endif;
+   endif;
+      // counter 2: past RPGAPI_tlsSetup, to the procedure that called it
+   send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                         %len(error_text) : '*ESCAPE' : '*' : 2 :
+                         message_key : error_code );
+end-proc;
+
+
+   // the TLS handshake on a connection just accepted. The connection is
+   // blocking for it, with GSKit's handshake timeout set to the read timeout
+   // so a client cannot hold the job; afterwards it is non-blocking again
+dcl-proc RPGAPI_tlsHandshake;
+   dcl-pi *n ind;
+      descriptor int(10:0) const;
+   end-pi;
+   dcl-s flags int(10:0);
+   dcl-s return_code int(10:0);
+
+   RPGAPI_tlsClose();
+   flags = fcntl(descriptor : F_GETFL);
+   if flags >= 0 and %bitand(flags : O_NONBLOCK) <> 0;
+      fcntl(descriptor : F_SETFL : flags - O_NONBLOCK);
+   endif;
+
+   return_code = gsk_secure_soc_open(RPGAPI_tls_environment :
+                                     RPGAPI_tls_session);
+   if return_code = GSK_OK;
+      return_code = gsk_attribute_set_numeric_value(RPGAPI_tls_session :
+                                                    GSK_FD : descriptor);
+   endif;
+   if return_code = GSK_OK;
+      return_code = gsk_attribute_set_numeric_value(RPGAPI_tls_session :
+                       GSK_HANDSHAKE_TIMEOUT : RPGAPI_READ_TIMEOUT);
+   endif;
+   if return_code = GSK_OK;
+      return_code = gsk_secure_soc_init(RPGAPI_tls_session);
+   endif;
+   if return_code <> GSK_OK;
+      RPGAPI_tlsClose();
+      return *off;
+   endif;
+
+   if flags >= 0;
+      fcntl(descriptor : F_SETFL : %bitor(flags : O_NONBLOCK));
+   endif;
+   return *on;
+end-proc;
+
+
+   // ends the TLS session of the connection, if there is one
+dcl-proc RPGAPI_tlsClose;
+   if RPGAPI_tls_session <> *null;
+      gsk_secure_soc_close(RPGAPI_tls_session);
+      RPGAPI_tls_session = *null;
+   endif;
+end-proc;
+
+
+   // reads what has arrived on the connection, decrypted with TLS: the
+   // number of bytes, 0 when the client closed it, RPGAPI_WOULD_BLOCK when
+   // nothing has arrived, -1 when it failed
+dcl-proc RPGAPI_connectionRead;
+   dcl-pi *n int(10:0);
+      buffer pointer value;
+      size int(10:0) value;
+   end-pi;
+   dcl-s count int(10:0) inz(0);
+   dcl-s return_code int(10:0);
+   dcl-s error_number int(10:0) based(error_number_ptr);
+
+   if RPGAPI_tls_session <> *null;
+      return_code = gsk_secure_soc_read(RPGAPI_tls_session : buffer : size :
+                                        count);
+      select;
+      when return_code = GSK_OK;
+         return count;
+      when return_code = GSK_WOULD_BLOCK;
+         return RPGAPI_WOULD_BLOCK;
+      when return_code = GSK_ERROR_SOCKET_CLOSED;
+         return 0;
+      other;
+         return -1;
+      endsl;
+   endif;
+
+   count = read(RPGAPI_connection : buffer : size);
+   if count < 0;
+      error_number_ptr = get_errno();
+      if error_number = EWOULDBLOCK;
+         return RPGAPI_WOULD_BLOCK;
+      endif;
+      return -1;
+   endif;
+   return count;
+end-proc;
+
+
+   // writes what it can of length bytes to the connection, encrypted with
+   // TLS: how many, RPGAPI_WOULD_BLOCK when none fit right now, -1 when it
+   // failed. With TLS, after RPGAPI_WOULD_BLOCK the same bytes have to be
+   // written again
+dcl-proc RPGAPI_connectionWrite;
+   dcl-pi *n int(10:0);
+      data pointer value;
+      length int(10:0) value;
+   end-pi;
+   dcl-s count int(10:0) inz(0);
+   dcl-s return_code int(10:0);
+   dcl-s error_number int(10:0) based(error_number_ptr);
+
+   if RPGAPI_tls_session <> *null;
+      return_code = gsk_secure_soc_write(RPGAPI_tls_session : data : length :
+                                         count);
+      select;
+      when return_code = GSK_OK;
+         return count;
+      when return_code = GSK_WOULD_BLOCK;
+         return RPGAPI_WOULD_BLOCK;
+      other;
+         return -1;
+      endsl;
+   endif;
+
+   count = write(RPGAPI_connection : data : length);
+   if count < 0;
+      error_number_ptr = get_errno();
+      if error_number = EWOULDBLOCK;
+         return RPGAPI_WOULD_BLOCK;
+      endif;
+      return -1;
+   endif;
+   return count;
+end-proc;
+
+
    // closes the client's connection. When it may still be sending a body
    // that was not read, stop sending, then read and drop what arrives for a
    // moment first: closing with unread data resets the connection, and the
@@ -1590,6 +1926,7 @@ dcl-proc RPGAPI_closeClient;
    dcl-ds poll_fds likeds(PollFd) dim(1);
    dcl-s until timestamp;
 
+   RPGAPI_tlsClose();
    if RPGAPI_linger or (RPGAPI_body_streamed and not RPGAPI_body_done);
       shutdown(RPGAPI_connection : SHUT_WR);
       until = %timestamp() + %seconds(2);
@@ -2065,18 +2402,16 @@ dcl-proc RPGAPI_sendAll;
    end-pi;
    dcl-ds poll_fds likeds(PollFd) dim(1);
    dcl-s written int(10:0);
-   dcl-s error_number int(10:0) based(error_number_ptr);
 
    dow length > 0 and not RPGAPI_connection_failed;
-      written = write(RPGAPI_connection : data : length);
+      written = RPGAPI_connectionWrite(data : length);
       if written > 0;
          data += written;
          length -= written;
          iter;
       endif;
 
-      error_number_ptr = get_errno();
-      if written < 0 and error_number = EWOULDBLOCK;
+      if written = RPGAPI_WOULD_BLOCK;
          poll_fds(1).fd = RPGAPI_connection;
          poll_fds(1).events = POLLOUT;
          poll_fds(1).revents = 0;

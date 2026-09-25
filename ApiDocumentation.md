@@ -119,6 +119,19 @@ one of the jobs that is free. Keep in mind that:
 - to stop the server, end the job you started; the others end within a few
   seconds. A job that ends on its own is not replaced
 
+#### HTTPS
+Call one of these before `RPGAPI_start` to serve HTTPS instead of HTTP:
+```
+RPGAPI_setTlsApplication('MYCO_RPGAPI_ORDERS');     // DCM application ID
+RPGAPI_setTlsKeystore(path : password : label);     // or a certificate store
+RPGAPI_start(app : 8443);
+```
+Everything else works the same over HTTPS. The certificate has to be set up in
+Digital Certificate Manager first; the README's HTTPS (TLS) section has the
+steps and the error messages. Each job sets up TLS when it starts, and
+`RPGAPI_start` ends with an escape message if it cannot. A client has 30
+seconds to complete its TLS handshake; one that fails it is disconnected.
+
 If the server cannot listen on the port, such as when another job is
 already using it, `RPGAPI_start` ends with escape message `CPF9898` naming the
 failed call and the reason, for example:
@@ -570,6 +583,8 @@ fails when the app is bound.
 | Procedure | Purpose |
 | --- | --- |
 | `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
+| `RPGAPI_setTlsApplication(application_id)` | Serve HTTPS with the certificate of a DCM application ID |
+| `RPGAPI_setTlsKeystore(path : password : label?)` | Serve HTTPS with a certificate from a certificate store file |
 | `RPGAPI_get` / `post` / `put` / `patch` / `delete(app : url : %paddr(proc))` | Add a route for that method |
 | `RPGAPI_setRoute(app : method : url : %paddr(proc))` | Add a route for any method |
 | `RPGAPI_setMiddleware(app : url : %paddr(proc))` | Add middleware for a path and everything below it, or `*` for all |

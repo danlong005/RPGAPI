@@ -78,5 +78,7 @@ ENDJOB JOB(HELLO)
   `RPGAPI_readBody`
 - Send large results with `RPGAPI_beginResponse` / `RPGAPI_write`, and files
   with `RPGAPI_sendFile`
+- Serve HTTPS: set up a certificate in DCM and call `RPGAPI_setTlsApplication`
+  before `RPGAPI_start` (see HTTPS (TLS) in the [README](README.md))
 
 All of it is in the [API Documentation](ApiDocumentation.md).
