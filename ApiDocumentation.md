@@ -266,8 +266,13 @@ These are the route params that came in on the request. To define route params i
 ```
 id_value = RPGAPI_getParam(request : 'id');
 ```
-Params and query values are handed over as they were sent: they are not URL
-decoded, so `%20` or `+` in them stays as it is.
+Params and query values are URL decoded, as Express does: `%20` becomes a
+space and `%C3%BC` a `ü` (escapes are read as UTF-8, then converted to the
+job's CCSID). In query names and values `+` is a space too; in params it stays
+a `+`. An escape that is not two hex digits, or bytes that are not UTF-8, are
+left as they were sent. Routes are matched on the path as it was sent, so an
+encoded `/` (`%2F`) stays inside its segment and arrives in the param.
+`request.route` and `request.query_string` keep the text as it was sent.
 
 #### Body
 To access the body of the request you can use the following variable in the 

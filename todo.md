@@ -214,10 +214,18 @@
   (2026-09-25): a 409 handler used to get `500 Internal Server Error`, now
   `HTTP/1.1 409` with its body; earlier tests pass and raw responses are
   unchanged
+- [x] Route params and query names and values were handed over as sent. They
+  are now URL decoded (`RPGAPI_urlDecode`): `%XX` escapes as UTF-8 bytes,
+  converted to the job's CCSID, and `+` as a space in queries only; invalid
+  escapes or bytes are left as sent. Matching still uses the raw path, and
+  `request.route` / `query_string` stay raw. Verified on PUB400 (2026-09-25):
+  `J%C3%BCrgen`, `a%20b`, `a%2Fb` (one segment) and `100%25` used to arrive
+  as sent and now arrive as `Jurgen` with u-umlaut, `a b`, `a/b` and `100%`;
+  `a+b` stays in a param; query `a+b`, `c%26d`, `a%3Db` and the key `na%20me`
+  decode; `%FF` and `%zz` stay. Unit tests added (not run). Earlier tests pass
+  and raw responses are unchanged
 
 ## Features
-- [ ] URL-decode route params and query values (`%20`, `+`), as Express does.
-  They are handed over as sent
 - [ ] Fill in `request.hostname` from the `Host` header, or drop the field;
   it is never set
 - [ ] Parse `multipart/form-data` (browser file upload forms) on top of the

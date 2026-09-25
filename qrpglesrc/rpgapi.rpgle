@@ -1231,16 +1231,19 @@ dcl-proc RPGAPI_parse export;
    parts = %split(request.query_string : '&');
    for index = 1 to %elem(parts) by 1;
       if parts(index) <> *blanks;
-            // split on the first '=' only, a value may contain more of them
+            // split on the first '=' only, a value may contain more of them.
+            // Names and values are decoded after splitting, so an encoded
+            // & or = (%26, %3D) stays part of them
          position = %scan('=' : parts(index));
          if position = 0;
-            request.query_params(index).name = parts(index);
-         else;
             request.query_params(index).name =
-                                    %subst(parts(index) : 1 : position - 1);
-            if position < %len(parts(index));
-               request.query_params(index).value =
-                                    %trim(%subst(parts(index) : position + 1));
+                                    RPGAPI_urlDecode(%trim(parts(index)) : *on);
+         else;
+            request.query_params(index).name = RPGAPI_urlDecode(
+                        %trim(%subst(parts(index) : 1 : position - 1)) : *on);
+            if position < %len(%trimr(parts(index)));
+               request.query_params(index).value = RPGAPI_urlDecode(
+                        %trim(%subst(parts(index) : position + 1)) : *on);
             endif;
          endif;
       else;
@@ -1282,6 +1285,85 @@ dcl-proc RPGAPI_parse export;
    return request;
 end-proc;
         
+
+
+   // decodes %XX escapes in a URL part, and + as a space when plus_is_space
+   // (query strings; not paths). The escapes are UTF-8 bytes: the text goes
+   // back to UTF-8, is decoded there, and comes back to the job's CCSID. An
+   // escape that is not two hex digits, or bytes that are not UTF-8, are left
+   // as they were sent
+dcl-proc RPGAPI_urlDecode;
+   dcl-pi *n varchar(1024);
+      value varchar(1024) const;
+      plus_is_space ind const;
+   end-pi;
+   dcl-s utf8 varchar(3072);
+   dcl-s decoded varchar(3072);
+   dcl-s index int(10:0);
+   dcl-s high int(10:0);
+   dcl-s low int(10:0);
+   dcl-ds one_byte;
+      character char(1);
+      number uns(3:0) overlay(character);
+   end-ds;
+
+   if %scan('%' : value) = 0 and
+      (not plus_is_space or %scan('+' : value) = 0);
+      return value;
+   endif;
+
+   monitor;
+      utf8 = RPGAPI_convert(value : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+      index = 1;
+      dow index <= %len(utf8);
+         character = %subst(utf8 : index : 1);
+            // ASCII %, followed by two hex digits
+         if number = 37 and index + 2 <= %len(utf8);
+            high = RPGAPI_hexValue(%subst(utf8 : index + 1 : 1));
+            low = RPGAPI_hexValue(%subst(utf8 : index + 2 : 1));
+            if high >= 0 and low >= 0;
+               number = high * 16 + low;
+               decoded += character;
+               index += 3;
+               iter;
+            endif;
+         endif;
+            // ASCII + as an ASCII space
+         if plus_is_space and number = 43;
+            number = 32;
+         endif;
+         decoded += character;
+         index += 1;
+      enddo;
+      return RPGAPI_convert(decoded : RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
+   on-error;
+      return value;
+   endmon;
+end-proc;
+
+
+   // the value of an ASCII hex digit, -1 when it is not one
+dcl-proc RPGAPI_hexValue;
+   dcl-pi *n int(10:0);
+      ascii char(1) const;
+   end-pi;
+   dcl-ds one_byte;
+      character char(1);
+      number uns(3:0) overlay(character);
+   end-ds;
+
+   character = ascii;
+   select;
+   when number >= 48 and number <= 57;
+      return number - 48;
+   when number >= 65 and number <= 70;
+      return number - 55;
+   when number >= 97 and number <= 102;
+      return number - 87;
+   other;
+      return -1;
+   endsl;
+end-proc;
 
 
 dcl-proc RPGAPI_getParam export;
@@ -1449,7 +1531,8 @@ dcl-proc RPGAPI_pathMatches;
          if param_count < %elem(found);
             param_count += 1;
             found(param_count).name = %subst(part : 2 : %len(part) - 2);
-            found(param_count).value = path_parts(index);
+               // matched on the path as sent, handed over decoded
+            found(param_count).value = RPGAPI_urlDecode(path_parts(index) : *off);
          endif;
       elseif part <> '*' and part <> path_parts(index);
          return *off;

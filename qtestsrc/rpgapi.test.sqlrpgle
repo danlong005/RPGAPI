@@ -766,6 +766,44 @@ dcl-proc test_buildHead_skipsConnection export;
 end-proc;
 
 // ============================================
+// URL DECODING TESTS
+// ============================================
+
+dcl-proc test_getQueryParam_decoded export;
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s rawRequest varchar(32000);
+
+   rawRequest = 'GET /search?q=a+b%26c&na%20me=100%25&bad=%zz HTTP/1.1' +
+                CRLF + 'Host: localhost' + DBL_CRLF;
+
+   request = RPGAPI_parse(rawRequest);
+
+   aEqual('a b&c' : RPGAPI_getQueryParam(request : 'q'));
+   aEqual('100%' : RPGAPI_getQueryParam(request : 'na me'));
+   aEqual('%zz' : RPGAPI_getQueryParam(request : 'bad'));
+   aEqual('q=a+b%26c&na%20me=100%25&bad=%zz' : %trim(request.query_string));
+end-proc;
+
+dcl-proc test_routeMatches_decodedParam export;
+   dcl-ds config likeds(RPGAPI_App);
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s matches ind;
+
+   clear config;
+   clear request;
+
+   config.routes(1).method = 'GET';
+   config.routes(1).url = '/files/{name}';
+
+   request.method = 'GET';
+   request.route = '/files/a%20b%2Fc+d';
+
+   matches = RPGAPI_routeMatches(config.routes(1) : request);
+   assert(matches : 'An encoded slash stays inside the segment');
+   aEqual('a b/c+d' : RPGAPI_getParam(request : 'name'));
+end-proc;
+
+// ============================================
 // DUMMY HANDLERS FOR TESTING
 // ============================================
 
