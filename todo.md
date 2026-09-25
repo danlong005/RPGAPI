@@ -130,18 +130,21 @@
   busy were refused. It is now `SOMAXCONN` (512). Verified on PUB400
   (2026-09-25): with one slow client being served, 9 of 10 clients connecting
   at once were reset; now all 10 are answered once it finishes
+- [x] Handle several requests at once. `RPGAPI_start(app : port : jobs)`
+  spawns jobs - 1 more jobs running the program the job was started with (found
+  with `QWVRCSTK`); each inherits the listening socket, registers its routes and
+  accepts from it. The socket is non-blocking and waited on with `poll`, so
+  jobs that lose a connection to another go back to waiting; workers end within
+  5s of the main job. Verified on PUB400 (2026-09-25): 8 requests that take 3s
+  each took 24.4s with 1 job and 6.1s with 4 (2 per job); behind a client
+  sending 1 byte every 2s, other requests were answered in 3.0s; all 4 jobs had
+  the main job's name and library list; ending the main job ended the rest and
+  freed the port. Request, route, timeout and backlog tests still pass with 1
 
 ## Features
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
   APIs (`gsk_*`) wrapped around the accepted socket, with the certificate coming
   from a DCM application ID or a keystore. Plain HTTP should still work.
-- [ ] Handle multiple requests at a time. Right now `RPGAPI_start` is a single job
-  that accepts, handles, and closes one connection before accepting the next.
-  Options: hand accepted sockets to a pool of worker jobs
-  (`givedescriptor` / `takedescriptor`), or run threads (RPG procedures and
-  handlers would need `thread(*concurrent)` or `*serialize`, and the global
-  `RPGAPI_callback_ptr` / `RPGAPI_mwCallback_ptr` and `HTTP_messages` would have
-  to stop being shared state).
 
 ## Cleanup
 

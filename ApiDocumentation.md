@@ -93,6 +93,23 @@ RPGAPI_start(app);
 ```
 _NOTE:_ The default port is 3000.
 
+#### Handling several requests at once
+By default one job handles one request at a time. Pass the number of jobs to
+serve with as a third parameter:
+```
+RPGAPI_start(app : 3000 : 4);
+```
+The job that calls `RPGAPI_start` opens the port and starts 3 more jobs, each
+running the program this job was started with (the first program on the call
+stack outside `QSYS`, e.g. `MYAPP` for `SBMJOB CMD(CALL MYAPP)`). Each of them
+registers its routes and serves the same port, and every connection goes to
+one of the jobs that is free. Keep in mind that:
+- the program is started again without parameters, so it must not need any,
+  and whatever it does before `RPGAPI_start` it does in every job
+- the jobs have the same name and library list as the one you started
+- to stop the server, end the job you started; the others end within a few
+  seconds. A job that ends on its own is not replaced
+
 If the server cannot listen on the port, such as when another job is
 already using it, `RPGAPI_start` ends with escape message `CPF9898` naming the
 failed call and the reason, for example:
@@ -107,7 +124,7 @@ UTF-8 bytes. Compile your application with `TGTCCSID(*JOB)`, as described in
 the README under Character sets, so that its literals are in the job's CCSID
 as well.
 
-The server handles one connection at a time, so a client has 30 seconds to send
+Each job handles one connection at a time, so a client has 30 seconds to send
 its whole request. If it has not by then, or it closes the connection before the
 headers are complete, the connection is closed without a response and the next
 one is accepted.

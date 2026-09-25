@@ -154,6 +154,17 @@ dcl-pr poll int(10:0) extproc('poll');
    timeout_ms int(10:0) value;
 end-pr;
 
+dcl-c F_GETFL 6;
+dcl-c F_SETFL 7;
+dcl-c O_NONBLOCK 128;
+dcl-c EWOULDBLOCK 3406;
+
+dcl-pr fcntl int(10:0) extproc('fcntl');
+   descriptor int(10:0) value;
+   command int(10:0) value;
+   argument int(10:0) value options(*nopass);
+end-pr;
+
 dcl-pr get_errno pointer extproc('__errno');
 end-pr;
 

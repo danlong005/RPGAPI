@@ -45,6 +45,50 @@ dcl-pr iconv_close int(10:0) extproc('iconv_close');
    converter likeds(RPGAPI_iconv_t) value;
 end-pr;
 
+   // a worker job finds the listening socket it inherited in this variable
+dcl-c RPGAPI_WORKER_VAR 'RPGAPI_LISTEN_FD';
+   // how often, in milliseconds, a worker checks that the main job still runs
+dcl-c RPGAPI_WORKER_CHECK_MS 5000;
+
+dcl-ds RPGAPI_inheritance_t qualified template inz;
+   flags uns(10:0);
+   process_group int(10:0);
+   signal_mask char(8) inz(*allx'00');
+   signal_default char(8) inz(*allx'00');
+end-ds;
+   // workers get the main job's name, so ENDJOB can find them by it
+dcl-c SPAWN_SETJOBNAMEPARENT_NP 128;
+
+dcl-pr spawn int(10:0) extproc('spawn');
+   path pointer value options(*string);
+   fd_count int(10:0) value;
+   fd_map int(10:0) dim(1) const;
+   inherit likeds(RPGAPI_inheritance_t) const;
+   argv pointer dim(2) const;
+   envp pointer dim(2) const;
+end-pr;
+
+dcl-pr getenv pointer extproc('getenv');
+   name pointer value options(*string);
+end-pr;
+
+dcl-pr getppid int(10:0) extproc('getppid');
+end-pr;
+
+dcl-pr kill int(10:0) extproc('kill');
+   process_id int(10:0) value;
+   signal int(10:0) value;
+end-pr;
+
+dcl-pr retrieve_call_stack extpgm('QWVRCSTK');
+   receiver char(65535) options(*varsize);
+   receiver_length int(10:0) const;
+   format char(8) const;
+   job_id char(56) const;
+   job_id_format char(8) const;
+   error_code char(8);
+end-pr;
+
 dcl-pr send_program_message extpgm('QMHSNDPM');
    message_id char(7) const;
    message_file char(20) const;
@@ -61,23 +105,42 @@ dcl-proc RPGAPI_start export;
    dcl-pi *n;
       config likeds(RPGAPI_App);
       port int(10:0) options(*nopass) const;
+      workers int(10:0) options(*nopass) const;
    end-pi;
    dcl-s index int(10:0) inz;
    dcl-s index2 int(10:0) inz;
+   dcl-s worker_count int(10:0) inz(1);
+   dcl-s main_job_pid int(10:0) inz(0);
+   dcl-s worker_env pointer;
    dcl-s route_found ind inz;
    dcl-ds response likeds(RPGAPI_Response) inz;
    dcl-ds request likeds(RPGAPI_Request) inz;
    dcl-s middleware_completed ind;
 
-   if config.port = 0 and %parms < 2;
-      config.port = 3000;
-   elseif %parms = 2;
+   if %parms >= 2;
       config.port = port;
+   elseif config.port = 0;
+      config.port = 3000;
+   endif;
+   if %parms >= 3 and workers > 1;
+      worker_count = workers;
    endif;
 
-   RPGAPI_setup(config);
+      // a worker job was started by RPGAPI_startWorkers from the main job, and
+      // serves the socket the main job opened
+   worker_env = getenv(RPGAPI_WORKER_VAR);
+   if worker_env <> *null;
+      config.socket_descriptor = %int(%str(worker_env));
+      main_job_pid = getppid();
+      RPGAPI_initHttp();
+   else;
+      RPGAPI_setup(config);
+      if worker_count > 1;
+         RPGAPI_startWorkers(config : worker_count - 1);
+      endif;
+   endif;
 
-   dow 1 = 1;
+   dow RPGAPI_acceptConnection(config : main_job_pid);
       monitor;
          clear request;
          request = RPGAPI_acceptRequest(config);
@@ -157,11 +220,146 @@ end-proc;
 
 
 
+   // waits for the next connection and accepts it into
+   // config.return_socket_descriptor. A worker job passes the process ID of
+   // the main job, and gets *off once that job has ended
+dcl-proc RPGAPI_acceptConnection;
+   dcl-pi *n ind;
+      config likeds(RPGAPI_App);
+      main_job_pid int(10:0) const;
+   end-pi;
+   dcl-ds poll_fds likeds(PollFd) dim(1);
+   dcl-s descriptor int(10:0);
+   dcl-s flags int(10:0);
+
+   dow *on;
+      if main_job_pid > 0 and kill(main_job_pid : 0) < 0;
+         return *off;
+      endif;
+
+      poll_fds(1).fd = config.socket_descriptor;
+      poll_fds(1).events = POLLIN;
+      poll_fds(1).revents = 0;
+      if poll(poll_fds : 1 : RPGAPI_WORKER_CHECK_MS) <= 0;
+         iter;
+      endif;
+
+         // fails with EWOULDBLOCK when another job accepted it first
+      descriptor = accept( config.socket_descriptor : *null : *null );
+      if descriptor < 0;
+         iter;
+      endif;
+
+         // the connection inherits non-blocking from the listening socket;
+         // a response has to be written whole, so make it blocking again
+      flags = fcntl( descriptor : F_GETFL );
+      if flags >= 0 and %bitand(flags : O_NONBLOCK) <> 0;
+         fcntl( descriptor : F_SETFL : flags - O_NONBLOCK );
+      endif;
+
+      config.return_socket_descriptor = descriptor;
+      return *on;
+   enddo;
+end-proc;
+
+
+   // starts count worker jobs running the program this job was started with.
+   // Each inherits the listening socket as descriptor 0 and finds it through
+   // RPGAPI_WORKER_VAR, registers its routes, and serves the same port
+dcl-proc RPGAPI_startWorkers;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      count int(10:0) const;
+   end-pi;
+   dcl-s path varchar(64);
+   dcl-s path_z char(65);
+   dcl-s variable_z char(32);
+   dcl-s fd_map int(10:0) dim(1);
+   dcl-ds inherit likeds(RPGAPI_inheritance_t) inz(*likeds);
+   dcl-s argv pointer dim(2);
+   dcl-s envp pointer dim(2);
+   dcl-s index int(10:0);
+   dcl-s error_number int(10:0) based(error_number_ptr);
+   dcl-s error_text varchar(512);
+   dcl-s message_key char(4);
+      // bytes provided 0: a failure to send is signalled as an exception
+   dcl-s error_code char(8) inz(*allx'00');
+
+   path = RPGAPI_jobProgram();
+   path_z = path + x'00';
+   variable_z = RPGAPI_WORKER_VAR + '=0' + x'00';
+   fd_map(1) = config.socket_descriptor;
+   inherit.flags = SPAWN_SETJOBNAMEPARENT_NP;
+   argv(1) = %addr(path_z);
+   argv(2) = *null;
+   envp(1) = %addr(variable_z);
+   envp(2) = *null;
+
+   for index = 1 to count;
+      if spawn(%addr(path_z) : 1 : fd_map : inherit : argv : envp) < 0;
+         error_number_ptr = get_errno();
+         error_text = 'Starting worker job ' + %char(index) + ' of ' +
+                      %char(count) + ' (' + path + ') failed: ' +
+                      %str(strerror(error_number)) +
+                      ' (errno ' + %char(error_number) + ')';
+         send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                               %len(error_text) : '*ESCAPE' : '*' : 1 :
+                               message_key : error_code );
+      endif;
+   endfor;
+end-proc;
+
+
+   // the IFS path of the program this job was started with: the oldest entry
+   // on the call stack outside QSYS, e.g. MYAPP for SBMJOB CMD(CALL MYAPP)
+dcl-proc RPGAPI_jobProgram;
+   dcl-pi *n varchar(64);
+   end-pi;
+   dcl-ds stack len(65535) qualified;
+      bytes_returned int(10:0) pos(1);
+      entry_count int(10:0) pos(17);
+      entry_offset int(10:0) pos(13);
+   end-ds;
+   dcl-ds entry qualified based(entry_ptr);
+      length int(10:0) pos(1);
+      program char(10) pos(25);
+      library char(10) pos(35);
+   end-ds;
+   dcl-ds job_id len(56) qualified;
+      name char(10) pos(1) inz('*');
+      user char(10) pos(11) inz(*blanks);
+      number char(6) pos(21) inz(*blanks);
+      internal_id char(16) pos(27) inz(*blanks);
+      reserved char(2) pos(43) inz(*allx'00');
+      thread_indicator int(10:0) pos(45) inz(1);
+      thread_id char(8) pos(49) inz(*allx'00');
+   end-ds;
+   dcl-s error_code char(8) inz(*allx'00');
+   dcl-s index int(10:0);
+   dcl-s program char(10);
+   dcl-s library char(10);
+
+   retrieve_call_stack(stack : %size(stack) : 'CSTK0100' :
+                       job_id : 'JIDF0100' : error_code);
+
+      // entries run from the most recent call to the oldest
+   entry_ptr = %addr(stack) + stack.entry_offset;
+   for index = 1 to stack.entry_count;
+      if entry.library <> 'QSYS';
+         program = entry.program;
+         library = entry.library;
+      endif;
+      entry_ptr += entry.length;
+   endfor;
+
+   return '/QSYS.LIB/' + %trim(library) + '.LIB/' + %trim(program) + '.PGM';
+end-proc;
+
+
 dcl-proc RPGAPI_acceptRequest export;
    dcl-pi *n likeds(RPGAPI_Request);
       config likeds(RPGAPI_App);
    end-pi;
-   dcl-ds socket_address likeds(socketaddr);
       // RPGAPI_parse takes at most 32000 bytes, so that is all that is read
    dcl-s data char(32000);
    dcl-s return_code int(10:0) inz(0);
@@ -173,14 +371,6 @@ dcl-proc RPGAPI_acceptRequest export;
    dcl-ds poll_fds likeds(PollFd) dim(1);
    dcl-s deadline timestamp;
    dcl-s wait_ms int(20:0);
-
-   clear socket_address;
-   socket_address.sin_family = AF_INET;
-   socket_address.sin_port = config.port;
-   socket_address.sin_addr = INADDR_ANY;
-   config.return_socket_descriptor = accept( config.socket_descriptor :
-                                  %addr(socket_address) :
-                                  socketaddrlena );
 
       // a request can arrive in several pieces: read until the blank line
       // after the headers, then until Content-Length bytes of body are in.
@@ -680,6 +870,18 @@ dcl-proc RPGAPI_setup;
    return_code = listen( config.socket_descriptor : SOMAXCONN );
    if return_code < 0;
       RPGAPI_socketFailed(config : 'listen');
+   endif;
+
+      // worker jobs share this socket, and all of them may wake up for one
+      // connection. Non-blocking, accept() then fails for those that lose it
+      // instead of leaving them stuck until the next connection
+   return_code = fcntl( config.socket_descriptor : F_GETFL );
+   if return_code >= 0;
+      return_code = fcntl( config.socket_descriptor : F_SETFL :
+                           %bitor(return_code : O_NONBLOCK) );
+   endif;
+   if return_code < 0;
+      RPGAPI_socketFailed(config : 'fcntl');
    endif;
 end-proc;
 
