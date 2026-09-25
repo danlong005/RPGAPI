@@ -1253,7 +1253,12 @@ dcl-proc RPGAPI_parse export;
 
    start = stop + 1;
    stop = %scan(RPGAPI_DBL_CRLF : raw_request);
-   raw_headers = %subst(raw_request : start : stop - start);
+      // a request can have no headers at all (HTTP/1.0): then the blank line
+      // starts at the CR LF that ends the request line
+   clear raw_headers;
+   if stop > start;
+      raw_headers = %subst(raw_request : start : stop - start);
+   endif;
    parts = %split(raw_headers : RPGAPI_CRLF);
 
    for index = 1 to %elem(parts) by 1;

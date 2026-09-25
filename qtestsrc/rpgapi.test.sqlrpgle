@@ -765,6 +765,15 @@ dcl-proc test_buildHead_skipsConnection export;
           RPGAPI_buildHead(response : 0));
 end-proc;
 
+dcl-proc test_parse_noHeaders export;
+   dcl-ds request likeds(RPGAPI_Request);
+
+   request = RPGAPI_parse('GET /status HTTP/1.0' + DBL_CRLF);
+
+   aEqual('GET' : %trim(request.method));
+   aEqual('/status' : %trim(request.route));
+end-proc;
+
 // ============================================
 // URL DECODING TESTS
 // ============================================

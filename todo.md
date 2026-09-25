@@ -224,6 +224,10 @@
   `a+b` stays in a param; query `a+b`, `c%26d`, `a%3Db` and the key `na%20me`
   decode; `%FF` and `%zz` stay. Unit tests added (not run). Earlier tests pass
   and raw responses are unchanged
+- [x] A request with no headers at all (`GET / HTTP/1.0` and a blank line)
+  got a 500: `RPGAPI_parse` cut the headers out with a negative length. It now
+  takes them as empty. Verified on PUB400 (2026-09-25): 500 before, 200 now.
+  Unit test added (not run)
 
 ## Features
 - [ ] Fill in `request.hostname` from the `Host` header, or drop the field;
