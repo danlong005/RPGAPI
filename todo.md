@@ -207,6 +207,13 @@
   408; with a 3MB limit, 4MB gets 413 (declared and chunked) and 2.5MB chunked
   passes. All earlier tests pass, raw responses are unchanged, and the service
   program keeps its earlier signatures
+- [x] A response with a status that has no reason phrase in `HTTP_messages`
+  (409, 418, ...) failed with a 500: the table had no `inz`, so looking the
+  status up ran into entries of blanks, which are not valid zoned numbers.
+  This was also the real cause of the earlier 202 failure. Verified on PUB400
+  (2026-09-25): a 409 handler used to get `500 Internal Server Error`, now
+  `HTTP/1.1 409` with its body; earlier tests pass and raw responses are
+  unchanged
 
 ## Features
 - [ ] Parse `multipart/form-data` (browser file upload forms) on top of the

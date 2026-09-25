@@ -28,7 +28,10 @@ dcl-c HTTP_HEADERS_TOO_LARGE 431;
 dcl-c HTTP_INTERNAL_SERVER 500;
 dcl-c HTTP_NOT_IMPLEMENTED 501;
 
-dcl-ds HTTP_messages qualified dim(100);
+   // inz: the entries not filled in by RPGAPI_initHttp have to be zeros;
+   // blanks are not a valid zoned number, and looking up a status without
+   // an entry failed on them
+dcl-ds HTTP_messages qualified dim(100) inz;
    status zoned(3:0);
    text char(40);
 end-ds;
