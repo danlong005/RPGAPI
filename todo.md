@@ -69,12 +69,13 @@
   line used to get a 500 and a 20000-byte body sent after the headers arrived
   as `len=0` (7000 when sent in 3 pieces); now both work and the body is all
   20000 bytes, as is `hello world@` (was 11 bytes)
+- [x] `RPGAPI_sendResponse` wrote `%len(%trim(data))` bytes after translating
+  to ASCII, so a trailing `@` (x'40', the EBCDIC blank) was not sent although
+  `Content-Length` counted it. The length is now taken before translating.
+  Verified on PUB400 (2026-09-25): a body `user@example.com @@` used to arrive
+  as 17 bytes against `Content-Length: 19`; now all 19 arrive
 
 ## Small fixes (independent)
-- [ ] `RPGAPI_sendResponse` writes `%len(%trim(data))` bytes after translating
-  to ASCII, so a trailing `@` (x'40') is not sent although `Content-Length`
-  counts it. Seen on PUB400: a body ending `orld@` arrived as `orld`. Take the
-  length before translating
 - [ ] `RPGAPI_parse` passes the body through `RPGAPI_cleanString`, which removes
   every CR and LF and trims it, so a multi-line JSON body loses its line breaks
   (seen in the code, not yet reproduced). Take the body after the blank line

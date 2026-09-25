@@ -470,6 +470,7 @@ dcl-proc RPGAPI_sendResponse export;
    dcl-s body varchar(32000);
    dcl-s return_code int(10:0) inz(0);
    dcl-s index int(10:0) inz;
+   dcl-s length int(10:0);
 
    data = 'HTTP/1.1 ' + %char(response.status) + ' ' +
                   %trim(RPGAPI_getMessage(response.status)) + RPGAPI_CRLF;
@@ -498,11 +499,14 @@ dcl-proc RPGAPI_sendResponse export;
    data = %trim(data) + 'Content-Length: ' + %char(%len(body)) +
                     RPGAPI_DBL_CRLF + body;
 
-   RPGAPI_translate( %len(%trim(data)) : data : 'QTCPASC');
+      // measure while the data is EBCDIC: in ASCII a trailing '@' is x'40',
+      // the EBCDIC blank, and %trim would cut it off
+   length = %len(%trimr(data));
+   RPGAPI_translate( length : data : 'QTCPASC');
 
    return_code = write( config.return_socket_descriptor :
                                 %addr(data) :
-                                %len(%trim(data)) );
+                                length );
    close_port( config.return_socket_descriptor );
 end-proc;
 
