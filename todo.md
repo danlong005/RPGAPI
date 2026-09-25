@@ -191,10 +191,26 @@
   the whole file for `100-50`, several ranges and `items=`; If-Range by ETag or
   date; a handler's Cache-Control kept; after touching the file the old ETag
   gets a 200. All earlier tests pass and raw responses are unchanged
+- [x] Phase C, uploads beyond the in-memory limit: with
+  `RPGAPI_setMaxUploadSize` (off by default), a body over the request limit is
+  left on the connection and read by the procedure through `RPGAPI_readBody` /
+  `RPGAPI_readBodyBytes` / the new `RPGAPI_saveBody` (to an IFS file); chunked
+  bodies switch over when they outgrow memory. 100 Continue waits for the
+  first read; too large, bad or stalled bodies end the procedure and get 413,
+  400 or 408; unread bodies are drained briefly before the close. Verified on
+  PUB400 (2026-09-25): 50MB uploads arrive intact (checksum, and SHA-256 of the
+  saved file) with the job's temporary storage at 22MB throughout (19MB
+  before); 5MB chunked switches over (bodyLength -1, then 5,000,000); 1.5M
+  u-umlauts across socket reads count 1.5M; 200MB declared gets 413 at once;
+  with Expect, a refusing handler's 403 arrives without 100 Continue; an
+  ignored 10MB body still lets the response through; a stalled upload gets
+  408; with a 3MB limit, 4MB gets 413 (declared and chunked) and 2.5MB chunked
+  passes. All earlier tests pass, raw responses are unchanged, and the service
+  program keeps its earlier signatures
 
 ## Features
-- [ ] Phase C (rest): requests larger than the in-memory limit, streamed from
-  the socket instead of buffered (large uploads, multipart)
+- [ ] Parse `multipart/form-data` (browser file upload forms) on top of the
+  streamed body: parts, their headers and file names
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
   APIs (`gsk_*`) wrapped around the accepted socket, with the certificate coming
   from a DCM application ID or a keystore. Plain HTTP should still work.

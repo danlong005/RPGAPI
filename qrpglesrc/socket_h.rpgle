@@ -168,6 +168,19 @@ end-pr;
 
    // IFS files
 dcl-c O_RDONLY 1;
+dcl-c O_WRONLY 2;
+dcl-c O_CREAT 8;
+dcl-c O_TRUNC 64;
+dcl-c SHUT_WR 1;
+
+dcl-pr shutdown int(10:0) extproc('shutdown');
+   descriptor int(10:0) value;
+   how int(10:0) value;
+end-pr;
+
+dcl-pr unlink int(10:0) extproc('unlink');
+   path pointer value options(*string);
+end-pr;
 dcl-c SEEK_SET 0;
 dcl-c SEEK_END 2;
 

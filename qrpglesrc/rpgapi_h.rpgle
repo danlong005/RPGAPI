@@ -176,7 +176,16 @@ dcl-pr RPGAPI_setMaxRequestSize;
    bytes int(10:0) const;
 end-pr;
 
-   // the size of the request body in bytes, as it was sent
+   // lets bodies larger than the request size limit through, up to bytes,
+   // for procedures that read them with RPGAPI_readBody, readBodyBytes or
+   // saveBody: they are read from the connection as the procedure asks for
+   // them, not held in memory. 0 (the default) turns this off
+dcl-pr RPGAPI_setMaxUploadSize;
+   bytes int(10:0) const;
+end-pr;
+
+   // the size of the request body in bytes, as it was sent. -1 while it is
+   // not known yet: a chunked body that is still being read
 dcl-pr RPGAPI_bodyLength int(10:0);
    request likeds(RPGAPI_Request) const;
 end-pr;
@@ -220,6 +229,13 @@ end-pr;
    // answer itself
 dcl-pr RPGAPI_sendFile ind;
    response likeds(RPGAPI_Response) const;
+   path varchar(1024) const;
+end-pr;
+
+   // writes the request body, unconverted, to an IFS file, replacing it.
+   // *off when the file cannot be created
+dcl-pr RPGAPI_saveBody ind;
+   request likeds(RPGAPI_Request) const;
    path varchar(1024) const;
 end-pr;
 

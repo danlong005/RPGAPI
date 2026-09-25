@@ -285,6 +285,36 @@ RPGAPI_setMaxRequestSize(5000000);
 RPGAPI_start(app);
 ```
 
+#### Uploads larger than memory
+Bodies over the request size limit can be allowed too, up to a second, larger
+limit (at most 2GB):
+
+```
+RPGAPI_setMaxUploadSize(500000000);     // 500MB; 0, the default, is off
+RPGAPI_start(app);
+```
+
+Such a body is not read into memory before your procedure is called. It is
+read from the connection as your procedure asks for it, with the same
+`RPGAPI_readBody` and `RPGAPI_readBodyBytes`, so memory stays the same
+whatever its size. To store it in a file:
+
+```
+if RPGAPI_saveBody(request : '/uploads/' + name);   // *off: cannot create it
+   response.status = HTTP_CREATED;
+endif;
+```
+
+- A client that sent `Expect: 100-continue` is only asked for the body when
+  your procedure first reads it. A procedure that refuses without reading it
+  (say with 403) is never sent it.
+- `RPGAPI_bodyLength` is -1 while a chunked body's size is not known yet.
+- When the body turns out larger than the upload limit, is not valid, or
+  stops arriving for 30 seconds, the read ends your procedure with an escape
+  message and the request is answered with 413, 400 or 408. Monitor for it if
+  your procedure has to clean up.
+- A body your procedure does not read is dropped.
+
 Requests that are refused before your procedures are called:
 | Status | When |
 | --- | --- |
