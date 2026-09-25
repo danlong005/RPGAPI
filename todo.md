@@ -22,9 +22,13 @@ request/response was off by two bytes.
   `Content-Length: 5` and exactly `hello`; the 404 sends `Content-Length: 0` and
   no body. Committed (438fbd8)
 
+- [x] 404s sent the `Connection` header twice. `RPGAPI_setResponse` no longer adds
+  one, and `RPGAPI_sendResponse` skips any `Connection` header a handler sets,
+  since it always sends `Connection: close` itself. Verified on PUB400
+  (2026-09-25): 404 and a handler setting `Connection: keep-alive` both send a
+  single `Connection: close`; other handler headers still go out
+
 ## Small fixes (independent)
-- [ ] 404s send the `Connection` header twice (`Connection: close` from
-  `RPGAPI_sendResponse`, `Connection: Close` from `RPGAPI_setResponse`)
 - [ ] `on-error` in `RPGAPI_start` builds a 500 but never sends it or closes the
   client socket, so the client hangs and the descriptor leaks
 - [ ] Header and query values are cut off after a second `:` or `=`

@@ -409,6 +409,12 @@ dcl-proc RPGAPI_sendResponse export;
 
    for index = 1 to %elem(response.headers) by 1;
       if response.headers(index).name <> *blanks;
+            // the connection is always closed after the response, and the
+            // Connection header saying so is sent above
+         if %upper(%trim(response.headers(index).name)) = 'CONNECTION';
+            iter;
+         endif;
+
          data = %trim(data) +
                               %trim(response.headers(index).name) + ': ' +
                               %trim(response.headers(index).value) + 
@@ -580,8 +586,7 @@ dcl-proc RPGAPI_setResponse export;
 
    clear response;
    response.status = status;
-   RPGAPI_setHeader(response : 'Connection' : 'Close');
-          
+
    return response;
 end-proc;
 
