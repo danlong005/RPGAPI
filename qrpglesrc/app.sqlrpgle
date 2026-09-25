@@ -1,9 +1,16 @@
 **free
 
+   // An example app. Build it with the RPGAPI binding directory's library in
+   // the library list, pointing INCDIR at this qrpglesrc directory:
+   //   CRTSQLRPGI OBJ(MYLIB/APP) SRCSTMF('<IFS_PATH>/qrpglesrc/app.sqlrpgle')
+   //              CVTCCSID(*JOB)
+   //              COMPILEOPT('INCDIR(''<IFS_PATH>/qrpglesrc'') TGTCCSID(*JOB)')
+   // MBR_show reads a table TESTDTA (ID, FNAME, LNAME) that you provide
+
 ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI')
               dftactgrp(*no);
 
-/copy './qrpglesrc/rpgapi_h.rpgle'
+/include 'rpgapi_h.rpgle'
 
 dcl-ds request likeds(RPGAPI_Request);
 dcl-ds response likeds(RPGAPI_Response);

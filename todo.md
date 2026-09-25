@@ -116,6 +116,11 @@
   app using both used to fail to build; now a PATCH route added with each
   answers, a GET to it 404s, and the old build's signature is the new service
   program's previous one
+- [x] `app.sqlrpgle` used `/copy './qrpglesrc/rpgapi_h.rpgle'`, which only
+  resolves when compiling from the checkout's root. It now includes
+  `rpgapi_h.rpgle` through `INCDIR`, and a comment gives the build command.
+  Verified on PUB400 (2026-09-25): compiled from `/home/LONGDM` it used to fail
+  with a severity 40 error, now the program is created
 
 ## Features
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
@@ -130,7 +135,6 @@
   to stop being shared state).
 
 ## Cleanup
-- [ ] `app.sqlrpgle` uses a relative `/copy './qrpglesrc/...'` path
 - [ ] Move the response builder out of `RPGAPI_sendResponse` so the tests can reach it
 
 ## PUB400
