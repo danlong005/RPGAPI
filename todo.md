@@ -10,7 +10,9 @@ request/response was off by two bytes.
   a clean `HTTP/1.1 200 OK` status line and the handler's headers and body, and
   an unknown route returns `404 Not Found`. The body still has an extra CRLF in
   front of it, a separate bug (fixed below)
-- [ ] Run `make test` on PUB400 (needs iRPGUnit in library `RPGUNIT`)
+- [ ] Run `make test` (needs iRPGUnit in library `RPGUNIT`). Blocked: iRPGUnit is
+  not installed on PUB400. Needs another IBM i that has it, or iRPGUnit installed
+  into a library we own on PUB400 (the Makefile hard-codes `RPGUNIT`)
 - [x] Committed (438fbd8)
 
 ## Done
