@@ -170,12 +170,19 @@
   begin is a 500; a failure mid-stream leaves an incomplete chunked response.
   All earlier tests pass, raw responses are unchanged, and the service program
   keeps its earlier signatures
+- [x] No write timeout: a client that stopped reading a large response held
+  its job in `write()` for as long as it liked. Connections now stay
+  non-blocking, and `RPGAPI_sendAll` waits for room with `poll(POLLOUT)` for up
+  to 30s (`RPGAPI_WRITE_TIMEOUT`) with no progress before giving up; later
+  writes to that connection do nothing (not even the conversion). Verified on
+  PUB400 (2026-09-25): with one job, a request queued behind a client that
+  stopped reading a 22MB stream got no answer in 65s; now it is answered after
+  34s. A slow but steady reader still gets the whole 1.09MB. All earlier tests
+  pass and raw responses are unchanged
 
 ## Features
 - [ ] `RPGAPI_sendFile`: range requests (206) and caching headers
   (`Last-Modified` / `ETag`, 304)
-- [ ] No write timeout: a client that stops reading a large response blocks
-  its job in `write()`. Set `SO_SNDTIMEO` on accepted connections
 - [ ] Phase C (rest): requests larger than the in-memory limit, streamed from
   the socket instead of buffered (large uploads, multipart)
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets

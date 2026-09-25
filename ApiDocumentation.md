@@ -129,6 +129,11 @@ its whole request. If it has not by then, or it closes the connection before the
 headers are complete, the connection is closed without a response and the next
 one is accepted.
 
+Likewise, a client that takes none of a response for 30 seconds, for example
+one that stopped reading a large download, is given up on and its connection
+closed. From then on `RPGAPI_write` and `RPGAPI_writeBytes` do nothing, so a
+procedure writing rows still runs to its end and can close what it opened.
+
 
 #### Routing
 To create routes in your application we have given you several ways to create those. 

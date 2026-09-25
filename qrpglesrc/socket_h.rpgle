@@ -141,6 +141,7 @@ dcl-pr get_host_by_addr pointer extproc('gethostbyaddr');
 end-pr;
 
 dcl-c POLLIN 1;
+dcl-c POLLOUT 2;
 
 dcl-ds PollFd qualified template;
    fd int(10:0);

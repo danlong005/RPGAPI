@@ -11,6 +11,9 @@ dcl-c RPGAPI_JOB_CCSID 0;
    // seconds a client has to send its whole request. The server handles one
    // connection at a time, so a client that stalls holds up everyone else
 dcl-c RPGAPI_READ_TIMEOUT 30;
+   // seconds a client may take no response data before it is given up on,
+   // so a client that stops reading does not hold its job
+dcl-c RPGAPI_WRITE_TIMEOUT 30;
 
    // every field has to start as zeros: declare it with inz(*likeds)
 dcl-ds RPGAPI_QtqCode_T qualified template inz;
@@ -67,6 +70,9 @@ dcl-c RPGAPI_MAX_BODY_LIMIT 16000000;
    // the connection being answered, for the procedures that stream a
    // response, and the protocol of its request (HTTP/1.0 has no chunking)
 dcl-s RPGAPI_connection int(10:0) inz(-1);
+   // set once writing to the connection failed or timed out: later writes
+   // do nothing, so a procedure writing rows can still finish normally
+dcl-s RPGAPI_connection_failed ind inz(*off);
 dcl-s RPGAPI_request_protocol char(8);
    // a streamed response: RPGAPI_STREAM_... how its body is framed, and body
    // bytes waiting to be sent, already UTF-8 or raw
@@ -292,7 +298,6 @@ dcl-proc RPGAPI_acceptConnection;
    end-pi;
    dcl-ds poll_fds likeds(PollFd) dim(1);
    dcl-s descriptor int(10:0);
-   dcl-s flags int(10:0);
 
    dow *on;
       if main_job_pid > 0 and kill(main_job_pid : 0) < 0;
@@ -312,15 +317,12 @@ dcl-proc RPGAPI_acceptConnection;
          iter;
       endif;
 
-         // the connection inherits non-blocking from the listening socket;
-         // a response has to be written whole, so make it blocking again
-      flags = fcntl( descriptor : F_GETFL );
-      if flags >= 0 and %bitand(flags : O_NONBLOCK) <> 0;
-         fcntl( descriptor : F_SETFL : flags - O_NONBLOCK );
-      endif;
-
+         // the connection inherits non-blocking from the listening socket,
+         // and stays that way: reads and writes wait with poll, which can
+         // time out, instead of blocking in read() or write()
       config.return_socket_descriptor = descriptor;
       RPGAPI_connection = descriptor;
+      RPGAPI_connection_failed = *off;
       RPGAPI_stream = RPGAPI_STREAM_NONE;
       RPGAPI_output_length = 0;
       return *on;
@@ -498,9 +500,7 @@ dcl-proc RPGAPI_acceptRequest export;
       continue_text = 'HTTP/1.1 100 Continue' + RPGAPI_DBL_CRLF;
       continue_utf8 = RPGAPI_convert(continue_text :
                                      RPGAPI_JOB_CCSID : RPGAPI_UTF8);
-         // callp: on its own, write( is read as the WRITE operation
-      callp write( config.return_socket_descriptor :
-                   %addr(continue_utf8 : *data) : %len(continue_utf8) );
+      RPGAPI_sendAll(%addr(continue_utf8 : *data) : %len(continue_utf8));
    endif;
 
    if chunked;
@@ -1172,24 +1172,38 @@ dcl-proc RPGAPI_buildHead export;
 end-proc;
 
 
-   // writes all of length bytes to the connection; write() can take fewer.
-   // *off when the connection failed
+   // writes all of length bytes to the connection. write() takes what fits;
+   // when nothing fits, wait for the client to read, up to the timeout.
+   // *off, and nothing more is written to this connection, when it failed
 dcl-proc RPGAPI_sendAll;
    dcl-pi *n ind;
       data pointer value;
       length int(10:0) value;
    end-pi;
+   dcl-ds poll_fds likeds(PollFd) dim(1);
    dcl-s written int(10:0);
+   dcl-s error_number int(10:0) based(error_number_ptr);
 
-   dow length > 0;
+   dow length > 0 and not RPGAPI_connection_failed;
       written = write(RPGAPI_connection : data : length);
-      if written <= 0;
-         return *off;
+      if written > 0;
+         data += written;
+         length -= written;
+         iter;
       endif;
-      data += written;
-      length -= written;
+
+      error_number_ptr = get_errno();
+      if written < 0 and error_number = EWOULDBLOCK;
+         poll_fds(1).fd = RPGAPI_connection;
+         poll_fds(1).events = POLLOUT;
+         poll_fds(1).revents = 0;
+         if poll(poll_fds : 1 : RPGAPI_WRITE_TIMEOUT * 1000) > 0;
+            iter;
+         endif;
+      endif;
+      RPGAPI_connection_failed = *on;
    enddo;
-   return *on;
+   return not RPGAPI_connection_failed;
 end-proc;
 
 
@@ -1286,6 +1300,10 @@ dcl-proc RPGAPI_write export;
    dcl-s utf8 varchar(96000);
 
    RPGAPI_checkStream('RPGAPI_write');
+      // the client is gone: skip the conversion too, for the rows still coming
+   if RPGAPI_connection_failed;
+      return;
+   endif;
    utf8 = RPGAPI_convert(text : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
    RPGAPI_writeBytes(%addr(utf8 : *data) : %len(utf8));
 end-proc;
@@ -1301,6 +1319,9 @@ dcl-proc RPGAPI_writeBytes export;
    dcl-s count int(10:0);
 
    RPGAPI_checkStream('RPGAPI_writeBytes');
+   if RPGAPI_connection_failed;
+      return;
+   endif;
    dow done < length;
       if RPGAPI_output_length = %size(RPGAPI_output);
          RPGAPI_flushOutput();
