@@ -675,7 +675,9 @@ dcl-proc RPGAPI_setup;
       RPGAPI_socketFailed(config : 'bind');
    endif;
 
-   return_code = listen( config.socket_descriptor : 1 );
+      // connections that arrive while one is being handled wait in this
+      // queue; with room for only 1, the rest were refused
+   return_code = listen( config.socket_descriptor : SOMAXCONN );
    if return_code < 0;
       RPGAPI_socketFailed(config : 'listen');
    endif;

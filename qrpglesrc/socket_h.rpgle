@@ -68,6 +68,8 @@ dcl-c SO_SNDTIMEO 70;
 dcl-c SO_TYPE 75;
 dcl-c SO_USELOOPBACK 80;
 dcl-c INADDR_ANY 0;
+   // the most connections listen() will queue
+dcl-c SOMAXCONN 512;
 dcl-c RC_OK 0;
 
 

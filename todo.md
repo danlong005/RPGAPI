@@ -126,14 +126,18 @@
   `RPGAPI_sendResponse`, and have unit tests (not run). Verified on PUB400
   (2026-09-25): five raw responses (custom and `Connection` headers, UTF-8
   body, 202, CR/LF, 404) are byte for byte the same before and after
+- [x] `listen` had a backlog of 1, so connections arriving while the server was
+  busy were refused. It is now `SOMAXCONN` (512). Verified on PUB400
+  (2026-09-25): with one slow client being served, 9 of 10 clients connecting
+  at once were reset; now all 10 are answered once it finishes
 
 ## Features
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
   APIs (`gsk_*`) wrapped around the accepted socket, with the certificate coming
   from a DCM application ID or a keystore. Plain HTTP should still work.
 - [ ] Handle multiple requests at a time. Right now `RPGAPI_start` is a single job
-  that accepts, handles, and closes one connection before accepting the next, with
-  a `listen` backlog of 1. Options: hand accepted sockets to a pool of worker jobs
+  that accepts, handles, and closes one connection before accepting the next.
+  Options: hand accepted sockets to a pool of worker jobs
   (`givedescriptor` / `takedescriptor`), or run threads (RPG procedures and
   handlers would need `thread(*concurrent)` or `*serialize`, and the global
   `RPGAPI_callback_ptr` / `RPGAPI_mwCallback_ptr` and `HTTP_messages` would have
