@@ -1,11 +1,12 @@
 **free
 
-   // An example app. Build it with the RPGAPI binding directory's library in
-   // the library list, pointing INCDIR at this qrpglesrc directory:
-   //   CRTSQLRPGI OBJ(MYLIB/APP) SRCSTMF('<IFS_PATH>/qrpglesrc/app.sqlrpgle')
+   // Middleware on all routes and on one path, a route param, and SQL.
+   // MBR_show reads a table TESTDTA (ID, FNAME, LNAME) that you provide.
+   // Build it with the RPGAPI binding directory's library in the library list:
+   //   CRTSQLRPGI OBJ(MYLIB/APP) SRCSTMF('<clone>/examples/memberships.sqlrpgle')
    //              CVTCCSID(*JOB)
-   //              COMPILEOPT('INCDIR(''<IFS_PATH>/qrpglesrc'') TGTCCSID(*JOB)')
-   // MBR_show reads a table TESTDTA (ID, FNAME, LNAME) that you provide
+   //              COMPILEOPT('INCDIR(''<clone>/qrpglesrc'') TGTCCSID(*JOB)')
+   // Try: curl http://your-ibm-i:3012/api/v1/memberships/1
 
 ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI')
               dftactgrp(*no);

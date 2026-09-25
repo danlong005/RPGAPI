@@ -12,7 +12,7 @@ IFS_PATH ?= /home/longdm/builds/RPGAPI
 
 SHELL=/QOpenSys/usr/bin/qsh
 
-.PHONY: all test clean
+.PHONY: all test clean integration
 
 all:
 	@system "CHKOBJ OBJ(QSYS/$(LIB)) OBJTYPE(*LIB)" >/dev/null 2>&1 || { \
@@ -23,7 +23,6 @@ all:
 	}
 	-system "CRTBNDDIR BNDDIR($(LIB)/$(BNDDIR))"
 	system "CHGATR OBJ('$(IFS_PATH)/qrpglesrc/*.rpgle') ATR(*CCSID) VALUE(1252)"
-	system "CHGATR OBJ('$(IFS_PATH)/qrpglesrc/*.sqlrpgle') ATR(*CCSID) VALUE(1252)"
 	system "CRTRPGMOD MODULE($(LIB)/RPGAPI) SRCSTMF('$(IFS_PATH)/qrpglesrc/RPGAPI.rpgle') REPLACE(*YES) DBGVIEW(*SOURCE) OPTION(*EVENTF) TGTCCSID(*JOB) INCDIR('$(IFS_PATH)/qrpglesrc')"
 	-system "CPYTOSTMF FROMMBR('/QSYS.LIB/$(LIB).LIB/EVFEVENT.FILE/RPGAPI.MBR') TOSTMF('$(IFS_PATH)/RPGAPI.evfevent') STMFOPT(*REPLACE)"
 	-cat $(IFS_PATH)/RPGAPI.evfevent
@@ -39,6 +38,11 @@ test:
 	liblist -a RPGUNIT && \
 	system "RPGUNIT/RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI) BNDSRVPGM((RUTESTCASE))" && \
 	system "RPGUNIT/RUCALLTST TSTPGM($(LIB)/RPGAPITEST)"
+
+# Runs the integration tests in tests/integration against a build in LIB: see
+# tests/integration/README.md. SUITES picks some of them.
+integration:
+	sh $(IFS_PATH)/tests/integration/run.sh $(SUITES)
 
 # Removes what `all` and `test` create. The library is never deleted: this
 # Makefile does not create it, so it does not own it.

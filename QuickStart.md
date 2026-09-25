@@ -83,4 +83,5 @@ ENDJOB JOB(HELLO)
 - See what the server does: `RPGAPI_setLogLevel(app : RPGAPI_LOG_INFO)` logs a
   line per request to the job log, `RPGAPI_LOG_DEBUG` everything
 
-All of it is in the [API Documentation](ApiDocumentation.md).
+All of it is in the [API Documentation](ApiDocumentation.md), and
+[examples](examples/README.md) has complete apps that use it.

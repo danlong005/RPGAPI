@@ -78,6 +78,10 @@ make test
 This needs [iRPGUnit](https://github.com/tools-400/irpgunit) installed in library
 `RPGUNIT`; the target fails immediately with `CPF2110` if it is missing.
 
+   The [integration tests](tests/integration/README.md) run the library for
+   real, in batch jobs with Python clients, and need nothing but Python 3 and
+   curl: `make integration`.
+
 6. (Optional) Remove the objects the build created (the module, service program,
 binding directory and test program):
 ```bash
@@ -112,8 +116,9 @@ SBMJOB CMD(CALL PGM(MYLIB/MYAPP)) JOB(MYAPP)
 ENDJOB JOB(MYAPP)
 ```
 [QuickStart.md](QuickStart.md) walks through this with a first app, and
-`qrpglesrc/app.sqlrpgle` is a larger example with middleware, a route param
-and SQL.
+[examples](examples/README.md) has complete apps to start from: a JSON API
+over SQL, streaming exports, API keys, static files, uploads and production
+settings.
 
 ### Character sets
 RPGAPI sends and receives UTF-8, and converts it to and from the CCSID of the
