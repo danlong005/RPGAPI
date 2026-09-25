@@ -105,6 +105,10 @@
 - [x] `RPGAPI_CR` was x'25' (LF) and `RPGAPI_LF` x'0D' (CR). Swapped. Verified
   on PUB400 (2026-09-25): a body `'a' + RPGAPI_CR + RPGAPI_LF + 'b'` used to go
   out as `a\n\rb`, now `a\r\nb`
+- [x] 202 `HTTP_ACCEPTED` had no reason phrase in `RPGAPI_initHttp`, and a
+  response with that status failed with a 500. Added `Accepted`. Verified on
+  PUB400 (2026-09-25): a 202 handler used to get `500 Internal Server Error`,
+  now `202 Accepted` with its body
 
 ## Features
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
@@ -121,7 +125,6 @@
 ## Cleanup
 - [ ] `RPGAPI_setRoute` is documented but not exported in `RPGAPI_b.bnd`
 - [ ] Add `RPGAPI_patch` (`HTTP_PATCH` exists but has no helper)
-- [ ] Add a reason phrase for 202 `HTTP_ACCEPTED` in `RPGAPI_initHttp`
 - [ ] `app.sqlrpgle` uses a relative `/copy './qrpglesrc/...'` path
 - [ ] Move the response builder out of `RPGAPI_sendResponse` so the tests can reach it
 

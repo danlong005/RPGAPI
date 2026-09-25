@@ -850,6 +850,17 @@ dcl-proc RPGAPI_delete export;
 end-proc;
 
 
+dcl-proc RPGAPI_patch export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      url varchar(32000) const;
+      procedure pointer(*proc) const;
+   end-pi;
+
+   RPGAPI_setRoute(config: HTTP_PATCH : url : procedure);
+end-proc;
+
+
 
 dcl-proc RPGAPI_setResponse export;
    dcl-pi *n likeds(RPGAPI_Response);
