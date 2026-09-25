@@ -103,8 +103,13 @@ dcl-proc RPGAPI_acceptRequest export;
       config likeds(RPGAPI_App);
    end-pi;
    dcl-ds socket_address likeds(socketaddr);
-   dcl-s data char(32766);
+      // RPGAPI_parse takes at most 32000 bytes, so that is all that is read
+   dcl-s data char(32000);
    dcl-s return_code int(10:0) inz(0);
+   dcl-s received int(10:0) inz(0);
+   dcl-s header_end int(10:0) inz(0);
+   dcl-s expected int(10:0) inz(0);
+   dcl-ds request likeds(RPGAPI_Request);
 
    clear socket_address;
    socket_address.sin_family = AF_INET;
@@ -113,12 +118,82 @@ dcl-proc RPGAPI_acceptRequest export;
    config.return_socket_descriptor = accept( config.socket_descriptor :
                                   %addr(socket_address) :
                                   socketaddrlena );
-   return_code = read( config.return_socket_descriptor :
-                                %addr(data) :
-                                %size(data) );
 
-   RPGAPI_translate( %len(%trim(data)) : data : 'QTCPEBC');
-   return RPGAPI_parse(data);
+      // a request can arrive in several pieces: read until the blank line
+      // after the headers, then until Content-Length bytes of body are in.
+      // Stop early if the client closes the connection or the buffer is full
+   dow received < %size(data);
+      return_code = read( config.return_socket_descriptor :
+                                   %addr(data) + received :
+                                   %size(data) - received );
+      if return_code <= 0;
+         leave;
+      endif;
+      received += return_code;
+
+      if header_end = 0;
+            // the request is still ASCII here: CR LF CR LF. header_end is
+            // where it starts, so the headers are the bytes before it
+         header_end = %scan(x'0d0a0d0a' : %subst(data : 1 : received));
+         if header_end > 0;
+            expected = header_end + 3 +
+                       RPGAPI_contentLength(%subst(data : 1 : header_end - 1));
+         endif;
+      endif;
+
+      if header_end > 0 and received >= expected;
+         leave;
+      endif;
+   enddo;
+
+      // nothing arrived: the client closed or the read failed
+   if received <= 0;
+      clear request;
+      return request;
+   endif;
+
+   RPGAPI_translate( received : data : 'QTCPEBC');
+   return RPGAPI_parse(%subst(data : 1 : received));
+end-proc;
+
+
+   // the Content-Length of a request from its headers, still in ASCII.
+   // 0 when there is none or it is not a valid number
+dcl-proc RPGAPI_contentLength;
+   dcl-pi *n int(10:0);
+      ascii_headers varchar(32000) const;
+   end-pi;
+   dcl-s headers char(32000);
+   dcl-s length int(10:0) inz(0);
+   dcl-s start int(10:0);
+   dcl-s stop int(10:0);
+   dcl-c NAME 'CONTENT-LENGTH:';
+
+   headers = ascii_headers;
+   RPGAPI_translate( %len(ascii_headers) : headers : 'QTCPEBC');
+   headers = %upper(%subst(headers : 1 : %len(ascii_headers)));
+
+      // headers start after the request line, each after a CRLF
+   start = %scan(RPGAPI_CRLF + NAME : headers);
+   if start = 0;
+      return 0;
+   endif;
+   start += %len(RPGAPI_CRLF) + %len(NAME);
+   stop = %scan(RPGAPI_CRLF : headers : start);
+   if stop = 0;
+      stop = %len(ascii_headers) + 1;
+   endif;
+
+   monitor;
+      length = %int(%subst(headers : start : stop - start));
+   on-error;
+      length = 0;
+   endmon;
+
+   if length < 0;
+      length = 0;
+   endif;
+   return length;
 end-proc;
 
 

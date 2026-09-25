@@ -60,11 +60,29 @@
   `/admin` middleware blocked `/administrator` and `/x/admin`, and a `/` route
   answered every path. Now each goes to the right route or 404s, params with
   `(` or `.` work, `/admin/x` still gets the 401. Unit tests added but not run
+- [x] `RPGAPI_acceptRequest` did one `read()`, so a request in more than one
+  piece was cut off, and it translated `%len(%trim(data))` bytes of ASCII,
+  dropping a trailing `@` (x'40', the EBCDIC blank). It now reads until the end
+  of the headers, then until `Content-Length` bytes of body (up to the 32000
+  bytes `RPGAPI_parse` takes), and translates exactly what arrived. Verified on
+  PUB400 (2026-09-25) with a client sending pieces 0.5s apart: a split request
+  line used to get a 500 and a 20000-byte body sent after the headers arrived
+  as `len=0` (7000 when sent in 3 pieces); now both work and the body is all
+  20000 bytes, as is `hello world@` (was 11 bytes)
+
+## Small fixes (independent)
+- [ ] `RPGAPI_sendResponse` writes `%len(%trim(data))` bytes after translating
+  to ASCII, so a trailing `@` (x'40') is not sent although `Content-Length`
+  counts it. Seen on PUB400: a body ending `orld@` arrived as `orld`. Take the
+  length before translating
+- [ ] `RPGAPI_parse` passes the body through `RPGAPI_cleanString`, which removes
+  every CR and LF and trims it, so a multi-line JSON body loses its line breaks
+  (seen in the code, not yet reproduced). Take the body after the blank line
+  as it is
 
 ## Larger fixes
-- [ ] Only one `read()` per request, so anything larger than one packet is cut off.
-  Read until the end of the headers, then `Content-Length` bytes of body
-  (`RPGAPI_acceptRequest`)
+- [ ] No read timeout: a client that sends less than its `Content-Length`, or
+  nothing at all, blocks the server (one connection at a time) until it goes away
 
 ## Features
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
