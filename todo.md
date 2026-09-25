@@ -36,12 +36,16 @@ request/response was off by two bytes.
   (2026-09-25): `?x=a=b` with `Host: 127.0.0.1:41731` used to give `x=a` and
   `host=127.0.0.1`, now gives `x=a=b` and `host=127.0.0.1:41731`. Unit tests
   added but not run (no iRPGUnit on PUB400)
+- [x] `SO_REUSEADDR` was sent with `option_val` = 0, so it was off, and a restart
+  soon after a run could not bind the port. `RPGAPI_setup` now passes 1 from a
+  local variable, and `option_val` is gone from the public header. Verified on
+  PUB400 (2026-09-25): restarting right after serving requests used to leave the
+  server not listening; it now serves normally
 
 ## Small fixes (independent)
-- [ ] `SO_REUSEADDR` is sent with `option_val` = 0, so it is off (`RPGAPI_setup`).
-  Seen on PUB400: restarting the server right after a run left it not listening
-  at all (every request refused), because `bind` failed and its return code is
-  ignored
+- [ ] `RPGAPI_setup` ignores the return codes of `socket`, `bind` and `listen`. When
+  `bind` failed on PUB400 the job kept running but never listened, and every
+  request was refused. It should fail loudly (or retry) instead
 
 ## Larger fixes
 - [ ] Middleware re-runs for every route checked before a match, up to 250 times per

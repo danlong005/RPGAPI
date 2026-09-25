@@ -11,8 +11,6 @@ dcl-c RPGAPI_CRLF x'0d25';
 dcl-c RPGAPI_DBL_CRLF x'0d250d25';
 dcl-c RPGAPI_GLOBAL_MIDDLEWARE '*';
 
-dcl-s option_val int(10:0);
-
 dcl-ds RPGAPI_header_ds qualified template;
    name char(50);
    value varchar(1024);

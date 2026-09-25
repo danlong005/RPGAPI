@@ -494,6 +494,9 @@ dcl-proc RPGAPI_setup;
    end-pi;
    dcl-s return_code int(10:0) inz(0);
    dcl-ds socket_address likeds(socketaddr);
+      // 1 turns SO_REUSEADDR on, so a restart can bind the port while
+      // connections from the previous run are still in TIME_WAIT
+   dcl-s reuse_address int(10:0) inz(1);
 
    RPGAPI_initHttp();
 
@@ -501,8 +504,8 @@ dcl-proc RPGAPI_setup;
    return_code = set_socket_options( config.socket_descriptor :
                                               SOL_SOCKET :
                                               SO_REUSEADDR :
-                                              %addr(option_val) :
-                                              %size(option_val) );
+                                              %addr(reuse_address) :
+                                              %size(reuse_address) );
 
    clear socket_address;
    socket_address.sin_family = AF_INET;
