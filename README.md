@@ -17,6 +17,8 @@ server, and each request is handed to your procedure as a data structure.
 - Several jobs serving one port, and timeouts so one slow client cannot hold a
   job
 - HTTPS, with a certificate from Digital Certificate Manager (DCM)
+- Logging to the job log at four levels, down to every request's headers and
+  routing, to find out what happened when a problem is reported
 
 See the [Quick Start](QuickStart.md) to write and run a first app, and the
 [API Documentation](ApiDocumentation.md) for everything else.
@@ -177,7 +179,7 @@ Assign the certificate from step 2 to the application ID from step 3
 ### 5. Use it in your app
 Before `RPGAPI_start`:
 ```
-RPGAPI_setTlsApplication('MYCO_RPGAPI_ORDERS');
+RPGAPI_setTlsApplication(app : 'MYCO_RPGAPI_ORDERS');
 RPGAPI_start(app : 8443);
 ```
 Protocols and ciphers are those the system allows (system values `QSSLPCL`
@@ -190,7 +192,7 @@ password, and the label of the certificate in it (its default certificate
 when left out). This needs no application definition, but puts the password
 in your program:
 ```
-RPGAPI_setTlsKeystore('/QIBM/USERDATA/ICSS/CERT/SERVER/DEFAULT.KDB' :
+RPGAPI_setTlsKeystore(app : '/QIBM/USERDATA/ICSS/CERT/SERVER/DEFAULT.KDB' :
                       'store password' : 'MYCO_ORDERS_CERT');
 ```
 
@@ -218,9 +220,14 @@ is not registered to use TLS. (GSKit 6002).
 | 406 | An I/O error; the message adds the system's reason. A `.p12` file named as a keystore gives this |
 
 A client whose handshake fails, such as one sending plain `http://` to the
-HTTPS port, is disconnected without an answer; the server carries on.
+HTTPS port, is disconnected without an answer; the server carries on. With
+`RPGAPI_setLogLevel(app : RPGAPI_LOG_WARN)` or more, such handshakes are
+logged with GSKit's reason.
 
 ### Upgrading
-New versions of the service program keep the signatures of the earlier ones,
-so programs bound to an older RPGAPI keep running without being recompiled.
-Recompile a program to use procedures added since.
+**The settings moved into `RPGAPI_App`.** Programs compiled against an
+earlier `rpgapi_h.rpgle` have to be recompiled; they fail to start with a
+signature error until they are. The setters now take the app first:
+`RPGAPI_setMaxRequestSize(app : bytes)`, `RPGAPI_setMaxUploadSize(app : bytes)`,
+`RPGAPI_setTlsApplication(app : id)` and `RPGAPI_setTlsKeystore(app : ...)`.
+See Settings in the [API Documentation](ApiDocumentation.md).

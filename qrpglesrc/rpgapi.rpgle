@@ -10,10 +10,10 @@ dcl-c RPGAPI_JOB_CCSID 0;
 
    // seconds a client has to send its whole request. The server handles one
    // connection at a time, so a client that stalls holds up everyone else
-dcl-c RPGAPI_READ_TIMEOUT 30;
+dcl-s RPGAPI_READ_TIMEOUT int(10:0) inz(30);
    // seconds a client may take no response data before it is given up on,
    // so a client that stops reading does not hold its job
-dcl-c RPGAPI_WRITE_TIMEOUT 30;
+dcl-s RPGAPI_WRITE_TIMEOUT int(10:0) inz(30);
    // RPGAPI_connectionRead / Write: nothing can be read or written right now
 dcl-c RPGAPI_WOULD_BLOCK -2;
 
@@ -53,6 +53,18 @@ end-pr;
    // the request being read. One job handles one connection at a time, so
    // this is kept here rather than in RPGAPI_Request, whose layout apps use
 dcl-s RPGAPI_max_request_size int(10:0) inz(1048576);
+dcl-c RPGAPI_DEFAULT_REQUEST_SIZE 1048576;
+   // how much is logged, RPGAPI_LOG_..., from the app's settings
+dcl-s RPGAPI_log_level int(10:0) inz(0);
+   // for the line logged at the end of each request
+dcl-s RPGAPI_request_started timestamp;
+dcl-s RPGAPI_request_route varchar(250);
+dcl-s RPGAPI_response_status int(10:0) inz(0);
+dcl-s RPGAPI_bytes_sent int(20:0) inz(0);
+   // counts the connections this job has taken, to tell requests apart in
+   // the job log: every message during one carries its number
+dcl-s RPGAPI_request_number int(20:0) inz(0);
+dcl-s RPGAPI_in_request ind inz(*off);
    // raw bytes read from the connection and not used yet, still ASCII/UTF-8
 dcl-s RPGAPI_input char(32000);
 dcl-s RPGAPI_input_start int(10:0);
@@ -249,8 +261,8 @@ dcl-pr gsk_strerror pointer extproc('gsk_strerror');
 end-pr;
 
    // how the certificate for TLS is found: RPGAPI_TLS_..., and the
-   // application ID or keystore it is found in. The environment is opened
-   // once per job, a session per connection
+   // application ID or keystore it is found in, from the app's settings. The
+   // environment is opened once per job, a session per connection
 dcl-s RPGAPI_tls int(10:0) inz(0);
 dcl-c RPGAPI_TLS_OFF 0;
 dcl-c RPGAPI_TLS_APPLICATION 1;
@@ -261,6 +273,19 @@ dcl-s RPGAPI_tls_password varchar(128);
 dcl-s RPGAPI_tls_label varchar(128);
 dcl-s RPGAPI_tls_environment pointer inz(*null);
 dcl-s RPGAPI_tls_session pointer inz(*null);
+
+dcl-pr receive_program_message extpgm('QMHRCVPM');
+   receiver char(4096) options(*varsize);
+   receiver_length int(10:0) const;
+   format char(8) const;
+   call_stack_entry char(10) const;
+   call_stack_counter int(10:0) const;
+   message_type char(10) const;
+   message_key char(4) const;
+   wait_time int(10:0) const;
+   action char(10) const;
+   error_code char(8);
+end-pr;
 
 dcl-pr send_program_message extpgm('QMHSNDPM');
    message_id char(7) const;
@@ -297,7 +322,10 @@ dcl-proc RPGAPI_start export;
    endif;
    if %parms >= 3 and workers > 1;
       worker_count = workers;
+   elseif %parms < 3 and config.jobs > 1;
+      worker_count = config.jobs;
    endif;
+   RPGAPI_applySettings(config);
 
       // a worker job was started by RPGAPI_startWorkers from the main job, and
       // serves the socket the main job opened
@@ -311,6 +339,21 @@ dcl-proc RPGAPI_start export;
       RPGAPI_setup(config);
       if worker_count > 1;
          RPGAPI_startWorkers(config : worker_count - 1);
+      endif;
+   endif;
+
+   if RPGAPI_logging(RPGAPI_LOG_INFO);
+      if worker_env <> *null;
+         RPGAPI_log(RPGAPI_LOG_INFO : 'worker job serving port ' +
+                    %char(config.port));
+      else;
+         RPGAPI_log(RPGAPI_LOG_INFO : 'serving port ' + %char(config.port) +
+                    ' in ' + %char(worker_count) + ' job(s), ' +
+                    RPGAPI_tlsDescription() +
+                    ', request limit ' + %char(RPGAPI_max_request_size) +
+                    ' bytes, upload limit ' + %char(RPGAPI_max_upload_size) +
+                    ' bytes, timeouts ' + %char(RPGAPI_READ_TIMEOUT) + 's read ' +
+                    %char(RPGAPI_WRITE_TIMEOUT) + 's write');
       endif;
    endif;
 
@@ -347,8 +390,14 @@ dcl-proc RPGAPI_start export;
                middleware_completed = RPGAPI_mwCallback(request : response);
 
                if middleware_completed = *off;
+                  RPGAPI_log(RPGAPI_LOG_DEBUG : 'middleware ' +
+                             config.middlewares(index2).url +
+                             ' ended the request with ' +
+                             %char(response.status));
                   leave;
                endif;
+               RPGAPI_log(RPGAPI_LOG_DEBUG : 'middleware ' +
+                          config.middlewares(index2).url + ' ran');
             endif;
          endfor;
 
@@ -359,6 +408,9 @@ dcl-proc RPGAPI_start export;
                endif;
 
                if RPGAPI_routeMatches(config.routes(index) : request);
+                  RPGAPI_log(RPGAPI_LOG_DEBUG : 'route ' +
+                             %trim(config.routes(index).method) + ' ' +
+                             config.routes(index).url + ' matched');
                   RPGAPI_callback_ptr = config.routes(index).procedure;
                   response = RPGAPI_callback(request);
                   route_found = *on;
@@ -367,6 +419,7 @@ dcl-proc RPGAPI_start export;
             endfor;
 
             if not route_found;
+               RPGAPI_log(RPGAPI_LOG_DEBUG : 'no route matched');
                response = RPGAPI_setResponse(request :  HTTP_NOT_FOUND);
             endif;
          endif;
@@ -382,6 +435,12 @@ dcl-proc RPGAPI_start export;
             // and close the client socket, so the client is not left
             // waiting and the descriptor is not leaked. Once a streamed
             // response has begun, closing is all that is left
+            // a request body that failed has logged why itself
+         if RPGAPI_reject_status = 0;
+            RPGAPI_log(RPGAPI_LOG_ERROR : %trim(request.method) + ' ' +
+                       %trim(request.route) + ' failed: ' +
+                       RPGAPI_lastException() + '; ' + RPGAPI_failureOutcome());
+         endif;
          monitor;
             if RPGAPI_stream = RPGAPI_STREAM_NONE;
                if RPGAPI_reject_status > 0;
@@ -400,6 +459,10 @@ dcl-proc RPGAPI_start export;
       endmon;
    enddo;
 
+   if main_job_pid > 0;
+      RPGAPI_log(RPGAPI_LOG_INFO : 'the main job has ended, so this worker ' +
+                 'job ends too');
+   endif;
    RPGAPI_stop(config);
 end-proc;
 
@@ -457,6 +520,15 @@ dcl-proc RPGAPI_acceptConnection;
          // time out, instead of blocking in read() or write()
       config.return_socket_descriptor = descriptor;
       RPGAPI_connection = descriptor;
+      RPGAPI_request_started = %timestamp();
+      RPGAPI_request_number += 1;
+      RPGAPI_in_request = *on;
+      RPGAPI_request_route = '';
+      RPGAPI_request_method = '';
+      RPGAPI_response_status = 0;
+      RPGAPI_bytes_sent = 0;
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'connection accepted' +
+                 RPGAPI_tlsDescriptionShort());
       RPGAPI_connection_failed = *off;
       RPGAPI_stream = RPGAPI_STREAM_NONE;
       RPGAPI_output_length = 0;
@@ -497,6 +569,8 @@ dcl-proc RPGAPI_startWorkers;
    envp(1) = %addr(variable_z);
    envp(2) = *null;
 
+   RPGAPI_log(RPGAPI_LOG_DEBUG : 'starting ' + %char(count) +
+              ' worker job(s) running ' + path);
    for index = 1 to count;
       if spawn(%addr(path_z) : 1 : fd_map : inherit : argv : envp) < 0;
          error_number_ptr = get_errno();
@@ -504,6 +578,7 @@ dcl-proc RPGAPI_startWorkers;
                       %char(count) + ' (' + path + ') failed: ' +
                       %str(strerror(error_number)) +
                       ' (errno ' + %char(error_number) + ')';
+         RPGAPI_log(RPGAPI_LOG_ERROR : error_text);
          send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
                                %len(error_text) : '*ESCAPE' : '*' : 1 :
                                message_key : error_code );
@@ -571,6 +646,7 @@ dcl-proc RPGAPI_acceptRequest export;
    dcl-s length int(10:0) inz(0);
    dcl-s chunked ind inz(*off);
    dcl-s expects_continue ind;
+   dcl-s count int(10:0);
 
    clear refused;
    RPGAPI_reject_status = 0;
@@ -598,10 +674,19 @@ dcl-proc RPGAPI_acceptRequest export;
    RPGAPI_input_deadline = %timestamp() + %seconds(RPGAPI_READ_TIMEOUT);
    dou header_end > 0;
       if RPGAPI_input_end = %size(RPGAPI_input);
+         RPGAPI_log(RPGAPI_LOG_WARN : 'request line and headers are over ' +
+                    %char(%size(RPGAPI_input)) + ' bytes: answered 431');
          RPGAPI_reject_status = HTTP_HEADERS_TOO_LARGE;
          return refused;
       endif;
-      if RPGAPI_fillInput() <= 0;
+      count = RPGAPI_fillInput();
+      if count < 0;
+         RPGAPI_log(RPGAPI_LOG_WARN : 'no complete request within ' +
+                    %char(RPGAPI_READ_TIMEOUT) + 's: connection closed');
+         return refused;
+      elseif count = 0;
+         RPGAPI_log(RPGAPI_LOG_DEBUG : 'the client closed the connection ' +
+                    'without sending a request');
          return refused;
       endif;
          // still ASCII here: CR LF CR LF
@@ -617,13 +702,19 @@ dcl-proc RPGAPI_acceptRequest export;
                                RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
    RPGAPI_request_headers_upper = %upper(RPGAPI_request_headers);
    RPGAPI_request_method = request.method;
+   RPGAPI_request_route = %trim(request.route);
    headers = RPGAPI_request_headers_upper;
+   if RPGAPI_logging(RPGAPI_LOG_DEBUG);
+      RPGAPI_logRequestHeaders(request);
+   endif;
 
       // the body is either chunked or Content-Length bytes long
    transfer_encoding = RPGAPI_headerValue(headers : 'TRANSFER-ENCODING');
    content_length = RPGAPI_headerValue(headers : 'CONTENT-LENGTH');
    if transfer_encoding <> '';
       if transfer_encoding <> 'CHUNKED';
+         RPGAPI_log(RPGAPI_LOG_WARN : 'Transfer-Encoding ' + transfer_encoding +
+                    ' is not supported: answered 501');
          RPGAPI_reject_status = HTTP_NOT_IMPLEMENTED;
          return refused;
       endif;
@@ -635,6 +726,8 @@ dcl-proc RPGAPI_acceptRequest export;
          length = -1;
       endmon;
       if length < 0;
+         RPGAPI_log(RPGAPI_LOG_WARN : 'Content-Length ' + content_length +
+                    ' is not a number: answered 400');
          RPGAPI_reject_status = HTTP_BAD_REQUEST;
          return refused;
       endif;
@@ -655,8 +748,15 @@ dcl-proc RPGAPI_acceptRequest export;
          RPGAPI_body_remaining = length;
          RPGAPI_body_declared = length;
          RPGAPI_continue_pending = expects_continue;
+         RPGAPI_log(RPGAPI_LOG_DEBUG : 'body of ' + %char(length) +
+                    ' bytes left on the connection for the procedure to read');
          length = 0;
       else;
+         RPGAPI_log(RPGAPI_LOG_WARN : 'body of ' + %char(length) +
+                    ' bytes is over the limit of ' +
+                    %char(%max(RPGAPI_max_request_size :
+                               RPGAPI_max_upload_size)) +
+                    ' bytes: answered 413');
             // refused before reading it, or before the client even sends it
          RPGAPI_reject_status = HTTP_CONTENT_TOO_LARGE;
          RPGAPI_linger = not expects_continue;
@@ -665,17 +765,35 @@ dcl-proc RPGAPI_acceptRequest export;
    endif;
 
    if expects_continue and (chunked or length > 0);
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'sent 100 Continue');
       RPGAPI_sendContinue();
    endif;
 
    if chunked;
       if not RPGAPI_readChunkedBody();
+         if RPGAPI_reject_status > 0;
+            RPGAPI_log(RPGAPI_LOG_WARN : 'chunked body refused: answered ' +
+                       %char(RPGAPI_reject_status));
+         else;
+            RPGAPI_log(RPGAPI_LOG_WARN : 'chunked body did not arrive whole ' +
+                       'within ' + %char(RPGAPI_READ_TIMEOUT) +
+                       's: connection closed');
+         endif;
          return refused;
       endif;
    elseif length > 0;
       if not RPGAPI_readInputToBody(length);
+         RPGAPI_log(RPGAPI_LOG_WARN : 'body of ' + %char(length) +
+                    ' bytes did not arrive whole within ' +
+                    %char(RPGAPI_READ_TIMEOUT) + 's: connection closed');
          return refused;
       endif;
+   endif;
+   if RPGAPI_body_length > 0 or RPGAPI_body_streamed;
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'body: ' + %char(RPGAPI_body_length) +
+                 ' bytes in memory' + %trim(RPGAPI_choose(RPGAPI_body_streamed :
+                 ', the rest streamed' : '')) +
+                 %trim(RPGAPI_choose(chunked : ', chunked' : '')));
    endif;
 
       // a body that fits is also handed over in request.body (a varchar,
@@ -956,41 +1074,115 @@ end-proc;
 
 dcl-proc RPGAPI_setMaxRequestSize export;
    dcl-pi *n;
+      config likeds(RPGAPI_App);
       bytes int(10:0) const;
    end-pi;
-   dcl-s error_text varchar(512);
+
+   if bytes < 1 or bytes > RPGAPI_MAX_BODY_LIMIT;
+      RPGAPI_settingFailed('RPGAPI_setMaxRequestSize: ' + %char(bytes) +
+                           ' is not between 1 and ' +
+                           %char(RPGAPI_MAX_BODY_LIMIT));
+   endif;
+   config.max_request_size = bytes;
+end-proc;
+
+
+dcl-proc RPGAPI_setLogLevel export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      level int(10:0) const;
+   end-pi;
+
+   if level < RPGAPI_LOG_OFF or level > RPGAPI_LOG_DEBUG;
+      RPGAPI_settingFailed('RPGAPI_setLogLevel: ' + %char(level) +
+                           ' is not a level, RPGAPI_LOG_OFF to _DEBUG');
+   endif;
+   config.log_level = level;
+end-proc;
+
+
+dcl-proc RPGAPI_setTimeouts export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      read_seconds int(10:0) const;
+      write_seconds int(10:0) const;
+   end-pi;
+
+   if read_seconds < 1 or write_seconds < 1;
+      RPGAPI_settingFailed('RPGAPI_setTimeouts: the timeouts have to be at ' +
+                           'least 1 second');
+   endif;
+   config.read_timeout = read_seconds;
+   config.write_timeout = write_seconds;
+end-proc;
+
+
+   // ends the procedure that called the setter with an escape message
+dcl-proc RPGAPI_settingFailed;
+   dcl-pi *n;
+      error_text varchar(512) const;
+   end-pi;
    dcl-s message_key char(4);
       // bytes provided 0: a failure to send is signalled as an exception
    dcl-s error_code char(8) inz(*allx'00');
 
-   if bytes < 0 or bytes > RPGAPI_MAX_BODY_LIMIT;
-      error_text = 'RPGAPI_setMaxRequestSize: ' + %char(bytes) +
-                   ' is not between 0 and ' + %char(RPGAPI_MAX_BODY_LIMIT);
-      send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
-                            %len(error_text) : '*ESCAPE' : '*' : 1 :
-                            message_key : error_code );
+      // counter 2: past the setter, to the procedure that called it
+   send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                         %len(error_text) : '*ESCAPE' : '*' : 2 :
+                         message_key : error_code );
+end-proc;
+
+
+   // copies the app's settings into the job, with their defaults, when
+   // RPGAPI_start begins
+dcl-proc RPGAPI_applySettings;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+   end-pi;
+
+   RPGAPI_log_level = RPGAPI_LOG_OFF;
+   if config.log_level >= RPGAPI_LOG_OFF and config.log_level <= RPGAPI_LOG_DEBUG;
+      RPGAPI_log_level = config.log_level;
    endif;
-   RPGAPI_max_request_size = bytes;
+   RPGAPI_max_request_size = RPGAPI_DEFAULT_REQUEST_SIZE;
+   if config.max_request_size > 0;
+      RPGAPI_max_request_size = %min(config.max_request_size :
+                                     RPGAPI_MAX_BODY_LIMIT);
+   endif;
+   RPGAPI_max_upload_size = %max(config.max_upload_size : 0);
+   RPGAPI_READ_TIMEOUT = 30;
+   if config.read_timeout > 0;
+      RPGAPI_READ_TIMEOUT = config.read_timeout;
+   endif;
+   RPGAPI_WRITE_TIMEOUT = 30;
+   if config.write_timeout > 0;
+      RPGAPI_WRITE_TIMEOUT = config.write_timeout;
+   endif;
+
+   RPGAPI_tls = RPGAPI_TLS_OFF;
+   if %len(%trim(config.tls_application_id)) > 0;
+      RPGAPI_tls = RPGAPI_TLS_APPLICATION;
+      RPGAPI_tls_app_id = %trim(config.tls_application_id);
+   elseif %len(%trim(config.tls_keystore)) > 0;
+      RPGAPI_tls = RPGAPI_TLS_KEYSTORE;
+      RPGAPI_tls_keystore_path = %trim(config.tls_keystore);
+      RPGAPI_tls_password = config.tls_password;
+      RPGAPI_tls_label = %trim(config.tls_label);
+   endif;
 end-proc;
 
 
 dcl-proc RPGAPI_setMaxUploadSize export;
    dcl-pi *n;
+      config likeds(RPGAPI_App);
       bytes int(10:0) const;
    end-pi;
-   dcl-s error_text varchar(512);
-   dcl-s message_key char(4);
-      // bytes provided 0: a failure to send is signalled as an exception
-   dcl-s error_code char(8) inz(*allx'00');
 
    if bytes < 0;
-      error_text = 'RPGAPI_setMaxUploadSize: ' + %char(bytes) +
-                   ' is less than 0';
-      send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
-                            %len(error_text) : '*ESCAPE' : '*' : 1 :
-                            message_key : error_code );
+      RPGAPI_settingFailed('RPGAPI_setMaxUploadSize: ' + %char(bytes) +
+                           ' is less than 0');
    endif;
-   RPGAPI_max_upload_size = bytes;
+   config.max_upload_size = bytes;
 end-proc;
 
 
@@ -1229,6 +1421,8 @@ dcl-proc RPGAPI_bodyFailed;
       endif;
    endif;
    RPGAPI_body_done = *on;
+   RPGAPI_log(RPGAPI_LOG_WARN : 'the request body ' + problem + ': answered ' +
+              %char(RPGAPI_reject_status));
    error_text = 'The request body ' + problem;
    send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
                          %len(error_text) : '*ESCAPE' : '*' : 1 :
@@ -1296,6 +1490,7 @@ dcl-proc RPGAPI_saveBody export;
       endif;
       error_text = 'RPGAPI_saveBody: the request body could not be saved to ' +
                    %trim(path);
+      RPGAPI_log(RPGAPI_LOG_ERROR : error_text);
       send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
                             %len(error_text) : '*ESCAPE' : '*' : 1 :
                             message_key : error_code );
@@ -1357,6 +1552,8 @@ dcl-proc RPGAPI_nextPart export;
 
    RPGAPI_mp_state = RPGAPI_MP_IN_PART;
    RPGAPI_mp_carry_length = 0;
+   RPGAPI_log(RPGAPI_LOG_DEBUG : 'multipart part name=' + part.name +
+              ' filename=' + part.filename + ' type=' + part.content_type);
    return *on;
 end-proc;
 
@@ -1456,6 +1653,7 @@ dcl-proc RPGAPI_savePart export;
       endif;
       error_text = 'RPGAPI_savePart: the part could not be saved to ' +
                    %trim(path);
+      RPGAPI_log(RPGAPI_LOG_ERROR : error_text);
       send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
                             %len(error_text) : '*ESCAPE' : '*' : 1 :
                             message_key : error_code );
@@ -1680,27 +1878,29 @@ end-proc;
 
 dcl-proc RPGAPI_setTlsApplication export;
    dcl-pi *n;
+      config likeds(RPGAPI_App);
       application_id varchar(100) const;
    end-pi;
 
-   RPGAPI_tls = RPGAPI_TLS_APPLICATION;
-   RPGAPI_tls_app_id = %trim(application_id);
+   config.tls_application_id = %trim(application_id);
+   config.tls_keystore = '';
 end-proc;
 
 
 dcl-proc RPGAPI_setTlsKeystore export;
    dcl-pi *n;
+      config likeds(RPGAPI_App);
       path varchar(1024) const;
       password varchar(128) const;
       label varchar(128) const options(*nopass);
    end-pi;
 
-   RPGAPI_tls = RPGAPI_TLS_KEYSTORE;
-   RPGAPI_tls_keystore_path = %trim(path);
-   RPGAPI_tls_password = password;
-   RPGAPI_tls_label = '';
-   if %parms >= 3;
-      RPGAPI_tls_label = %trim(label);
+   config.tls_application_id = '';
+   config.tls_keystore = %trim(path);
+   config.tls_password = password;
+   config.tls_label = '';
+   if %parms >= 4;
+      config.tls_label = %trim(label);
    endif;
 end-proc;
 
@@ -1776,6 +1976,7 @@ dcl-proc RPGAPI_tlsFailed;
    error_text = 'TLS could not be set up, ' + step + ' failed: ' +
                 %str(gsk_strerror(return_code)) +
                 ' (GSKit ' + %char(return_code) + ')';
+   RPGAPI_log(RPGAPI_LOG_ERROR : error_text);
       // an I/O error's GSKit text only says to look at errno, when it is set
    if return_code = GSK_ERROR_IO;
       error_number_ptr = get_errno();
@@ -1821,6 +2022,9 @@ dcl-proc RPGAPI_tlsHandshake;
       return_code = gsk_secure_soc_init(RPGAPI_tls_session);
    endif;
    if return_code <> GSK_OK;
+      RPGAPI_log(RPGAPI_LOG_WARN : 'TLS handshake failed: ' +
+                 %str(gsk_strerror(return_code)) + ' (GSKit ' +
+                 %char(return_code) + '); connection closed');
       RPGAPI_tlsClose();
       return *off;
    endif;
@@ -1918,6 +2122,180 @@ dcl-proc RPGAPI_connectionWrite;
 end-proc;
 
 
+   // whether messages of this level are logged, to skip building ones that
+   // are not
+dcl-proc RPGAPI_logging;
+   dcl-pi *n ind;
+      level int(10:0) const;
+   end-pi;
+
+   return level > RPGAPI_LOG_OFF and level <= RPGAPI_log_level;
+end-proc;
+
+
+   // writes a message to the job log, as an informational message
+   // RPGAPI <LEVEL>: text, when the app's log level includes level
+dcl-proc RPGAPI_log;
+   dcl-pi *n;
+      level int(10:0) const;
+      text varchar(1000) const;
+   end-pi;
+   dcl-s message varchar(512);
+   dcl-s message_key char(4);
+   dcl-s error_code char(8) inz(*allx'00');
+
+   if not RPGAPI_logging(level);
+      return;
+   endif;
+   select;
+   when level = RPGAPI_LOG_ERROR;
+      message = 'RPGAPI ERROR: ';
+   when level = RPGAPI_LOG_WARN;
+      message = 'RPGAPI WARN: ';
+   when level = RPGAPI_LOG_INFO;
+      message = 'RPGAPI INFO: ';
+   other;
+      message = 'RPGAPI DEBUG: ';
+   endsl;
+   if RPGAPI_in_request;
+      message = %trimr(message : ': ') + ' #' +
+                %char(RPGAPI_request_number) + ': ';
+   endif;
+   message += %subst(text : 1 : %min(%len(text) : 512 - %len(message)));
+
+      // logging never ends a request: a message that cannot be sent is lost
+   monitor;
+      send_program_message( 'CPF9897' : 'QCPFMSG   *LIBL' : message :
+                            %len(message) : '*INFO' : '*' : 1 :
+                            message_key : error_code );
+   on-error;
+   endmon;
+end-proc;
+
+
+   // the request line and headers, at DEBUG. Values that carry credentials
+   // are left out
+dcl-proc RPGAPI_logRequestHeaders;
+   dcl-pi *n;
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-s index int(10:0);
+   dcl-s name varchar(50);
+   dcl-s value varchar(1024);
+
+   RPGAPI_log(RPGAPI_LOG_DEBUG : 'request ' + %trim(request.method) + ' ' +
+              %trim(request.route) +
+              %trim(RPGAPI_choose(request.query_string <> '' :
+                    '?' + %trim(request.query_string) : '')) + ' ' +
+              %trim(request.protocol));
+   for index = 1 to %elem(request.headers);
+      if request.headers(index).name = *blanks;
+         leave;
+      endif;
+      name = %trim(request.headers(index).name);
+      value = request.headers(index).value;
+      if %upper(name) = 'AUTHORIZATION' or %upper(name) = 'COOKIE' or
+         %upper(name) = 'PROXY-AUTHORIZATION';
+         value = '(not logged)';
+      endif;
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'header ' + name + ': ' + value);
+   endfor;
+end-proc;
+
+
+   // yes when condition is on, otherwise no
+dcl-proc RPGAPI_choose;
+   dcl-pi *n varchar(1000);
+      condition ind const;
+      yes varchar(1000) const;
+      no varchar(1000) const;
+   end-pi;
+
+   if condition;
+      return yes;
+   endif;
+   return no;
+end-proc;
+
+
+   // how the server serves: TLS and how, or plain HTTP
+dcl-proc RPGAPI_tlsDescription;
+   dcl-pi *n varchar(1200);
+   end-pi;
+
+   select;
+   when RPGAPI_tls = RPGAPI_TLS_APPLICATION;
+      return 'HTTPS with application ID ' + RPGAPI_tls_app_id;
+   when RPGAPI_tls = RPGAPI_TLS_KEYSTORE;
+      return 'HTTPS with keystore ' + RPGAPI_tls_keystore_path +
+             %trim(RPGAPI_choose(RPGAPI_tls_label <> '' :
+                   ' label ' + RPGAPI_tls_label : ''));
+   other;
+      return 'plain HTTP';
+   endsl;
+end-proc;
+
+
+dcl-proc RPGAPI_tlsDescriptionShort;
+   dcl-pi *n varchar(20);
+   end-pi;
+
+   if RPGAPI_tls_session <> *null;
+      return ', TLS handshake done';
+   endif;
+   return '';
+end-proc;
+
+
+   // the exception a failed procedure ended with, from this procedure's
+   // caller's messages, as message ID and text: MCH1211 Attempt made to
+   // divide by zero for fixed point operation. It stays in the job log
+dcl-proc RPGAPI_lastException;
+   dcl-pi *n varchar(400);
+   end-pi;
+   dcl-ds received len(4096) qualified;
+      bytes_returned int(10:0) pos(1);
+      message_id char(7) pos(13);
+      data_length int(10:0) pos(153);
+      text_length int(10:0) pos(161);
+   end-ds;
+   dcl-s error_code char(8) inz(*allx'00');
+   dcl-s text varchar(400);
+
+   monitor;
+         // counter 1: the messages of RPGAPI_start, where the exception
+         // ended up; received with *SAME, so it stays as it is
+      receive_program_message(received : %size(received) : 'RCVM0200' :
+                              '*' : 1 : '*EXCP' : ' ' : 0 : '*SAME' :
+                              error_code);
+      if received.bytes_returned = 0 or received.message_id = *blanks;
+         return 'no exception message found';
+      endif;
+      text = received.message_id;
+      if received.text_length > 0 and
+         176 + received.data_length + received.text_length <= %size(received);
+         text += ' ' + %subst(received : 177 + received.data_length :
+                              %min(received.text_length : 380));
+      endif;
+      return text;
+   on-error;
+      return 'its exception message could not be read';
+   endmon;
+end-proc;
+
+
+   // what happens after a procedure failed, for the log
+dcl-proc RPGAPI_failureOutcome;
+   dcl-pi *n varchar(100);
+   end-pi;
+
+   if RPGAPI_stream = RPGAPI_STREAM_NONE;
+      return 'answered 500';
+   endif;
+   return 'its streamed response was cut off';
+end-proc;
+
+
    // closes the client's connection. When it may still be sending a body
    // that was not read, stop sending, then read and drop what arrives for a
    // moment first: closing with unread data resets the connection, and the
@@ -1925,6 +2303,23 @@ end-proc;
 dcl-proc RPGAPI_closeClient;
    dcl-ds poll_fds likeds(PollFd) dim(1);
    dcl-s until timestamp;
+
+   if RPGAPI_logging(RPGAPI_LOG_INFO) and
+      (RPGAPI_response_status > 0 or RPGAPI_request_method <> '');
+      RPGAPI_log(RPGAPI_LOG_INFO :
+         %trim(RPGAPI_choose(RPGAPI_request_method <> '' :
+                             %trim(RPGAPI_request_method) : '-')) + ' ' +
+         %trim(RPGAPI_choose(RPGAPI_request_route <> '' :
+                             RPGAPI_request_route : '-')) + ' -> ' +
+         %trim(RPGAPI_choose(RPGAPI_response_status > 0 :
+                             %char(RPGAPI_response_status) : 'no response')) +
+         ', ' + %char(RPGAPI_bytes_sent) + ' bytes, ' +
+         %char(%div(%diff(%timestamp() : RPGAPI_request_started : *mseconds) :
+                    1000)) + ' ms');
+   endif;
+   RPGAPI_request_method = '';
+   RPGAPI_response_status = 0;
+   RPGAPI_in_request = *off;
 
    RPGAPI_tlsClose();
    if RPGAPI_linger or (RPGAPI_body_streamed and not RPGAPI_body_done);
@@ -2361,6 +2756,7 @@ dcl-proc RPGAPI_buildHead export;
    dcl-s head varchar(32766);
    dcl-s index int(10:0);
 
+   RPGAPI_response_status = response.status;
    head = 'HTTP/1.1 ' + %char(response.status) + ' ' +
           %trim(RPGAPI_getMessage(response.status)) + RPGAPI_CRLF +
           'Connection: close' + RPGAPI_CRLF;
@@ -2410,6 +2806,7 @@ dcl-proc RPGAPI_sendAll;
    dow length > 0 and not RPGAPI_connection_failed;
       written = RPGAPI_connectionWrite(data : length);
       if written > 0;
+         RPGAPI_bytes_sent += written;
          data += written;
          length -= written;
          iter;
@@ -2422,6 +2819,12 @@ dcl-proc RPGAPI_sendAll;
          if poll(poll_fds : 1 : RPGAPI_WRITE_TIMEOUT * 1000) > 0;
             iter;
          endif;
+         RPGAPI_log(RPGAPI_LOG_WARN : 'the client took no response data for ' +
+                    %char(RPGAPI_WRITE_TIMEOUT) + 's after ' +
+                    %char(RPGAPI_bytes_sent) + ' bytes: connection given up');
+      else;
+         RPGAPI_log(RPGAPI_LOG_WARN : 'the connection failed after ' +
+                    %char(RPGAPI_bytes_sent) + ' bytes of the response');
       endif;
       RPGAPI_connection_failed = *on;
    enddo;
@@ -2615,11 +3018,14 @@ dcl-proc RPGAPI_sendFile export;
 
       // no stepping out of the directory a procedure builds the path in
    if %scan('/../' : '/' + path + '/') > 0;
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'sendFile refused ' + path +
+                 ': it has a .. segment');
       return *off;
    endif;
 
    descriptor = open(%trim(path) : O_RDONLY);
    if descriptor < 0;
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'sendFile cannot open ' + path);
       return *off;
    endif;
    if fstat(descriptor : info) < 0;
@@ -2686,6 +3092,11 @@ dcl-proc RPGAPI_sendFile export;
       endif;
    endif;
 
+   RPGAPI_log(RPGAPI_LOG_DEBUG : 'sendFile ' + path + ' (' + %char(size) +
+              ' bytes): ' + %char(file_response.status) +
+              %trim(RPGAPI_choose(range_result > 0 : ' range ' + %char(first) +
+                    '-' + %char(last) : '')) +
+              %trim(RPGAPI_choose(range_result < 0 : ' range outside it' : '')));
    select;
    when file_response.status = HTTP_NOT_MODIFIED;
       close_port(descriptor);
@@ -3113,6 +3524,7 @@ dcl-proc RPGAPI_socketFailed;
    error_text = call_name + '() failed for port ' + %char(config.port) +
                 ': ' + %str(strerror(error_number)) +
                 ' (errno ' + %char(error_number) + ')';
+   RPGAPI_log(RPGAPI_LOG_ERROR : error_text);
 
    if config.socket_descriptor >= 0;
       close_port( config.socket_descriptor );

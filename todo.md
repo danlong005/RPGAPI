@@ -249,6 +249,21 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Settings in `RPGAPI_App`, and logging. The app now holds `jobs`,
+  `log_level`, `max_request_size`, `max_upload_size`, `read_timeout`,
+  `write_timeout` and the TLS settings (0/blank: defaults); the setters take
+  the app first, `RPGAPI_setLogLevel` and `RPGAPI_setTimeouts` are new, and the
+  timeouts are settable. Breaking: programs must be recompiled, so the `*PRV`
+  export lists were dropped. Logging (off, ERROR, WARN, INFO, DEBUG) writes
+  `RPGAPI <LEVEL> #n:` informational messages to the serving job's log: failures
+  with the exception message (from `QMHRCVPM`), refusals and timeouts, one line
+  per request, and at DEBUG connections, headers (credentials masked), routing,
+  body handling, parts and sendFile decisions. Verified on PUB400 (2026-09-25):
+  for the same 9 events, OFF 0 messages, ERROR 1 (the handler's MCH1211),
+  WARN 4, INFO 12, DEBUG 51; route `{name}` prints as sent in the job log;
+  `app.jobs = 2` runs 2 jobs, each logging, both ending with the main job; a
+  3s read timeout closes an idle client after 3s; TLS setup errors unchanged;
+  all earlier tests pass and raw responses are unchanged
 - [x] `RPGAPI_parse` split the request line, the query string and the headers
   into one array, and `%split` leaves the elements it does not fill as they
   were: parts of the request line turned up as extra query params (`?a=1&b=2`

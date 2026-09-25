@@ -35,6 +35,16 @@
           return_socket_descriptor int(10:0);
           routes likeds(RPGAPI_route_ds) dim(250);
           middlewares likeds(RPGAPI_route_ds) dim(100);
+          jobs int(10:0);                          // see Settings
+          log_level int(10:0);
+          max_request_size int(10:0);
+          max_upload_size int(10:0);
+          read_timeout int(10:0);
+          write_timeout int(10:0);
+          tls_application_id varchar(100);
+          tls_keystore varchar(1024);
+          tls_password varchar(128);
+          tls_label varchar(128);
         end-ds;
 
         dcl-ds RPGAPI_header_ds qualified template;
@@ -102,6 +112,26 @@ _NOTE:_ The default port is 3000.
 job of its own (`SBMJOB CMD(CALL PGM(MYLIB/MYAPP))`) and end that job to stop
 the server. The [Quick Start](QuickStart.md) shows the whole cycle.
 
+#### Settings
+Everything about how the server runs is in the app data structure. `clear app`
+first: a setting left at 0 or blank gets its default when `RPGAPI_start` runs.
+Set them with these procedures, which check the values, before
+`RPGAPI_start`:
+
+| Setting | Procedure | Default |
+| --- | --- | --- |
+| `port` | `app.port = 8080`, or `RPGAPI_start(app : 8080)` | 3000 |
+| `jobs` | `app.jobs = 4`, or `RPGAPI_start(app : 8080 : 4)` | 1 |
+| `log_level` | `RPGAPI_setLogLevel(app : RPGAPI_LOG_INFO)` | off |
+| `max_request_size` | `RPGAPI_setMaxRequestSize(app : bytes)` | 1MB |
+| `max_upload_size` | `RPGAPI_setMaxUploadSize(app : bytes)` | 0, off |
+| `read_timeout`, `write_timeout` | `RPGAPI_setTimeouts(app : readSeconds : writeSeconds)` | 30, 30 |
+| `tls_...` | `RPGAPI_setTlsApplication(app : id)` or `RPGAPI_setTlsKeystore(app : path : password : label)` | plain HTTP |
+
+A setter given a value it does not accept ends your program with escape
+message `CPF9898` saying why. Every job serving the app, including the extra
+jobs below, runs your program and so gets the same settings.
+
 #### Handling several requests at once
 By default one job handles one request at a time. Pass the number of jobs to
 serve with as a third parameter:
@@ -122,8 +152,8 @@ one of the jobs that is free. Keep in mind that:
 #### HTTPS
 Call one of these before `RPGAPI_start` to serve HTTPS instead of HTTP:
 ```
-RPGAPI_setTlsApplication('MYCO_RPGAPI_ORDERS');     // DCM application ID
-RPGAPI_setTlsKeystore(path : password : label);     // or a certificate store
+RPGAPI_setTlsApplication(app : 'MYCO_RPGAPI_ORDERS');   // DCM application ID
+RPGAPI_setTlsKeystore(app : path : password : label);   // or a certificate store
 RPGAPI_start(app : 8443);
 ```
 Everything else works the same over HTTPS. The certificate has to be set up in
@@ -146,12 +176,13 @@ UTF-8 bytes. Compile your application with `TGTCCSID(*JOB)`, as described in
 the README under Character sets, so that its literals are in the job's CCSID
 as well.
 
-Each job handles one connection at a time, so a client has 30 seconds to send
-its whole request. If it has not by then, or it closes the connection before the
+Each job handles one connection at a time, so a client has 30 seconds (the
+read timeout, see Settings) to send its whole request. If it has not by then, or it closes the connection before the
 headers are complete, the connection is closed without a response and the next
 one is accepted.
 
-Likewise, a client that takes none of a response for 30 seconds, for example
+Likewise, a client that takes none of a response for 30 seconds (the write
+timeout), for example
 one that stopped reading a large download, is given up on and its connection
 closed. From then on `RPGAPI_write` and `RPGAPI_writeBytes` do nothing, so a
 procedure writing rows still runs to its end and can close what it opened.
@@ -330,7 +361,7 @@ Both read from the same position, so use one or the other for a request.
 Change the limit, up to 16,000,000 bytes, before starting the app:
 
 ```
-RPGAPI_setMaxRequestSize(5000000);
+RPGAPI_setMaxRequestSize(app : 5000000);
 RPGAPI_start(app);
 ```
 
@@ -339,7 +370,7 @@ Bodies over the request size limit can be allowed too, up to a second, larger
 limit (at most 2GB):
 
 ```
-RPGAPI_setMaxUploadSize(500000000);     // 500MB; 0, the default, is off
+RPGAPI_setMaxUploadSize(app : 500000000);   // 500MB; 0, the default, is off
 RPGAPI_start(app);
 ```
 
@@ -359,7 +390,7 @@ endif;
   (say with 403) is never sent it.
 - `RPGAPI_bodyLength` is -1 while a chunked body's size is not known yet.
 - When the body turns out larger than the upload limit, is not valid, or
-  stops arriving for 30 seconds, the read ends your procedure with an escape
+  stops arriving for the read timeout, the read ends your procedure with an escape
   message and the request is answered with 413, 400 or 408. Monitor for it if
   your procedure has to clean up.
 - A body your procedure does not read is dropped.
@@ -575,6 +606,54 @@ for a GET it answers:
   Several ranges get the whole file, and so does a range whose `If-Range`
   names an older version of the file
 
+### Logging
+RPGAPI can log what it does to the job log of the job serving each request,
+to find out what happened when someone reports a problem. It is off unless
+you set a level:
+
+```
+RPGAPI_setLogLevel(app : RPGAPI_LOG_INFO);
+RPGAPI_start(app);
+```
+
+| Level | Logs |
+| --- | --- |
+| `RPGAPI_LOG_OFF` | nothing (the default) |
+| `RPGAPI_LOG_ERROR` | procedures that fail, with the exception they ended with (such as `MCH1211 Attempt made to divide by zero`); files that cannot be saved; TLS or port setup that fails |
+| `RPGAPI_LOG_WARN` | the above, and requests refused and why (413, 431, 400, 501), request bodies that are too large, not valid or stop arriving, clients that time out or stop taking a response, TLS handshakes that fail |
+| `RPGAPI_LOG_INFO` | the above, the settings the server started with, and one line per request: method, path, status, bytes sent and milliseconds |
+| `RPGAPI_LOG_DEBUG` | the above, and each connection, the request line and headers, which middleware ran and which route matched, how the body was read, the parts of a multipart body, and what `RPGAPI_sendFile` decided |
+
+Each message is an informational message (`CPF9897`) that starts with
+`RPGAPI` and its level, and the messages of one request carry its number in
+the job, so they can be picked out of a busy job log:
+
+```
+RPGAPI INFO: serving port 8080 in 1 job(s), plain HTTP, request limit 1048576 bytes, ...
+RPGAPI DEBUG #4: request GET /boom HTTP/1.1
+RPGAPI DEBUG #4: route GET /boom matched
+RPGAPI ERROR #4: GET /boom failed: MCH1211 Attempt made to divide by zero for fixed point operation.; answered 500
+RPGAPI INFO #4: GET /boom -> 500, 76 bytes, 10 ms
+```
+
+Read them with `DSPJOBLOG` for the server's job (`WRKACTJOB`, option 5 then
+10), or with SQL, which suits a job log with many messages:
+
+```sql
+SELECT message_timestamp, message_text
+  FROM TABLE(QSYS2.JOBLOG_INFO('123456/MYUSER/MYAPP'))
+  WHERE message_text LIKE 'RPGAPI %';
+```
+
+- With several jobs, each logs to its own job log; they all have the name of
+  the job you started.
+- The values of `Authorization`, `Proxy-Authorization` and `Cookie` headers
+  are not logged. Other headers and the request line are, at DEBUG.
+- DEBUG and INFO add messages to the job log for every request: a job log that
+  fills up wraps or spills to a spooled file depending on the job's
+  `LOG` and job message queue settings (`QJOBMSGQMX`, `QJOBMSGQFL`). Use
+  them while looking into a problem, and WARN or ERROR otherwise.
+
 ### Procedure reference
 These are the procedures the service program exports. `rpgapi_h.rpgle` also
 declares procedures RPGAPI uses internally; calling one of those from an app
@@ -583,8 +662,10 @@ fails when the app is bound.
 | Procedure | Purpose |
 | --- | --- |
 | `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
-| `RPGAPI_setTlsApplication(application_id)` | Serve HTTPS with the certificate of a DCM application ID |
-| `RPGAPI_setTlsKeystore(path : password : label?)` | Serve HTTPS with a certificate from a certificate store file |
+| `RPGAPI_setLogLevel(app : level)` | How much to log; see Logging |
+| `RPGAPI_setTimeouts(app : readSeconds : writeSeconds)` | How long clients have to send a request and take a response |
+| `RPGAPI_setTlsApplication(app : application_id)` | Serve HTTPS with the certificate of a DCM application ID |
+| `RPGAPI_setTlsKeystore(app : path : password : label?)` | Serve HTTPS with a certificate from a certificate store file |
 | `RPGAPI_get` / `post` / `put` / `patch` / `delete(app : url : %paddr(proc))` | Add a route for that method |
 | `RPGAPI_setRoute(app : method : url : %paddr(proc))` | Add a route for any method |
 | `RPGAPI_setMiddleware(app : url : %paddr(proc))` | Add middleware for a path and everything below it, or `*` for all |
@@ -592,8 +673,8 @@ fails when the app is bound.
 | `RPGAPI_getQueryParam(request : name)` | A query string value |
 | `RPGAPI_getHeader(request : name)` | A request header |
 | `RPGAPI_setHeader(response : name : value)` | Add a response header |
-| `RPGAPI_setMaxRequestSize(bytes)` | The largest body read into memory (1MB) |
-| `RPGAPI_setMaxUploadSize(bytes)` | The largest body streamed from the connection (0, off) |
+| `RPGAPI_setMaxRequestSize(app : bytes)` | The largest body read into memory (1MB) |
+| `RPGAPI_setMaxUploadSize(app : bytes)` | The largest body streamed from the connection (0, off) |
 | `RPGAPI_bodyLength(request)` | The body's size in bytes, -1 while unknown |
 | `RPGAPI_readBody(request)` | The next piece of the body as text |
 | `RPGAPI_readBodyBytes(request : buffer : size)` | The next piece of the body as bytes |

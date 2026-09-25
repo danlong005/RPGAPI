@@ -53,13 +53,41 @@ dcl-ds RPGAPI_Part qualified template;
    content_type varchar(256);
 end-ds;
 
+   // the application: clear it before use. Settings left at 0 or blank get
+   // their defaults when RPGAPI_start runs; the RPGAPI_set... procedures set
+   // them with checks
 dcl-ds RPGAPI_App qualified template;
    port int(10:0);
    socket_descriptor int(10:0);
    return_socket_descriptor int(10:0);
    routes likeds(RPGAPI_route_ds) dim(250);
    middlewares likeds(RPGAPI_route_ds) dim(100);
+      // jobs serving the port: 1
+   jobs int(10:0);
+      // RPGAPI_LOG_...: RPGAPI_LOG_OFF
+   log_level int(10:0);
+      // largest body read into memory, bytes: 1MB
+   max_request_size int(10:0);
+      // largest body streamed from the connection, bytes: 0, not allowed
+   max_upload_size int(10:0);
+      // seconds a client has to send its request, or to take response data: 30
+   read_timeout int(10:0);
+   write_timeout int(10:0);
+      // HTTPS: a DCM application ID, or a certificate store file with its
+      // password and certificate label. Blank: plain HTTP
+   tls_application_id varchar(100);
+   tls_keystore varchar(1024);
+   tls_password varchar(128);
+   tls_label varchar(128);
 end-ds;
+
+   // log levels, for RPGAPI_setLogLevel: each also logs the levels above it.
+   // Messages go to the job log of the job serving the request
+dcl-c RPGAPI_LOG_OFF 0;
+dcl-c RPGAPI_LOG_ERROR 1;
+dcl-c RPGAPI_LOG_WARN 2;
+dcl-c RPGAPI_LOG_INFO 3;
+dcl-c RPGAPI_LOG_DEBUG 4;
 
 dcl-s RPGAPI_callback_ptr pointer(*proc);
 dcl-pr RPGAPI_callBack extproc(RPGAPI_callback_ptr) likeds(RPGAPI_Response);
@@ -178,23 +206,41 @@ dcl-pr RPGAPI_patch;
    procedure pointer(*proc) const;
 end-pr;
 
-   // the largest request body accepted, in bytes; 1MB unless set. Larger
-   // requests are answered with 413. Call it before RPGAPI_start
+   // the largest request body read into memory, in bytes; 1MB unless set.
+   // Larger requests are answered with 413, unless uploads that large are
+   // allowed
 dcl-pr RPGAPI_setMaxRequestSize;
+   config likeds(RPGAPI_App);
    bytes int(10:0) const;
 end-pr;
 
+   // how much to log: RPGAPI_LOG_OFF, _ERROR, _WARN, _INFO or _DEBUG
+dcl-pr RPGAPI_setLogLevel;
+   config likeds(RPGAPI_App);
+   level int(10:0) const;
+end-pr;
+
+   // seconds a client has to send its whole request, and to take response
+   // data before it is given up on (30 and 30)
+dcl-pr RPGAPI_setTimeouts;
+   config likeds(RPGAPI_App);
+   read_seconds int(10:0) const;
+   write_seconds int(10:0) const;
+end-pr;
+
    // HTTPS: serve TLS with the certificate assigned in Digital Certificate
-   // Manager to this application ID. Call before RPGAPI_start
+   // Manager to this application ID
 dcl-pr RPGAPI_setTlsApplication;
+   config likeds(RPGAPI_App);
    application_id varchar(100) const;
 end-pr;
 
    // HTTPS: serve TLS with a certificate from a keystore file (such as the
    // *SYSTEM store, /QIBM/USERDATA/ICSS/CERT/SERVER/DEFAULT.KDB), its
    // password, and the label of the certificate (its default one when left
-   // out). Call before RPGAPI_start
+   // out)
 dcl-pr RPGAPI_setTlsKeystore;
+   config likeds(RPGAPI_App);
    path varchar(1024) const;
    password varchar(128) const;
    label varchar(128) const options(*nopass);
@@ -205,6 +251,7 @@ end-pr;
    // saveBody: they are read from the connection as the procedure asks for
    // them, not held in memory. 0 (the default) turns this off
 dcl-pr RPGAPI_setMaxUploadSize;
+   config likeds(RPGAPI_App);
    bytes int(10:0) const;
 end-pr;
 

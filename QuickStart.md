@@ -80,5 +80,7 @@ ENDJOB JOB(HELLO)
   with `RPGAPI_sendFile`
 - Serve HTTPS: set up a certificate in DCM and call `RPGAPI_setTlsApplication`
   before `RPGAPI_start` (see HTTPS (TLS) in the [README](README.md))
+- See what the server does: `RPGAPI_setLogLevel(app : RPGAPI_LOG_INFO)` logs a
+  line per request to the job log, `RPGAPI_LOG_DEBUG` everything
 
 All of it is in the [API Documentation](ApiDocumentation.md).
