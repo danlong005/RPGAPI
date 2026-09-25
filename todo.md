@@ -93,10 +93,15 @@
   UTF-8 with a matching `Content-Length`, and a UTF-8 `Jürgen` in a request
   arrives as 6 characters, not 7. The earlier request, `@` and route tests still
   pass. A default-compiled app on a 273 system now loses `{name}` routes (seen)
-
-## Larger fixes
-- [ ] No read timeout: a client that sends less than its `Content-Length`, or
-  nothing at all, blocks the server (one connection at a time) until it goes away
+- [x] No read timeout: a client that sent nothing, less than its
+  `Content-Length`, or one byte at a time held the server (one connection at a
+  time) for as long as it liked. `RPGAPI_acceptRequest` now `poll`s before each
+  read against a 30-second deadline for the whole request
+  (`RPGAPI_READ_TIMEOUT`), and `RPGAPI_start` closes the connection without a
+  response when no complete headers arrived. Verified on PUB400 (2026-09-25):
+  with each kind of stalled client, a GET queued behind it got no answer in 65s
+  (the dripping client held the server 65s); now it is answered 29s after it
+  connects. Earlier request, CCSID and route tests still pass
 
 ## Features
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets

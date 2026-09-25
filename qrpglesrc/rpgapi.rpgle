@@ -8,6 +8,10 @@ ctl-opt option(*nodebugio:*srcstmt) nomain;
 dcl-c RPGAPI_UTF8 1208;
 dcl-c RPGAPI_JOB_CCSID 0;
 
+   // seconds a client has to send its whole request. The server handles one
+   // connection at a time, so a client that stalls holds up everyone else
+dcl-c RPGAPI_READ_TIMEOUT 30;
+
    // every field has to start as zeros: declare it with inz(*likeds)
 dcl-ds RPGAPI_QtqCode_T qualified template inz;
    ccsid int(10:0);
@@ -77,6 +81,12 @@ dcl-proc RPGAPI_start export;
       monitor;
          clear request;
          request = RPGAPI_acceptRequest(config);
+
+            // no complete request arrived in time: nothing to answer
+         if request.method = *blanks;
+            close_port( config.return_socket_descriptor );
+            iter;
+         endif;
 
          clear response;
          clear route_found;
@@ -160,6 +170,9 @@ dcl-proc RPGAPI_acceptRequest export;
    dcl-s expected int(10:0) inz(0);
    dcl-ds request likeds(RPGAPI_Request);
    dcl-s text varchar(32000);
+   dcl-ds poll_fds likeds(PollFd) dim(1);
+   dcl-s deadline timestamp;
+   dcl-s wait_ms int(20:0);
 
    clear socket_address;
    socket_address.sin_family = AF_INET;
@@ -171,8 +184,28 @@ dcl-proc RPGAPI_acceptRequest export;
 
       // a request can arrive in several pieces: read until the blank line
       // after the headers, then until Content-Length bytes of body are in.
-      // Stop early if the client closes the connection or the buffer is full
+      // Stop early if the client closes the connection or the buffer is full,
+      // and give up if the whole request takes longer than the timeout
+   deadline = %timestamp() + %seconds(RPGAPI_READ_TIMEOUT);
    dow received < %size(data);
+         // *mseconds are microseconds; poll wants milliseconds
+      wait_ms = %diff(deadline : %timestamp() : *mseconds) / 1000;
+      if wait_ms <= 0;
+         clear request;
+         return request;
+      endif;
+
+      poll_fds(1).fd = config.return_socket_descriptor;
+      poll_fds(1).events = POLLIN;
+      poll_fds(1).revents = 0;
+      return_code = poll(poll_fds : 1 : wait_ms);
+      if return_code = 0;
+         clear request;
+         return request;
+      elseif return_code < 0;
+         leave;
+      endif;
+
       return_code = read( config.return_socket_descriptor :
                                    %addr(data) + received :
                                    %size(data) - received );
@@ -196,8 +229,9 @@ dcl-proc RPGAPI_acceptRequest export;
       endif;
    enddo;
 
-      // nothing arrived: the client closed or the read failed
-   if received <= 0;
+      // the headers never all arrived: the client closed, the read failed
+      // or they do not fit in the buffer
+   if header_end = 0;
       clear request;
       return request;
    endif;

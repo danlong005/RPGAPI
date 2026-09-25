@@ -107,6 +107,11 @@ UTF-8 bytes. Compile your application with `TGTCCSID(*JOB)`, as described in
 the README under Character sets, so that its literals are in the job's CCSID
 as well.
 
+The server handles one connection at a time, so a client has 30 seconds to send
+its whole request. If it has not by then, or it closes the connection before the
+headers are complete, the connection is closed without a response and the next
+one is accepted.
+
 
 #### Routing
 To create routes in your application we have given you several ways to create those. 

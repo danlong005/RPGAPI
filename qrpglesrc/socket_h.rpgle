@@ -138,6 +138,20 @@ dcl-pr get_host_by_addr pointer extproc('gethostbyaddr');
    address_type int(10:0) value;
 end-pr;
 
+dcl-c POLLIN 1;
+
+dcl-ds PollFd qualified template;
+   fd int(10:0);
+   events int(5:0);
+   revents int(5:0);
+end-ds;
+
+dcl-pr poll int(10:0) extproc('poll');
+   fds likeds(PollFd) dim(1);
+   fd_count uns(10:0) value;
+   timeout_ms int(10:0) value;
+end-pr;
+
 dcl-pr get_errno pointer extproc('__errno');
 end-pr;
 
