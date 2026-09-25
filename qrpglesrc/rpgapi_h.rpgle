@@ -213,8 +213,11 @@ end-pr;
 
    // sends an IFS file as it is stored, with the status and headers of
    // response, a Content-Length, and a Content-Type from the file's extension
-   // unless response has one. *off when the file cannot be opened or the
-   // path contains '..': nothing is sent, so the procedure can answer itself
+   // unless response has one. Adds Last-Modified, ETag, Accept-Ranges and
+   // Cache-Control, answers conditional requests with 304 and a Range with
+   // 206 (416 when it is outside the file). *off when the file cannot be
+   // opened or the path contains '..': nothing is sent, so the procedure can
+   // answer itself
 dcl-pr RPGAPI_sendFile ind;
    response likeds(RPGAPI_Response) const;
    path varchar(1024) const;

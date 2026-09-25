@@ -179,10 +179,20 @@
   stopped reading a 22MB stream got no answer in 65s; now it is answered after
   34s. A slow but steady reader still gets the whole 1.09MB. All earlier tests
   pass and raw responses are unchanged
+- [x] `RPGAPI_sendFile` ranges and caching: it now sends `Last-Modified`, a weak
+  `ETag` from size and mtime (`fstat`), `Accept-Ranges` and a default
+  `Cache-Control`; answers `If-None-Match` / `If-Modified-Since` with 304, a
+  single `Range` with 206 (416 outside the file) and honours `If-Range`.
+  Verified on PUB400 (2026-09-25) against a 2MB file: ETag and Last-Modified
+  match the file's stat; 304 for a matching ETag, one in a list, `*`, and a
+  date at or after the mtime; 200 for others, a junk date, and when
+  If-None-Match does not match even if the date would; 206 with exact bytes for
+  `0-99`, `1999900-`, `-500` and an end past the file; 416 for `5000000-`;
+  the whole file for `100-50`, several ranges and `items=`; If-Range by ETag or
+  date; a handler's Cache-Control kept; after touching the file the old ETag
+  gets a 200. All earlier tests pass and raw responses are unchanged
 
 ## Features
-- [ ] `RPGAPI_sendFile`: range requests (206) and caching headers
-  (`Last-Modified` / `ETag`, 304)
 - [ ] Phase C (rest): requests larger than the in-memory limit, streamed from
   the socket instead of buffered (large uploads, multipart)
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets

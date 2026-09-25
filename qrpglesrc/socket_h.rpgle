@@ -177,6 +177,18 @@ dcl-pr open int(10:0) extproc('open');
    mode uns(10:0) value options(*nopass);
 end-pr;
 
+   // the parts of struct stat (32-bit sizes and times) that are used
+dcl-ds FileStat qualified template;
+   size int(10:0) pos(21);
+   modified int(10:0) pos(29);
+   rest char(228) pos(33);
+end-ds;
+
+dcl-pr fstat int(10:0) extproc('fstat');
+   descriptor int(10:0) value;
+   info likeds(FileStat);
+end-pr;
+
 dcl-pr lseek int(10:0) extproc('lseek');
    descriptor int(10:0) value;
    offset int(10:0) value;

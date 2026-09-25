@@ -414,3 +414,13 @@ return response;
 It returns `*off`, having sent nothing, when the file cannot be opened or the
 path contains a `..` segment, so your procedure can answer instead. Text files
 are sent as stored, so keep them in UTF-8 or ASCII.
+
+Like Express, it also sends `Last-Modified`, an `ETag`, `Accept-Ranges: bytes`
+and `Cache-Control: public, max-age=0` (unless you set a `Cache-Control`), and
+for a GET it answers:
+- `If-None-Match` / `If-Modified-Since` with **304 Not Modified** and no body
+  when the client's copy is current
+- `Range: bytes=...` (one range) with **206 Partial Content** and just those
+  bytes, or **416 Range Not Satisfiable** when the range is outside the file.
+  Several ranges get the whole file, and so does a range whose `If-Range`
+  names an older version of the file

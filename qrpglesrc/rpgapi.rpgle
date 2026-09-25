@@ -74,6 +74,12 @@ dcl-s RPGAPI_connection int(10:0) inz(-1);
    // do nothing, so a procedure writing rows can still finish normally
 dcl-s RPGAPI_connection_failed ind inz(*off);
 dcl-s RPGAPI_request_protocol char(8);
+   // the method and headers of that request (RPGAPI_sendFile needs them and
+   // is not passed the request), converted, and in upper case for finding
+   // header names
+dcl-s RPGAPI_request_method char(10);
+dcl-s RPGAPI_request_headers varchar(32000);
+dcl-s RPGAPI_request_headers_upper varchar(32000);
    // a streamed response: RPGAPI_STREAM_... how its body is framed, and body
    // bytes waiting to be sent, already UTF-8 or raw
 dcl-s RPGAPI_stream int(10:0) inz(0);
@@ -464,8 +470,12 @@ dcl-proc RPGAPI_acceptRequest export;
                                          RPGAPI_UTF8 : RPGAPI_JOB_CCSID));
    RPGAPI_input_start = header_end + 4;
    RPGAPI_request_protocol = request.protocol;
-   headers = %upper(RPGAPI_convert(%subst(RPGAPI_input : 1 : header_end - 1) :
-                                   RPGAPI_UTF8 : RPGAPI_JOB_CCSID));
+   RPGAPI_request_headers = RPGAPI_convert(
+                               %subst(RPGAPI_input : 1 : header_end - 1) :
+                               RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
+   RPGAPI_request_headers_upper = %upper(RPGAPI_request_headers);
+   RPGAPI_request_method = request.method;
+   headers = RPGAPI_request_headers_upper;
 
       // the body is either chunked or Content-Length bytes long
    transfer_encoding = RPGAPI_headerValue(headers : 'TRANSFER-ENCODING');
@@ -1152,7 +1162,8 @@ dcl-proc RPGAPI_buildHead export;
          // is up to this procedure too
       if %upper(%trim(response.headers(index).name)) = 'CONNECTION' or
          %upper(%trim(response.headers(index).name)) = 'CONTENT-LENGTH' or
-         %upper(%trim(response.headers(index).name)) = 'TRANSFER-ENCODING';
+         %upper(%trim(response.headers(index).name)) = 'TRANSFER-ENCODING' or
+         %trim(response.headers(index).name) = '-';
          iter;
       endif;
 
@@ -1264,27 +1275,43 @@ dcl-proc RPGAPI_beginResponse export;
       response likeds(RPGAPI_Response) const;
       length int(10:0) const options(*nopass);
    end-pi;
+
+      // an HTTP/1.0 client cannot take chunks: the body ends where the
+      // connection does, which it always does after a response
+   if %parms >= 2;
+      RPGAPI_beginStream(response : length);
+   elseif %trim(RPGAPI_request_protocol) = 'HTTP/1.0';
+      RPGAPI_beginStream(response : RPGAPI_UNTIL_CLOSE);
+   else;
+      RPGAPI_beginStream(response : RPGAPI_CHUNKED);
+   endif;
+end-proc;
+
+
+   // sends the status line and headers of a streamed response. framing is a
+   // Content-Length, RPGAPI_CHUNKED, or RPGAPI_UNTIL_CLOSE when the body ends
+   // with the connection or there is none (304)
+dcl-proc RPGAPI_beginStream;
+   dcl-pi *n;
+      response likeds(RPGAPI_Response) const;
+      framing int(10:0) const;
+   end-pi;
    dcl-ds head_response likeds(RPGAPI_Response);
    dcl-s head varchar(96000);
-   dcl-s framing int(10:0);
 
    head_response = response;
    if head_response.status = 0;
       head_response.status = HTTP_OK;
    endif;
 
-      // an HTTP/1.0 client cannot take chunks: the body ends where the
-      // connection does, which it always does after a response
-   if %parms >= 2;
-      framing = length;
-      RPGAPI_stream = RPGAPI_STREAM_LENGTH;
-   elseif %trim(RPGAPI_request_protocol) = 'HTTP/1.0';
-      framing = RPGAPI_UNTIL_CLOSE;
-      RPGAPI_stream = RPGAPI_STREAM_UNTIL_CLOSE;
-   else;
-      framing = RPGAPI_CHUNKED;
+   select;
+   when framing = RPGAPI_CHUNKED;
       RPGAPI_stream = RPGAPI_STREAM_CHUNKED;
-   endif;
+   when framing = RPGAPI_UNTIL_CLOSE;
+      RPGAPI_stream = RPGAPI_STREAM_UNTIL_CLOSE;
+   other;
+      RPGAPI_stream = RPGAPI_STREAM_LENGTH;
+   endsl;
 
    RPGAPI_output_length = 0;
    head = RPGAPI_convert(RPGAPI_buildHead(head_response : framing) :
@@ -1359,14 +1386,21 @@ dcl-proc RPGAPI_sendFile export;
       path varchar(1024) const;
    end-pi;
    dcl-ds file_response likeds(RPGAPI_Response);
+   dcl-ds info likeds(FileStat);
    dcl-s descriptor int(10:0);
    dcl-s size int(10:0);
    dcl-s buffer char(65536);
    dcl-s count int(10:0);
-   dcl-s index int(10:0);
-   dcl-s has_type ind inz(*off);
+   dcl-s remaining int(10:0);
    dcl-s extension varchar(10);
    dcl-s dot int(10:0);
+   dcl-s etag varchar(40);
+   dcl-s last_modified varchar(40);
+   dcl-s condition varchar(1024);
+   dcl-s since int(10:0);
+   dcl-s first int(10:0);
+   dcl-s last int(10:0);
+   dcl-s range_result int(10:0) inz(0);
 
       // no stepping out of the directory a procedure builds the path in
    if %scan('/../' : '/' + path + '/') > 0;
@@ -1377,39 +1411,338 @@ dcl-proc RPGAPI_sendFile export;
    if descriptor < 0;
       return *off;
    endif;
-   size = lseek(descriptor : 0 : SEEK_END);
-   if size < 0 or lseek(descriptor : 0 : SEEK_SET) < 0;
+   if fstat(descriptor : info) < 0;
       close_port(descriptor);
       return *off;
    endif;
+   size = info.size;
+
+      // the validators: a weak ETag from the size and the time it changed,
+      // as Express makes it, and that time as an HTTP date
+   etag = 'W/"' + RPGAPI_hex(size) + '-' + RPGAPI_hex(info.modified) + '"';
+   last_modified = RPGAPI_httpDate(info.modified);
 
    file_response = response;
-   for index = 1 to %elem(file_response.headers);
-      if file_response.headers(index).name = *blanks;
-         leave;
-      endif;
-      if %upper(%trim(file_response.headers(index).name)) = 'CONTENT-TYPE';
-         has_type = *on;
-      endif;
-   endfor;
-   if not has_type;
+   if file_response.status = 0;
+      file_response.status = HTTP_OK;
+   endif;
+   if not RPGAPI_hasHeader(file_response : 'Content-Type');
       dot = %scanr('.' : path);
-      if dot > 0 and dot < %len(path) and %len(path) - dot <= %size(extension) - 2;
+      if dot > 0 and dot < %len(path) and %len(path) - dot <= 8;
          extension = %lower(%subst(path : dot + 1));
       endif;
       RPGAPI_setHeader(file_response : 'Content-Type' :
                        RPGAPI_contentType(extension));
    endif;
+   if not RPGAPI_hasHeader(file_response : 'Cache-Control');
+      RPGAPI_setHeader(file_response : 'Cache-Control' : 'public, max-age=0');
+   endif;
+   RPGAPI_setHeader(file_response : 'Accept-Ranges' : 'bytes');
+   RPGAPI_setHeader(file_response : 'Last-Modified' : last_modified);
+   RPGAPI_setHeader(file_response : 'ETag' : etag);
 
-   RPGAPI_beginResponse(file_response : size);
-   count = read(descriptor : %addr(buffer) : %size(buffer));
-   dow count > 0;
+      // conditions and ranges only apply to a plain GET of the file
+   if file_response.status = HTTP_OK and
+      %trim(RPGAPI_request_method) = HTTP_GET;
+
+         // the client's copy is still current: If-None-Match wins over
+         // If-Modified-Since
+      condition = RPGAPI_requestHeader('If-None-Match');
+      if condition <> '';
+         if condition = '*' or
+            %scan(RPGAPI_opaqueTag(etag) : condition) > 0;
+            file_response.status = HTTP_NOT_MODIFIED;
+         endif;
+      else;
+         since = RPGAPI_parseHttpDate(RPGAPI_requestHeader('If-Modified-Since'));
+         if since >= 0 and info.modified <= since;
+            file_response.status = HTTP_NOT_MODIFIED;
+         endif;
+      endif;
+
+         // a part of the file, unless If-Range says the client's copy is
+         // of an older version
+      if file_response.status = HTTP_OK;
+         condition = RPGAPI_requestHeader('If-Range');
+         if condition = '' or
+            condition = etag or
+            (%scan('"' : condition) = 0 and
+             RPGAPI_parseHttpDate(condition) >= info.modified);
+            range_result = RPGAPI_parseRange(
+                              RPGAPI_requestHeader('Range') : size :
+                              first : last);
+         endif;
+      endif;
+   endif;
+
+   select;
+   when file_response.status = HTTP_NOT_MODIFIED;
+      close_port(descriptor);
+         // no body, and no Content-Length or Content-Type for it
+      RPGAPI_removeHeader(file_response : 'Content-Type');
+      RPGAPI_beginStream(file_response : RPGAPI_UNTIL_CLOSE);
+      RPGAPI_endResponse();
+      return *on;
+
+   when range_result < 0;
+      close_port(descriptor);
+      file_response.status = HTTP_RANGE_NOT_SATISFIABLE;
+      RPGAPI_setHeader(file_response : 'Content-Range' :
+                       'bytes */' + %char(size));
+      RPGAPI_beginStream(file_response : 0);
+      RPGAPI_endResponse();
+      return *on;
+
+   when range_result > 0;
+      file_response.status = HTTP_PARTIAL_CONTENT;
+      RPGAPI_setHeader(file_response : 'Content-Range' :
+                       'bytes ' + %char(first) + '-' + %char(last) +
+                       '/' + %char(size));
+      if lseek(descriptor : first : SEEK_SET) < 0;
+         close_port(descriptor);
+         return *off;
+      endif;
+      remaining = last - first + 1;
+
+   other;
+      remaining = size;
+   endsl;
+
+   RPGAPI_beginStream(file_response : remaining);
+   dow remaining > 0;
+      count = read(descriptor : %addr(buffer) : %min(remaining : %size(buffer)));
+      if count <= 0;
+         leave;
+      endif;
       RPGAPI_writeBytes(%addr(buffer) : count);
-      count = read(descriptor : %addr(buffer) : %size(buffer));
+      remaining -= count;
    enddo;
    close_port(descriptor);
    RPGAPI_endResponse();
    return *on;
+end-proc;
+
+
+   // parses Range: bytes=first-last, first- or -suffix against a file of
+   // size bytes into first and last. 1: a range to send; -1: a range outside
+   // the file (416); 0: send the whole file, when there is no Range, it is
+   // not one this understands, or it asks for several ranges
+dcl-proc RPGAPI_parseRange;
+   dcl-pi *n int(10:0);
+      range varchar(1024) const;
+      size int(10:0) const;
+      first int(10:0);
+      last int(10:0);
+   end-pi;
+   dcl-s spec varchar(1024);
+   dcl-s dash int(10:0);
+   dcl-s from_text varchar(20);
+   dcl-s to_text varchar(20);
+   dcl-s from_value int(20:0);
+   dcl-s to_value int(20:0);
+
+   if %len(range) < 7 or %lower(%subst(range : 1 : 6)) <> 'bytes=' or
+      %scan(',' : range) > 0;
+      return 0;
+   endif;
+   spec = %trim(%subst(range : 7));
+   dash = %scan('-' : spec);
+   if dash = 0;
+      return 0;
+   endif;
+   from_text = %trim(%subst(spec : 1 : dash - 1));
+   if dash < %len(spec);
+      to_text = %trim(%subst(spec : dash + 1));
+   endif;
+   if (from_text <> '' and %check('0123456789' : from_text) > 0) or
+      (to_text <> '' and %check('0123456789' : to_text) > 0) or
+      (from_text = '' and to_text = '') or
+      %len(from_text) > 18 or %len(to_text) > 18;
+      return 0;
+   endif;
+
+   if from_text = '';
+         // -suffix: the last suffix bytes
+      to_value = %int(to_text);
+      if to_value = 0 or size = 0;
+         return -1;
+      endif;
+      first = size - %min(to_value : size);
+      last = size - 1;
+      return 1;
+   endif;
+
+   from_value = %int(from_text);
+   if to_text = '';
+      to_value = size - 1;
+   else;
+      to_value = %int(to_text);
+      if to_value < from_value;
+         return 0;
+      endif;
+   endif;
+   if from_value >= size;
+      return -1;
+   endif;
+   first = from_value;
+   last = %min(to_value : size - 1);
+   return 1;
+end-proc;
+
+
+   // the value of a header of the request being handled, '' when there is
+   // none. The name is matched in any case
+dcl-proc RPGAPI_requestHeader;
+   dcl-pi *n varchar(1024);
+      name varchar(50) const;
+   end-pi;
+   dcl-s start int(10:0);
+   dcl-s stop int(10:0);
+
+   start = %scan(RPGAPI_CRLF + %upper(name) + ':' :
+                 RPGAPI_request_headers_upper);
+   if start = 0;
+      return '';
+   endif;
+   start += %len(RPGAPI_CRLF) + %len(name) + 1;
+   stop = %scan(RPGAPI_CRLF : RPGAPI_request_headers : start);
+   if stop = 0;
+      stop = %len(RPGAPI_request_headers) + 1;
+   endif;
+   return %trim(%subst(RPGAPI_request_headers : start : stop - start));
+end-proc;
+
+
+dcl-proc RPGAPI_hasHeader;
+   dcl-pi *n ind;
+      response likeds(RPGAPI_Response) const;
+      name varchar(50) const;
+   end-pi;
+   dcl-s index int(10:0);
+
+   for index = 1 to %elem(response.headers);
+      if response.headers(index).name = *blanks;
+         leave;
+      endif;
+      if %upper(%trim(response.headers(index).name)) = %upper(name);
+         return *on;
+      endif;
+   endfor;
+   return *off;
+end-proc;
+
+
+dcl-proc RPGAPI_removeHeader;
+   dcl-pi *n;
+      response likeds(RPGAPI_Response);
+      name varchar(50) const;
+   end-pi;
+   dcl-s index int(10:0);
+
+   for index = 1 to %elem(response.headers);
+      if response.headers(index).name = *blanks;
+         leave;
+      endif;
+      if %upper(%trim(response.headers(index).name)) = %upper(name);
+            // blank the name out, keeping the headers after it
+         response.headers(index).name = '-';
+         response.headers(index).value = '';
+      endif;
+   endfor;
+end-proc;
+
+
+   // an ETag without its W/ weak marker, for If-None-Match, which compares
+   // tags weakly
+dcl-proc RPGAPI_opaqueTag;
+   dcl-pi *n varchar(40);
+      tag varchar(40) const;
+   end-pi;
+
+   if %len(tag) > 2 and %subst(tag : 1 : 2) = 'W/';
+      return %subst(tag : 3);
+   endif;
+   return tag;
+end-proc;
+
+
+   // a number in upper case hex
+dcl-proc RPGAPI_hex;
+   dcl-pi *n varchar(16);
+      value int(10:0) value;
+   end-pi;
+   dcl-s text varchar(16);
+   dcl-s number int(20:0);
+   dcl-c DIGITS '0123456789ABCDEF';
+
+   number = value;
+   if number < 0;
+      number += 4294967296;
+   endif;
+   dou number = 0;
+      text = %subst(DIGITS : %rem(number : 16) + 1 : 1) + text;
+      number = %div(number : 16);
+   enddo;
+   return text;
+end-proc;
+
+
+   // seconds since 1970-01-01 UTC as an HTTP date:
+   // Sun, 06 Nov 1994 08:49:37 GMT
+dcl-proc RPGAPI_httpDate;
+   dcl-pi *n varchar(40);
+      seconds int(10:0) const;
+   end-pi;
+   dcl-s moment timestamp;
+   dcl-s days int(10:0);
+   dcl-c DAYS_OF_WEEK 'SunMonTueWedThuFriSat';
+   dcl-c MONTHS 'JanFebMarAprMayJunJulAugSepOctNovDec';
+
+   moment = z'1970-01-01-00.00.00.000000' + %seconds(seconds);
+   days = %diff(%date(moment) : d'1970-01-01' : *days);
+      // 1970-01-01 was a Thursday
+   return %subst(DAYS_OF_WEEK : %rem(days + 4 : 7) * 3 + 1 : 3) + ', ' +
+          %editc(%dec(%subdt(moment : *days) : 2 : 0) : 'X') + ' ' +
+          %subst(MONTHS : (%subdt(moment : *months) - 1) * 3 + 1 : 3) + ' ' +
+          %char(%subdt(moment : *years)) + ' ' +
+          %editc(%dec(%subdt(moment : *hours) : 2 : 0) : 'X') + ':' +
+          %editc(%dec(%subdt(moment : *minutes) : 2 : 0) : 'X') + ':' +
+          %editc(%dec(%subdt(moment : *seconds) : 2 : 0) : 'X') + ' GMT';
+end-proc;
+
+
+   // an HTTP date (Sun, 06 Nov 1994 08:49:37 GMT) as seconds since
+   // 1970-01-01 UTC, or -1 when it is not one
+dcl-proc RPGAPI_parseHttpDate;
+   dcl-pi *n int(10:0);
+      text varchar(1024) const;
+   end-pi;
+   dcl-s value varchar(40);
+   dcl-s month int(10:0);
+   dcl-s moment timestamp;
+   dcl-c MONTHS 'JANFEBMARAPRMAYJUNJULAUGSEPOCTNOVDEC';
+
+   value = %upper(%trim(text));
+   if %len(value) <> 29 or %subst(value : 26 : 4) <> ' GMT';
+      return -1;
+   endif;
+   month = %scan(%subst(value : 9 : 3) : MONTHS);
+   if month = 0 or %rem(month - 1 : 3) <> 0;
+      return -1;
+   endif;
+   month = %div(month - 1 : 3) + 1;
+
+   monitor;
+      moment = %timestamp(%subst(value : 13 : 4) + '-' +
+                          %editc(%dec(month : 2 : 0) : 'X') + '-' +
+                          %subst(value : 6 : 2) + '-' +
+                          %subst(value : 18 : 2) + '.' +
+                          %subst(value : 21 : 2) + '.' +
+                          %subst(value : 24 : 2) + '.000000');
+      return %diff(moment : z'1970-01-01-00.00.00.000000' : *seconds);
+   on-error;
+      return -1;
+   endmon;
 end-proc;
 
 
@@ -1483,6 +1816,12 @@ dcl-proc RPGAPI_initHttp export;
    HTTP_messages(13).text = 'Request Header Fields Too Large';
    HTTP_messages(14).status = HTTP_NOT_IMPLEMENTED;
    HTTP_messages(14).text = 'Not Implemented';
+   HTTP_messages(15).status = HTTP_PARTIAL_CONTENT;
+   HTTP_messages(15).text = 'Partial Content';
+   HTTP_messages(16).status = HTTP_NOT_MODIFIED;
+   HTTP_messages(16).text = 'Not Modified';
+   HTTP_messages(17).status = HTTP_RANGE_NOT_SATISFIABLE;
+   HTTP_messages(17).text = 'Range Not Satisfiable';
 end-proc;
 
 
