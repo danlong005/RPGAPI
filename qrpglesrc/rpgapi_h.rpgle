@@ -187,6 +187,39 @@ dcl-pr RPGAPI_readBody varchar(32000);
    request likeds(RPGAPI_Request) const;
 end-pr;
 
+   // streaming a response, for bodies of any size: begin it with the status
+   // and headers of response (its body is not used), write the body in as
+   // many pieces as needed, then end it. Without length the body is sent
+   // chunked; with it, as Content-Length. The response the procedure then
+   // returns is not sent, and a response not ended is ended for it
+dcl-pr RPGAPI_beginResponse;
+   response likeds(RPGAPI_Response) const;
+   length int(10:0) const options(*nopass);
+end-pr;
+
+   // text in the job's CCSID, sent as UTF-8
+dcl-pr RPGAPI_write;
+   text varchar(32000) const;
+end-pr;
+
+   // bytes sent as they are, for binary content
+dcl-pr RPGAPI_writeBytes;
+   buffer pointer value;
+   length int(10:0) const;
+end-pr;
+
+dcl-pr RPGAPI_endResponse;
+end-pr;
+
+   // sends an IFS file as it is stored, with the status and headers of
+   // response, a Content-Length, and a Content-Type from the file's extension
+   // unless response has one. *off when the file cannot be opened or the
+   // path contains '..': nothing is sent, so the procedure can answer itself
+dcl-pr RPGAPI_sendFile ind;
+   response likeds(RPGAPI_Response) const;
+   path varchar(1024) const;
+end-pr;
+
    // copies up to size bytes of the request body, unconverted, to buffer.
    // Returns how many, 0 at the end. For binary bodies
 dcl-pr RPGAPI_readBodyBytes int(10:0);

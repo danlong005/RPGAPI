@@ -157,13 +157,25 @@
   out where due, also with a 1,000-byte limit. All earlier tests pass, raw
   responses are unchanged and the service program keeps both earlier
   signatures
+- [x] Phase B, large responses: bodies over 32,000 characters could not be
+  sent at all. `RPGAPI_beginResponse` / `RPGAPI_write` (text, to UTF-8) /
+  `RPGAPI_writeBytes` (raw) / `RPGAPI_endResponse` stream a body in 32KB
+  chunks, or with a `Content-Length` when given, or until close for HTTP/1.0;
+  `RPGAPI_sendFile` streams an IFS file with a Content-Type from its extension.
+  Converters are now opened once per job instead of per call. Verified on
+  PUB400 (2026-09-25): 50,000 lines (539KB chunked) in 1.6s, also through curl
+  and over HTTP/1.0; a 20,000-row JSON array (1.29MB) parses with its u-umlaut
+  and `| \ @` intact; 2MB and 20MB files arrive with matching SHA-256 (20MB in
+  1.4s); missing files and `..` paths get the handler's 404; write without
+  begin is a 500; a failure mid-stream leaves an incomplete chunked response.
+  All earlier tests pass, raw responses are unchanged, and the service program
+  keeps its earlier signatures
 
 ## Features
-- [ ] Phase B: streaming responses. `RPGAPI_beginResponse` / `RPGAPI_write` /
-  `RPGAPI_writeBytes` / `RPGAPI_endResponse` with chunked encoding (or
-  `Content-Length` when it is known), and `RPGAPI_sendFile(path)` for IFS files
-  with a Content-Type from the extension. For large JSON built from SQL, files
-  and binary content. Later: ranges and caching headers for sendFile
+- [ ] `RPGAPI_sendFile`: range requests (206) and caching headers
+  (`Last-Modified` / `ETag`, 304)
+- [ ] No write timeout: a client that stops reading a large response blocks
+  its job in `write()`. Set `SO_SNDTIMEO` on accepted connections
 - [ ] Phase C (rest): requests larger than the in-memory limit, streamed from
   the socket instead of buffered (large uploads, multipart)
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets

@@ -165,6 +165,23 @@ dcl-pr fcntl int(10:0) extproc('fcntl');
    argument int(10:0) value options(*nopass);
 end-pr;
 
+   // IFS files
+dcl-c O_RDONLY 1;
+dcl-c SEEK_SET 0;
+dcl-c SEEK_END 2;
+
+dcl-pr open int(10:0) extproc('open');
+   path pointer value options(*string);
+   flags int(10:0) value;
+   mode uns(10:0) value options(*nopass);
+end-pr;
+
+dcl-pr lseek int(10:0) extproc('lseek');
+   descriptor int(10:0) value;
+   offset int(10:0) value;
+   whence int(10:0) value;
+end-pr;
+
 dcl-pr get_errno pointer extproc('__errno');
 end-pr;
 

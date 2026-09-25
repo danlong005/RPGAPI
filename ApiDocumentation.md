@@ -363,3 +363,49 @@ response.status = 200;
 response.status = HTTP_OK;      // 200
 response.status = HTTP_CREATED; // 201
 ```
+
+#### Large responses and streaming
+`response.body` holds up to 32,000 characters. For anything larger, or to send
+rows as they are read, stream the response instead of returning it: begin it
+with the status and headers of a response, write the body in as many pieces
+as you like, then end it.
+
+```
+RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+RPGAPI_beginResponse(response);
+RPGAPI_write('[');
+// ... RPGAPI_write(...) for each row ...
+RPGAPI_write(']');
+RPGAPI_endResponse();
+return response;            // not sent again: the response has gone out
+```
+
+- `RPGAPI_write(text)` converts text from the job's CCSID to UTF-8.
+- `RPGAPI_writeBytes(%addr(buffer) : length)` sends bytes as they are, for
+  binary content.
+- Writes are collected and sent in pieces of 32KB, so writing a row at a time
+  is fine.
+- The body is sent with `Transfer-Encoding: chunked`. If you know its size in
+  bytes up front, pass it and it is sent with a `Content-Length` instead:
+  `RPGAPI_beginResponse(response : 11)`.
+- A response you do not end is ended when your procedure returns. If your
+  procedure fails after beginning it, the connection is closed, and the
+  client can tell the response is incomplete.
+
+#### Sending files
+`RPGAPI_sendFile` sends an IFS file of any size as it is stored, with a
+`Content-Length` and a `Content-Type` from its extension (`html`, `css`, `js`,
+`json`, `txt`, `csv`, `xml`, `svg`, `png`, `jpg`, `gif`, `ico`, `pdf`, `zip`,
+otherwise `application/octet-stream`). Headers you set on the response are
+sent too, and a `Content-Type` you set is used instead.
+
+```
+if not RPGAPI_sendFile(response : '/www/files/' + RPGAPI_getParam(request : 'name'));
+   response.status = HTTP_NOT_FOUND;
+endif;
+return response;
+```
+
+It returns `*off`, having sent nothing, when the file cannot be opened or the
+path contains a `..` segment, so your procedure can answer instead. Text files
+are sent as stored, so keep them in UTF-8 or ASCII.
