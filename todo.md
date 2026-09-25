@@ -109,6 +109,13 @@
   response with that status failed with a 500. Added `Accepted`. Verified on
   PUB400 (2026-09-25): a 202 handler used to get `500 Internal Server Error`,
   now `202 Accepted` with its body
+- [x] `RPGAPI_setRoute` was documented but not exported, so an app calling it
+  failed to bind, and `HTTP_PATCH` had no helper. Both are exported now
+  (`RPGAPI_patch` is new); the old export list is kept as `PGMLVL(*PRV)`, so
+  programs bound before keep running. Verified on PUB400 (2026-09-25): a test
+  app using both used to fail to build; now a PATCH route added with each
+  answers, a GET to it 404s, and the old build's signature is the new service
+  program's previous one
 
 ## Features
 - [ ] TLS for HTTPS traffic. On IBM i this likely means the GSKit secure sockets
@@ -123,8 +130,6 @@
   to stop being shared state).
 
 ## Cleanup
-- [ ] `RPGAPI_setRoute` is documented but not exported in `RPGAPI_b.bnd`
-- [ ] Add `RPGAPI_patch` (`HTTP_PATCH` exists but has no helper)
 - [ ] `app.sqlrpgle` uses a relative `/copy './qrpglesrc/...'` path
 - [ ] Move the response builder out of `RPGAPI_sendResponse` so the tests can reach it
 

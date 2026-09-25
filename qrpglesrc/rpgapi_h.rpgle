@@ -158,6 +158,12 @@ dcl-pr RPGAPI_delete;
    procedure pointer(*proc) const;
 end-pr;
 
+dcl-pr RPGAPI_patch;
+   config likeds(RPGAPI_App);
+   url varchar(32000) const;
+   procedure pointer(*proc) const;
+end-pr;
+
 dcl-pr RPGAPI_setResponse likeds(RPGAPI_Response);
    request likeds(RPGAPI_Request);
    status zoned(3:0) const;

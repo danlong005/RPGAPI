@@ -624,6 +624,8 @@ dcl-proc RPGAPI_initHttp export;
    HTTP_messages(9).text = 'Found';
    HTTP_messages(10).status = HTTP_FORBIDDEN;
    HTTP_messages(10).text = 'Forbidden';
+   HTTP_messages(11).status = HTTP_ACCEPTED;
+   HTTP_messages(11).text = 'Accepted';
 end-proc;
 
 
