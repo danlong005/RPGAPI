@@ -1983,6 +1983,9 @@ dcl-proc RPGAPI_parse export;
       request.route = %subst(request.route : 1 : start - 1);
    endif;
 
+      // parts is split into three times: %split only fills as many elements
+      // as it returns, so clear what the split before left in the others
+   clear parts;
    parts = %split(request.query_string : '&');
    for index = 1 to %elem(parts) by 1;
       if parts(index) <> *blanks;
@@ -2014,6 +2017,7 @@ dcl-proc RPGAPI_parse export;
    if stop > start;
       raw_headers = %subst(raw_request : start : stop - start);
    endif;
+   clear parts;
    parts = %split(raw_headers : RPGAPI_CRLF);
 
    for index = 1 to %elem(parts) by 1;

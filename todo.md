@@ -249,6 +249,13 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] `RPGAPI_parse` split the request line, the query string and the headers
+  into one array, and `%split` leaves the elements it does not fill as they
+  were: parts of the request line turned up as extra query params (`?a=1&b=2`
+  also had one named `HTTP/1.1`) and headers. The array is cleared before each
+  split. Found through the new DEBUG logging. Verified on PUB400 (2026-09-25):
+  the extra query param is gone; routes, URL decoding and request tests pass,
+  raw responses unchanged. Unit test added (not run)
 - [x] TLS (HTTPS) through GSKit: `RPGAPI_setTlsApplication` (DCM application
   ID) or `RPGAPI_setTlsKeystore` (store, password, label) before
   `RPGAPI_start`; each job opens a server environment, each connection gets a

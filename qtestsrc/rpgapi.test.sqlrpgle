@@ -765,6 +765,18 @@ dcl-proc test_buildHead_skipsConnection export;
           RPGAPI_buildHead(response : 0));
 end-proc;
 
+dcl-proc test_parse_noLeftoverParts export;
+   dcl-ds request likeds(RPGAPI_Request);
+
+   request = RPGAPI_parse('GET /a?x=1 HTTP/1.1' + CRLF +
+                          'Host: h' + DBL_CRLF);
+
+   aEqual('1' : RPGAPI_getQueryParam(request : 'x'));
+   aEqual('' : %trim(request.query_params(2).name));
+   aEqual('Host' : %trim(request.headers(1).name));
+   aEqual('' : %trim(request.headers(2).name));
+end-proc;
+
 dcl-proc test_parse_noHeaders export;
    dcl-ds request likeds(RPGAPI_Request);
 
