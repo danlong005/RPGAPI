@@ -21,20 +21,25 @@ request/response was off by two bytes.
   `RPGAPI_sendResponse`. Verified on PUB400 (2026-09-25): `GET /hello` sends
   `Content-Length: 5` and exactly `hello`; the 404 sends `Content-Length: 0` and
   no body. Committed (438fbd8)
-
 - [x] 404s sent the `Connection` header twice. `RPGAPI_setResponse` no longer adds
   one, and `RPGAPI_sendResponse` skips any `Connection` header a handler sets,
   since it always sends `Connection: close` itself. Verified on PUB400
   (2026-09-25): 404 and a handler setting `Connection: keep-alive` both send a
   single `Connection: close`; other handler headers still go out
+- [x] A failing handler left the client hanging: `on-error` in `RPGAPI_start`
+  built a 500 but never sent it or closed the socket. It now sends the 500, and
+  just closes the socket if sending fails too. Verified on PUB400 (2026-09-25):
+  a divide-by-zero handler used to time out the client after 10s, now returns
+  `500 Internal Server Error` and the server keeps serving
 
 ## Small fixes (independent)
-- [ ] `on-error` in `RPGAPI_start` builds a 500 but never sends it or closes the
-  client socket, so the client hangs and the descriptor leaks
 - [ ] Header and query values are cut off after a second `:` or `=`
   (`Host: localhost:3000` becomes `localhost`, `a=b=c` becomes `b`); split on the
   first separator only (`RPGAPI_parse`)
-- [ ] `SO_REUSEADDR` is sent with `option_val` = 0, so it is off (`RPGAPI_setup`)
+- [ ] `SO_REUSEADDR` is sent with `option_val` = 0, so it is off (`RPGAPI_setup`).
+  Seen on PUB400: restarting the server right after a run left it not listening
+  at all (every request refused), because `bind` failed and its return code is
+  ignored
 
 ## Larger fixes
 - [ ] Middleware re-runs for every route checked before a match, up to 250 times per

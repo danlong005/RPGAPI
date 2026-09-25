@@ -72,7 +72,14 @@ dcl-proc RPGAPI_start export;
 
          RPGAPI_sendResponse(config : response);
       on-error;
-         response = RPGAPI_setResponse(request :  HTTP_INTERNAL_SERVER);
+            // answer with a 500 and close the client socket, so the client
+            // is not left waiting and the descriptor is not leaked
+         monitor;
+            response = RPGAPI_setResponse(request :  HTTP_INTERNAL_SERVER);
+            RPGAPI_sendResponse(config : response);
+         on-error;
+            close_port( config.return_socket_descriptor );
+         endmon;
       endmon;
    enddo;
 
