@@ -1,7 +1,8 @@
 # TODO
 
 ## Blocked
-- [ ] Run `make test` (needs iRPGUnit in library `RPGUNIT`). iRPGUnit is not
+- [ ] Run `make test` (needs iRPGUnit in library `RPGUNIT`). The integration
+  tests (`tests/integration`, `make integration`) run without it. iRPGUnit is not
   installed on PUB400. Needs another IBM i that has it, or iRPGUnit installed into
   a library we own on PUB400 (the Makefile hard-codes `RPGUNIT`)
   The test program is compiled with the default `TGTCCSID`, so on a system
@@ -249,6 +250,11 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Integration tests in `tests/integration`: the PUB400 test apps and
+  clients, made into suites that start each app in a batch job with settings
+  from a data area and print PASS/FAIL, run by `run.sh` (or `make
+  integration`) with LIB, PORT and WORK as settings. Every check that was run
+  by hand for the fixes and features above is in them
 - [x] Settings in `RPGAPI_App`, and logging. The app now holds `jobs`,
   `log_level`, `max_request_size`, `max_upload_size`, `read_timeout`,
   `write_timeout` and the TLS settings (0/blank: defaults); the setters take
