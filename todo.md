@@ -288,12 +288,35 @@
   every earlier test passes, over the new read/write layer, and raw responses
   are unchanged. The README has the DCM setup steps
 
+## Small fixes (independent)
+- [ ] Header values are cut at 1,024 characters (`RPGAPI_header_ds.value`): a long
+  `Authorization` (JWT) or `Cookie` header arrives truncated. `RPGAPI_getHeader`
+  should return the whole value
+- [ ] `RPGAPI_sendResponse` sends `%trim(response.body)`: leading and trailing
+  blanks of a body are dropped. Send it exactly as set
+
 ## Features
 - [ ] Run HTTPS end to end on a system with DCM access: assign a certificate to
   an application ID, `RPGAPI_setTlsApplication`, then the request, upload,
   streaming, file and worker tests over `https://` (curl, a browser). PUB400
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
+
+- [ ] CORS, `OPTIONS` and `HEAD`: browser preflight requests (`OPTIONS`) get a
+  404 and `HEAD` is not routed. A CORS setting on the app (allowed origins,
+  methods, headers), and `HEAD` / `OPTIONS` answered for existing routes
+- [ ] Keep-alive: every response closes the connection (`Connection: close`),
+  so clients reconnect for every request. Keep connections open for further
+  requests, with an idle timeout and a request limit per connection
+- [ ] Replace worker jobs that end unexpectedly, and shut down gracefully:
+  with `ENDJOB *CNTRLD` finish the requests in progress before ending
+- [ ] Cookie helpers: `RPGAPI_getCookie(request : name)` and
+  `RPGAPI_setCookie(response : name : value : options)` (`Path`, `Max-Age`,
+  `HttpOnly`, `Secure`, `SameSite`)
+- [ ] gzip compression of text and JSON responses when the client accepts it
+- [ ] Get the unit tests running: make the iRPGUnit library a Makefile
+  variable, try installing iRPGUnit into a library we own on PUB400, and run
+  the tests added since (they have never been compiled)
 
 ## Cleanup
 
