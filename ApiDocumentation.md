@@ -15,6 +15,7 @@
           query_params likeds(RPGAPI_param_ds) dim(100);
           query_string char(1024);
           route char(250);
+          header_text varchar(32000);              // for RPGAPI_getHeader
         end-ds;
 
         //
@@ -299,9 +300,11 @@ These are the headers that came in on the request. You can access those headers 
 ```
 header_value = RPGAPI_getHeader(request : 'Content-Type');
 ```
-The name is matched in any case, and `''` is returned for a header that was
-not sent. The first 100 headers are kept, with values of up to 1,024
-characters.
+The name is matched in any case, `''` is returned for a header that was not
+sent, and the whole value is returned however long it is, such as a long
+bearer token or a large `Cookie` header. `request.headers` also lists the
+first 50 headers, but with their values cut at 1,024 characters: use
+`RPGAPI_getHeader` to read values.
 
 `request.hostname` is the host the client asked for: the `Host` header without
 its port, as Express's `req.hostname`. For `Host: api.example.com:8080` it is

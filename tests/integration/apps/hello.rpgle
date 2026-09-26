@@ -16,6 +16,7 @@ RPGAPI_get(app : '/conflict' : %paddr(extra));
 RPGAPI_get(app : '/moved' : %paddr(extra));
 RPGAPI_get(app : '/q' : %paddr(query));
 RPGAPI_get(app : '/host' : %paddr(host));
+RPGAPI_get(app : '/header' : %paddr(header));
 testSettings(app);
 RPGAPI_start(app);
 
@@ -90,6 +91,23 @@ dcl-proc host;
    response.status = HTTP_OK;
    response.body = 'hostname=<' + %trim(request.hostname) + '> Host=<' +
                    RPGAPI_getHeader(request : 'Host') + '>';
+   return response;
+end-proc;
+
+   // the header named by ?name=: its length and its last 10 characters
+dcl-proc header;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-s value varchar(32000);
+
+   value = RPGAPI_getHeader(request : RPGAPI_getQueryParam(request : 'name'));
+   response.status = HTTP_OK;
+   response.body = 'len=' + %char(%len(value));
+   if %len(value) >= 10;
+      response.body += ' tail=' + %subst(value : %len(value) - 9);
+   endif;
    return response;
 end-proc;
 

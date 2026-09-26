@@ -37,6 +37,9 @@ dcl-ds RPGAPI_Request qualified template;
    query_params likeds(RPGAPI_param_ds) dim(100);
    query_string char(1024);
    route char(250);
+      // the header lines as sent (converted), each after a CR LF: where
+      // RPGAPI_getHeader finds values longer than headers(n).value holds
+   header_text varchar(32000);
 end-ds;
 
 dcl-ds RPGAPI_Response qualified template;
@@ -128,7 +131,7 @@ dcl-pr RPGAPI_getQueryParam varchar(1024);
    param char(50) const;
 end-pr;
 
-dcl-pr RPGAPI_getHeader varchar(1024);
+dcl-pr RPGAPI_getHeader varchar(32000);
    request likeds(RPGAPI_Request) const;
    header char(50) const;
 end-pr;

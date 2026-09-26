@@ -250,6 +250,14 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Header values were cut at about 1,010 characters: header lines are split
+  into 1,024-character parts before the name is taken off. `RPGAPI_Request` now
+  keeps the header lines whole in `header_text`, and `RPGAPI_getHeader` returns
+  the whole value from it (`varchar(32000)`); `request.headers` still lists the
+  first 50 with values cut at 1,024. Verified on PUB400 (2026-09-26, hello
+  suite): a 5,007-character `Authorization` and a 3,000-character `Cookie`
+  arrived as 1,009 and 1,016 characters, now whole. Unit test added (not run).
+  Layout change: recompile apps
 - [x] Integration tests in `tests/integration`: the PUB400 test apps and
   clients, made into suites that start each app in a batch job with settings
   from a data area and print PASS/FAIL, run by `run.sh` (or `make
@@ -289,9 +297,6 @@
   are unchanged. The README has the DCM setup steps
 
 ## Small fixes (independent)
-- [ ] Header values are cut at 1,024 characters (`RPGAPI_header_ds.value`): a long
-  `Authorization` (JWT) or `Cookie` header arrives truncated. `RPGAPI_getHeader`
-  should return the whole value
 - [ ] `RPGAPI_sendResponse` sends `%trim(response.body)`: leading and trailing
   blanks of a body are dropped. Send it exactly as set
 

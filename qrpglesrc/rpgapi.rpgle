@@ -2411,6 +2411,9 @@ dcl-proc RPGAPI_parse export;
    clear raw_headers;
    if stop > start;
       raw_headers = %subst(raw_request : start : stop - start);
+         // whole, for RPGAPI_getHeader: the parts below cut values at 1024
+      request.header_text = RPGAPI_CRLF +
+                            %subst(raw_request : start + 1 : stop - start - 1);
    endif;
    clear parts;
    parts = %split(raw_headers : RPGAPI_CRLF);
@@ -2585,13 +2588,31 @@ end-proc;
 
 
 dcl-proc RPGAPI_getHeader export;
-   dcl-pi *n varchar(1024);
+   dcl-pi *n varchar(32000);
       request likeds(RPGAPI_Request) const;
       header char(50) const;
    end-pi;
    dcl-s header_value varchar(1024);
    dcl-s index int(10:0);
+   dcl-s start int(10:0);
+   dcl-s stop int(10:0);
 
+      // the whole value, from the header lines as they were sent
+   if %len(request.header_text) > 0;
+      start = %scan(RPGAPI_CRLF + %upper(%trim(header)) + ':' :
+                    %upper(request.header_text));
+      if start = 0;
+         return '';
+      endif;
+      start += %len(RPGAPI_CRLF) + %len(%trim(header)) + 1;
+      stop = %scan(RPGAPI_CRLF : request.header_text : start);
+      if stop = 0;
+         stop = %len(request.header_text) + 1;
+      endif;
+      return %trim(%subst(request.header_text : start : stop - start));
+   endif;
+
+      // a request put together without its header text
    clear header_value;
    for index = 1 to %elem(request.headers) by 1;
       if %upper(request.headers(index).name) =

@@ -765,6 +765,28 @@ dcl-proc test_buildHead_skipsConnection export;
           RPGAPI_buildHead(response : 0));
 end-proc;
 
+dcl-proc test_getHeader_longValue export;
+   dcl-ds request likeds(RPGAPI_Request);
+   dcl-s token varchar(5000);
+   dcl-s value varchar(32000);
+
+   token = %subst(%char(%timestamp()) : 1 : 10);
+   dow %len(token) < 4990;
+      token += 'x';
+   enddo;
+   token += '0123456789';
+
+   request = RPGAPI_parse('GET / HTTP/1.1' + CRLF +
+                          'Host: h' + CRLF +
+                          'Authorization: Bearer ' + token + DBL_CRLF);
+
+   value = RPGAPI_getHeader(request : 'authorization');
+   iEqual(%len(token) + 7 : %len(value));
+   aEqual('0123456789' : %subst(value : %len(value) - 9));
+   aEqual('h' : RPGAPI_getHeader(request : 'Host'));
+   aEqual('' : RPGAPI_getHeader(request : 'X-None'));
+end-proc;
+
 dcl-proc test_parse_noLeftoverParts export;
    dcl-ds request likeds(RPGAPI_Request);
 

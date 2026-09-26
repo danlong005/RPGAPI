@@ -29,6 +29,17 @@ for host, want in [('example.com:8080', 'example.com'), ('Api.Example.COM', 'Api
 status, _, got = split(exchange(b'GET /host HTTP/1.0\r\n\r\n'))
 check('request with no headers at all', status == 200 and got.startswith(b'hostname=<>'), (status, got))
 
+token = 'x' * 4990 + '0123456789'
+got = get('/header?name=Authorization', f'Authorization: Bearer {token}')[2].decode()
+check('5,007-character Authorization header arrives whole', got == 'len=5007 tail=0123456789', got)
+cookie = 'a=' + 'y' * 2988 + 'ABCDEFGHIJ'
+got = get('/header?name=cookie', f'Cookie: {cookie}')[2].decode()
+check('3,000-character Cookie header arrives whole', got == 'len=3000 tail=ABCDEFGHIJ', got)
+got = get('/header?name=X-Short', 'X-Short: abc')[2].decode()
+check('short header', got == 'len=3', got)
+got = get('/header?name=X-Missing')[2].decode()
+check('missing header is empty', got == 'len=0', got)
+
 status, headers, _ = get('/moved')
 check('302 with Location', status == 302 and headers.get('location') == '/hello', (status, headers))
 data = exchange(b'GET /conflict HTTP/1.1\r\nHost: x\r\n\r\n')

@@ -236,3 +236,5 @@ signature error until they are. The setters now take the app first:
 `RPGAPI_setMaxRequestSize(app : bytes)`, `RPGAPI_setMaxUploadSize(app : bytes)`,
 `RPGAPI_setTlsApplication(app : id)` and `RPGAPI_setTlsKeystore(app : ...)`.
 See Settings in the [API Documentation](ApiDocumentation.md).
+`RPGAPI_Request` also gained `header_text`, so that `RPGAPI_getHeader` returns
+whole header values; that too needs a recompile.
