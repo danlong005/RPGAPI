@@ -15,7 +15,7 @@ def req(raw, wait=0, close=False):
         s.shutdown(socket.SHUT_WR)
     if wait:
         time.sleep(wait)
-    data = receive_all(s)
+    data = read_response(s)
     s.close()
     return split(data)[0]
 
@@ -40,7 +40,9 @@ def messages():
     return [line.strip() for line in out.split('\n') if line.strip().startswith('RPGAPI ')]
 
 log = messages()
-expected = {0: 0, 1: 1, 2: 4, 3: 12, 4: 51}[level]
+# DEBUG: 51, and 1 for each of the 5 responses that keep the connection
+# open, when the client then closes it
+expected = {0: 0, 1: 1, 2: 4, 3: 12, 4: 56}[level]
 check(f'level {level} logs {expected} messages', len(log) == expected, f'{len(log)}: {log[:5]}')
 if level >= 1:
     check('ERROR names the exception', any('failed: MCH1211' in m for m in log if m.startswith('RPGAPI ERROR')), log)

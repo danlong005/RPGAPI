@@ -62,6 +62,15 @@ dcl-s RPGAPI_cors_max_age int(10:0) inz(0);
 dcl-s RPGAPI_cors_allow_headers varchar(1000);
 dcl-s RPGAPI_cors_expose_headers varchar(1000);
 dcl-s RPGAPI_cors_allow_origin varchar(1000);
+   // keep-alive, from the app's settings: seconds a connection stays open
+   // for the next request (0: off) and requests per connection. For the
+   // connection: requests so far, whether the response being sent keeps it
+   // open, and whether it is open, waiting for the next request
+dcl-s RPGAPI_keepalive_timeout int(10:0) inz(5);
+dcl-s RPGAPI_keepalive_requests int(10:0) inz(100);
+dcl-s RPGAPI_connection_requests int(10:0) inz(0);
+dcl-s RPGAPI_keep_connection ind inz(*off);
+dcl-s RPGAPI_connection_open ind inz(*off);
    // a HEAD request: its response is sent without a body
 dcl-s RPGAPI_head_request ind inz(*off);
    // how much is logged, RPGAPI_LOG_..., from the app's settings
@@ -489,6 +498,8 @@ dcl-proc RPGAPI_start export;
                RPGAPI_closeClient();
             endif;
          on-error;
+            RPGAPI_keep_connection = *off;
+            RPGAPI_connection_open = *off;
             close_port( config.return_socket_descriptor );
          endmon;
       endmon;
@@ -525,6 +536,14 @@ dcl-proc RPGAPI_acceptConnection;
    dcl-ds poll_fds likeds(PollFd) dim(1);
    dcl-s descriptor int(10:0);
 
+   if RPGAPI_connection_open and RPGAPI_waitForNextRequest(config);
+      RPGAPI_startRequest();
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'request ' +
+                 %char(RPGAPI_connection_requests) +
+                 ' on a connection kept open');
+      return *on;
+   endif;
+
    dow *on;
       if main_job_pid > 0 and kill(main_job_pid : 0) < 0;
          return *off;
@@ -555,20 +574,91 @@ dcl-proc RPGAPI_acceptConnection;
          // time out, instead of blocking in read() or write()
       config.return_socket_descriptor = descriptor;
       RPGAPI_connection = descriptor;
-      RPGAPI_request_started = %timestamp();
-      RPGAPI_request_number += 1;
-      RPGAPI_in_request = *on;
-      RPGAPI_request_route = '';
-      RPGAPI_request_method = '';
-      RPGAPI_response_status = 0;
-      RPGAPI_bytes_sent = 0;
+      RPGAPI_connection_requests = 0;
+      RPGAPI_connection_failed = *off;
+         // nothing read yet on this connection
+      RPGAPI_input_start = 1;
+      RPGAPI_input_end = 0;
+      RPGAPI_startRequest();
       RPGAPI_log(RPGAPI_LOG_DEBUG : 'connection accepted' +
                  RPGAPI_tlsDescriptionShort());
-      RPGAPI_connection_failed = *off;
-      RPGAPI_stream = RPGAPI_STREAM_NONE;
-      RPGAPI_output_length = 0;
       return *on;
    enddo;
+end-proc;
+
+
+   // the start of a request, on a new connection or one kept open
+dcl-proc RPGAPI_startRequest;
+   RPGAPI_request_started = %timestamp();
+   RPGAPI_request_number += 1;
+   RPGAPI_connection_requests += 1;
+   RPGAPI_in_request = *on;
+   RPGAPI_request_route = '';
+   RPGAPI_request_method = '';
+   RPGAPI_response_status = 0;
+   RPGAPI_bytes_sent = 0;
+   RPGAPI_keep_connection = *off;
+   RPGAPI_connection_open = *off;
+   RPGAPI_stream = RPGAPI_STREAM_NONE;
+   RPGAPI_output_length = 0;
+end-proc;
+
+
+   // waits for the next request on a connection kept open: *on when it
+   // comes, or its bytes are already here. *off, having closed it, when the
+   // idle time runs out, the client closes it, or a new connection is
+   // waiting: an idle connection must not keep others from being served
+dcl-proc RPGAPI_waitForNextRequest;
+   dcl-pi *n ind;
+      config likeds(RPGAPI_App);
+   end-pi;
+   dcl-ds poll_fds likeds(PollFd) dim(2);
+   dcl-s until timestamp;
+   dcl-s wait_ms int(20:0);
+   dcl-s peeked char(1);
+
+      // pipelined: the client sent it along with the one before
+   if RPGAPI_input_start <= RPGAPI_input_end;
+      return *on;
+   endif;
+
+   until = %timestamp() + %seconds(RPGAPI_keepalive_timeout);
+   dow *on;
+      wait_ms = %div(%diff(until : %timestamp() : *mseconds) : 1000);
+      if wait_ms <= 0;
+         leave;
+      endif;
+      poll_fds(1).fd = RPGAPI_connection;
+      poll_fds(1).events = POLLIN;
+      poll_fds(1).revents = 0;
+      poll_fds(2).fd = config.socket_descriptor;
+      poll_fds(2).events = POLLIN;
+      poll_fds(2).revents = 0;
+      if poll(poll_fds : 2 : wait_ms) <= 0;
+         leave;
+      endif;
+      if poll_fds(1).revents <> 0;
+            // readable is also what a close looks like: peek, so that a client
+            // closing it is not taken for a request (not possible with TLS)
+         if RPGAPI_tls_session <> *null or
+            recv(RPGAPI_connection : %addr(peeked) : 1 : MSG_PEEK) <> 0;
+            return *on;
+         endif;
+         RPGAPI_log(RPGAPI_LOG_DEBUG : 'the client closed its kept-open ' +
+                    'connection');
+         leave;
+      endif;
+      if poll_fds(2).revents <> 0;
+         RPGAPI_log(RPGAPI_LOG_DEBUG : 'closing an idle kept-open connection ' +
+                    'for a new one');
+         leave;
+      endif;
+   enddo;
+
+   RPGAPI_connection_open = *off;
+   RPGAPI_tlsClose();
+   close_port(RPGAPI_connection);
+   return *off;
 end-proc;
 
 
@@ -685,8 +775,17 @@ dcl-proc RPGAPI_acceptRequest export;
 
    clear refused;
    RPGAPI_reject_status = 0;
-   RPGAPI_input_start = 1;
-   RPGAPI_input_end = 0;
+      // bytes of this request that came with the one before, to the front,
+      // where the headers are looked for
+   if RPGAPI_input_start > 1;
+      if RPGAPI_input_start <= RPGAPI_input_end;
+         %subst(RPGAPI_input : 1 : RPGAPI_input_end - RPGAPI_input_start + 1) =
+            %subst(RPGAPI_input : RPGAPI_input_start :
+                   RPGAPI_input_end - RPGAPI_input_start + 1);
+      endif;
+      RPGAPI_input_end -= RPGAPI_input_start - 1;
+      RPGAPI_input_start = 1;
+   endif;
    RPGAPI_body_length = 0;
    RPGAPI_body_position = 0;
    RPGAPI_body_streamed = *off;
@@ -707,7 +806,11 @@ dcl-proc RPGAPI_acceptRequest export;
       // the whole request has to arrive within the timeout. Read until the
       // blank line after the headers; they have to fit in RPGAPI_input
    RPGAPI_input_deadline = %timestamp() + %seconds(RPGAPI_READ_TIMEOUT);
-   dou header_end > 0;
+      // the headers may already be here, sent with the request before
+   if RPGAPI_input_end > 0;
+      header_end = %scan(x'0d0a0d0a' : %subst(RPGAPI_input : 1 : RPGAPI_input_end));
+   endif;
+   dow header_end = 0;
       if RPGAPI_input_end = %size(RPGAPI_input);
          RPGAPI_log(RPGAPI_LOG_WARN : 'request line and headers are over ' +
                     %char(%size(RPGAPI_input)) + ' bytes: answered 431');
@@ -1122,6 +1225,32 @@ dcl-proc RPGAPI_setMaxRequestSize export;
 end-proc;
 
 
+dcl-proc RPGAPI_setKeepAlive export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      seconds int(10:0) const;
+      max_requests int(10:0) const options(*nopass);
+   end-pi;
+
+   if seconds < 0;
+      RPGAPI_settingFailed('RPGAPI_setKeepAlive: ' + %char(seconds) +
+                           ' seconds is less than 0');
+   endif;
+      // 0 turns it off: in the app that is below 0, since 0 is the default
+   config.keepalive_timeout = seconds;
+   if seconds = 0;
+      config.keepalive_timeout = -1;
+   endif;
+   if %parms >= 3;
+      if max_requests < 1;
+         RPGAPI_settingFailed('RPGAPI_setKeepAlive: the requests per ' +
+                              'connection have to be at least 1');
+      endif;
+      config.keepalive_requests = max_requests;
+   endif;
+end-proc;
+
+
 dcl-proc RPGAPI_setCors export;
    dcl-pi *n;
       config likeds(RPGAPI_App);
@@ -1202,6 +1331,17 @@ dcl-proc RPGAPI_applySettings;
    RPGAPI_WRITE_TIMEOUT = 30;
    if config.write_timeout > 0;
       RPGAPI_WRITE_TIMEOUT = config.write_timeout;
+   endif;
+
+   RPGAPI_keepalive_timeout = 5;
+   if config.keepalive_timeout > 0;
+      RPGAPI_keepalive_timeout = config.keepalive_timeout;
+   elseif config.keepalive_timeout < 0;
+      RPGAPI_keepalive_timeout = 0;
+   endif;
+   RPGAPI_keepalive_requests = 100;
+   if config.keepalive_requests > 0;
+      RPGAPI_keepalive_requests = config.keepalive_requests;
    endif;
 
    RPGAPI_cors_origins = %trim(config.cors_origins);
@@ -2279,6 +2419,35 @@ dcl-proc RPGAPI_allowedMethods;
 end-proc;
 
 
+   // whether the connection stays open after the response being sent, for
+   // the next request: the client wants it (HTTP/1.1 unless it said
+   // Connection: close, HTTP/1.0 when it said keep-alive), it is not over
+   // its requests, the request was read whole and not refused, and the
+   // response's end can be told without closing
+dcl-proc RPGAPI_keepOpen;
+   dcl-pi *n ind;
+      body_length int(10:0) const;
+   end-pi;
+   dcl-s connection varchar(1024);
+
+   if RPGAPI_keepalive_timeout <= 0 or RPGAPI_connection_failed or
+      RPGAPI_connection_requests >= RPGAPI_keepalive_requests or
+      RPGAPI_reject_status > 0 or RPGAPI_linger or
+      (RPGAPI_body_streamed and not RPGAPI_body_done) or
+      body_length = RPGAPI_UNTIL_CLOSE or RPGAPI_request_method = '';
+      return *off;
+   endif;
+   connection = %lower(RPGAPI_requestHeader('Connection'));
+   if %scan('close' : connection) > 0;
+      return *off;
+   endif;
+   if %trim(RPGAPI_request_protocol) = 'HTTP/1.0';
+      return %scan('keep-alive' : connection) > 0;
+   endif;
+   return *on;
+end-proc;
+
+
    // whether messages of this level are logged, to skip building ones that
    // are not
 dcl-proc RPGAPI_logging;
@@ -2477,6 +2646,15 @@ dcl-proc RPGAPI_closeClient;
    RPGAPI_request_method = '';
    RPGAPI_response_status = 0;
    RPGAPI_in_request = *off;
+
+      // kept open for the next request, as the response said
+   if RPGAPI_keep_connection and not RPGAPI_connection_failed;
+      RPGAPI_keep_connection = *off;
+      RPGAPI_connection_open = *on;
+      return;
+   endif;
+   RPGAPI_keep_connection = *off;
+   RPGAPI_connection_open = *off;
 
    RPGAPI_tlsClose();
    if RPGAPI_linger or (RPGAPI_body_streamed and not RPGAPI_body_done);
@@ -2938,18 +3116,23 @@ dcl-proc RPGAPI_buildHead export;
    dcl-s index int(10:0);
 
    RPGAPI_response_status = response.status;
+   RPGAPI_keep_connection = RPGAPI_keepOpen(body_length);
    head = 'HTTP/1.1 ' + %char(response.status) + ' ' +
-          %trim(RPGAPI_getMessage(response.status)) + RPGAPI_CRLF +
-          'Connection: close' + RPGAPI_CRLF;
+          %trim(RPGAPI_getMessage(response.status)) + RPGAPI_CRLF;
+   if RPGAPI_keep_connection;
+      head += 'Connection: keep-alive' + RPGAPI_CRLF + 'Keep-Alive: timeout=' +
+              %char(RPGAPI_keepalive_timeout) + RPGAPI_CRLF;
+   else;
+      head += 'Connection: close' + RPGAPI_CRLF;
+   endif;
 
    for index = 1 to %elem(response.headers) by 1;
       if response.headers(index).name = *blanks;
          leave;
       endif;
 
-         // the connection is always closed after the response, and the
-         // Connection header saying so is sent above. How long the body is
-         // is up to this procedure too
+         // whether the connection stays open is decided here, and said in
+         // the Connection header above. How long the body is too
       if %upper(%trim(response.headers(index).name)) = 'CONNECTION' or
          %upper(%trim(response.headers(index).name)) = 'CONTENT-LENGTH' or
          %upper(%trim(response.headers(index).name)) = 'TRANSFER-ENCODING' or

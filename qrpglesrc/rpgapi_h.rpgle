@@ -93,6 +93,10 @@ dcl-ds RPGAPI_App qualified template;
    cors_allow_headers varchar(1000);
       // response headers scripts may read beyond the simple ones
    cors_expose_headers varchar(1000);
+      // keep-alive: seconds a connection stays open after a response for the
+      // next request (0: 5, below 0: off), and requests per connection (0: 100)
+   keepalive_timeout int(10:0);
+   keepalive_requests int(10:0);
 end-ds;
 
    // log levels, for RPGAPI_setLogLevel: each also logs the levels above it.
@@ -234,6 +238,15 @@ end-pr;
 dcl-pr RPGAPI_setCors;
    config likeds(RPGAPI_App);
    origins varchar(2000) const;
+end-pr;
+
+   // keep-alive: how long, in seconds, a connection stays open after a
+   // response for the next request (0 turns keep-alive off), and how many
+   // requests one connection may make
+dcl-pr RPGAPI_setKeepAlive;
+   config likeds(RPGAPI_App);
+   seconds int(10:0) const;
+   max_requests int(10:0) const options(*nopass);
 end-pr;
 
    // how much to log: RPGAPI_LOG_OFF, _ERROR, _WARN, _INFO or _DEBUG

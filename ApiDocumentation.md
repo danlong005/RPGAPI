@@ -51,6 +51,8 @@
           cors_max_age int(10:0);
           cors_allow_headers varchar(1000);
           cors_expose_headers varchar(1000);
+          keepalive_timeout int(10:0);             // see Keep-alive
+          keepalive_requests int(10:0);
         end-ds;
 
         dcl-ds RPGAPI_header_ds qualified template;
@@ -134,6 +136,7 @@ Set them with these procedures, which check the values, before
 | `read_timeout`, `write_timeout` | `RPGAPI_setTimeouts(app : readSeconds : writeSeconds)` | 30, 30 |
 | `tls_...` | `RPGAPI_setTlsApplication(app : id)` or `RPGAPI_setTlsKeystore(app : path : password : label)` | plain HTTP |
 | `cors_...` | `RPGAPI_setCors(app : origins)`, and the other `cors_` fields; see CORS | no CORS |
+| `keepalive_timeout`, `keepalive_requests` | `RPGAPI_setKeepAlive(app : seconds : maxRequests)`; see Keep-alive | 5 seconds, 100 requests |
 
 A setter given a value it does not accept ends your program with escape
 message `CPF9898` saying why. Every job serving the app, including the extra
@@ -182,6 +185,25 @@ them, and responses from the job's CCSID to UTF-8, so `Content-Length` counts
 UTF-8 bytes. Compile your application with `TGTCCSID(*JOB)`, as described in
 the README under Character sets, so that its literals are in the job's CCSID
 as well.
+
+#### Keep-alive
+A connection stays open after a response, so the client can send its next
+request without connecting again, as browsers and HTTP client libraries do.
+Responses say `Connection: keep-alive` and `Keep-Alive: timeout=5`.
+
+- It is kept 5 seconds for the next request, for up to 100 requests;
+  `RPGAPI_setKeepAlive(app : 15 : 1000)` changes that, and
+  `RPGAPI_setKeepAlive(app : 0)` turns keep-alive off.
+- Each job serves one connection at a time, so a job waiting on an idle kept
+  connection closes it as soon as a new connection is waiting: keep-alive
+  never keeps other clients waiting. Clients open a new connection when they
+  find theirs closed.
+- The connection is closed instead after a request the client sent with
+  `Connection: close` (or HTTP/1.0 without `Connection: keep-alive`), a
+  refused request (413, 431, ...), a request body your procedure did not read
+  to the end, and a streamed response to an HTTP/1.0 client.
+- Requests a client sends one after the other without waiting (pipelining)
+  are answered in order.
 
 Each job handles one connection at a time, so a client has 30 seconds (the
 read timeout, see Settings) to send its whole request. If it has not by then, or it closes the connection before the
@@ -545,8 +567,8 @@ The response object is something you will create in the callback methods. Inside
 
   return response;
 ```
-The connection is closed after every response: RPGAPI sends
-`Connection: close` and does not keep connections open for further requests.
+After the response the connection is kept open for the client's next request
+(see Keep-alive).
 
 #### Headers
 You can set response headers very easily. The following is an example. 
@@ -718,6 +740,7 @@ fails when the app is bound.
 | --- | --- |
 | `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
 | `RPGAPI_setCors(app : origins)` | Allow browsers on these origins to call the app; see CORS |
+| `RPGAPI_setKeepAlive(app : seconds : maxRequests?)` | How long connections stay open between requests, 0 for not at all |
 | `RPGAPI_setLogLevel(app : level)` | How much to log; see Logging |
 | `RPGAPI_setTimeouts(app : readSeconds : writeSeconds)` | How long clients have to send a request and take a response |
 | `RPGAPI_setTlsApplication(app : application_id)` | Serve HTTPS with the certificate of a DCM application ID |

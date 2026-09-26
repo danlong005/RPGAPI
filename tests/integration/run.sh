@@ -23,13 +23,14 @@ TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors examples"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive examples"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
 FAILURES=""
 JOB=""
 CORS=""
+KEEPALIVE=""
 
 cl() { system "$1" </dev/null 2>&1; }
 # the first value of an SQL query
@@ -79,7 +80,7 @@ compile_example() {
 # settings for the next app: log level;request limit;upload limit;timeout;jobs;tls;cors
 configure() {
   cl "CRTDTAARA DTAARA($LIB/TESTCFG) TYPE(*CHAR) LEN(500)" >/dev/null
-  cl "CHGDTAARA DTAARA($LIB/TESTCFG) VALUE('$PORT;$1;$WORK;$2;$CORS')" >/dev/null
+  cl "CHGDTAARA DTAARA($LIB/TESTCFG) VALUE('$PORT;$1;$WORK;$2;$CORS;$KEEPALIVE')" >/dev/null
 }
 
 # submits an app and waits for it to listen; library list in $2
@@ -211,6 +212,10 @@ for suite_name in $SUITES; do
     cors)      compile cors && {
                  CORS="https://app.example.com https://admin.example.com" suite_cors list
                  CORS="*" suite_cors any; } ;;
+    keepalive) compile hello && {
+                 KEEPALIVE="2,3"; suite hello ";;;;" keepalive on
+                 KEEPALIVE="0,1"; suite hello ";;;;" keepalive off
+                 KEEPALIVE=""; } ;;
     examples)  compile_example hello.rpgle EXHELLO
                compile_example notes-api.sqlrpgle EXNOTES
                compile_example table-export.sqlrpgle EXEXPORT

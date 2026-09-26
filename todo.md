@@ -250,6 +250,18 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Keep-alive, on by default: connections stay open 5s for the next request,
+  up to 100 (`RPGAPI_setKeepAlive`, `keepalive_` app fields; 0 turns it off).
+  Closed after `Connection: close` / HTTP/1.0 without keep-alive, refusals,
+  unread streamed bodies and HTTP/1.0 streams. A job waiting on an idle kept
+  connection closes it when a new connection is waiting (polls both), and a
+  client's close is recognised with MSG_PEEK so it is not taken for a
+  request; pipelined bytes are kept. The test clients now read responses by
+  their framing. Verified on PUB400 (2026-09-26, new keepalive suite, 12
+  checks): two requests and pipelined requests on one connection, the limit,
+  the 2s idle close, a new client served at once while another sits idle,
+  Connection: close and HTTP/1.0, keep-alive off; the logging DEBUG count
+  goes from 51 to 56 (one line per client close of a kept connection)
 - [x] CORS, `OPTIONS` and `HEAD`. `HEAD` is answered by `GET` routes with
   their headers and no body (also streamed responses and sendFile, which then
   does not read the file); an `OPTIONS` request without its own route gets 204
@@ -320,9 +332,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Keep-alive: every response closes the connection (`Connection: close`),
-  so clients reconnect for every request. Keep connections open for further
-  requests, with an idle timeout and a request limit per connection
 - [ ] Replace worker jobs that end unexpectedly, and shut down gracefully:
   with `ENDJOB *CNTRLD` finish the requests in progress before ending
 - [ ] Cookie helpers: `RPGAPI_getCookie(request : name)` and

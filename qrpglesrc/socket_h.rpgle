@@ -172,6 +172,14 @@ dcl-c O_WRONLY 2;
 dcl-c O_CREAT 8;
 dcl-c O_TRUNC 64;
 dcl-c SHUT_WR 1;
+dcl-c MSG_PEEK 8;
+
+dcl-pr recv int(10:0) extproc('recv');
+   descriptor int(10:0) value;
+   buffer pointer value;
+   length int(10:0) value;
+   flags int(10:0) value;
+end-pr;
 
 dcl-pr shutdown int(10:0) extproc('shutdown');
    descriptor int(10:0) value;

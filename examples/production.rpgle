@@ -24,6 +24,7 @@ RPGAPI_setLogLevel(app : RPGAPI_LOG_WARN);      // off; INFO or DEBUG to look in
 RPGAPI_setMaxRequestSize(app : 2000000);        // 1MB of body read into memory
 RPGAPI_setMaxUploadSize(app : 0);               // 0: no larger uploads
 RPGAPI_setTimeouts(app : 20 : 60);              // 30 and 30 seconds
+RPGAPI_setKeepAlive(app : 10 : 500);            // 5 seconds, 100 requests
 
    // HTTPS, with a certificate assigned to this application ID in Digital
    // Certificate Manager (see HTTPS in the README). Without it: plain HTTP

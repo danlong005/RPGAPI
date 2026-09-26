@@ -49,10 +49,75 @@ def receive_all(s):
     return data
 
 
+def read_response(s, method=b'GET', pending=None):
+    """Reads one response from s, as an HTTP client does: up to its
+    Content-Length, its last chunk, or (for neither) the close. HEAD, 1xx,
+    204 and 304 have no body. pending holds bytes already read and gets what
+    was read past this response. Returns b'' when the server closed first."""
+    buf = pending.pop() if pending else b''
+    def more():
+        nonlocal buf
+        try:
+            chunk = s.recv(262144)
+        except OSError:
+            chunk = b''
+        buf += chunk
+        return bool(chunk)
+    while CRLF + CRLF not in buf:
+        if not more():
+            return buf
+    head, _, rest = buf.partition(CRLF + CRLF)
+    status, headers, _ = split(head + CRLF + CRLF)
+    if 100 <= status < 200:
+        if pending is not None:
+            pending.append(rest)
+        return read_response(s, method, [rest] if pending is None else pending)
+    if method == b'HEAD' or status in (204, 304):
+        length = 0
+    elif 'content-length' in headers:
+        length = int(headers['content-length'])
+    elif headers.get('transfer-encoding') == 'chunked':
+        while not dechunk_end(rest):
+            if not more():
+                break
+            rest = buf.partition(CRLF + CRLF)[2]
+        length = dechunk_end(rest) or len(rest)
+    else:
+        while more():
+            pass
+        rest = buf.partition(CRLF + CRLF)[2]
+        length = len(rest)
+    while len(rest) < length:
+        if not more():
+            break
+        rest = buf.partition(CRLF + CRLF)[2]
+    if pending is not None:
+        pending.append(rest[length:])
+    return head + CRLF + CRLF + rest[:length]
+
+
+def dechunk_end(body):
+    """The length of a chunked body up to and with its last chunk, or 0 when
+    it has not all arrived."""
+    at = 0
+    while True:
+        line_end = body.find(CRLF, at)
+        if line_end < 0:
+            return 0
+        size = int(body[at:line_end].split(b';')[0] or b'0', 16)
+        at = line_end + 2 + size + 2
+        if size == 0:
+            end = body.find(CRLF + CRLF, line_end)
+            return end + 4 if end >= 0 else 0
+        if at > len(body):
+            return 0
+
+
 def exchange(request, pieces=None, pause=0.5, timeout=60):
     """Sends request (in pieces, pause seconds apart, when given) and returns
-    everything the server sends back until it closes."""
+    the response to it."""
     s = connect(timeout)
+    first = (pieces or [request])[0]
     try:
         for i, piece in enumerate(pieces or [request]):
             if i:
@@ -60,7 +125,7 @@ def exchange(request, pieces=None, pause=0.5, timeout=60):
             s.sendall(piece)
     except OSError:
         pass
-    data = receive_all(s)
+    data = read_response(s, first.split(b' ', 1)[0] if first else b'GET')
     s.close()
     return data
 

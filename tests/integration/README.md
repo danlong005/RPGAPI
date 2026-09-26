@@ -48,6 +48,7 @@ time, so a queue that runs one job at a time is fine.
 | `jobs` | `jobs` | 4 jobs share requests, a stalled client holds only one, all have the library list they were started with, and all end with the main job |
 | `logging` | `logging` | the number and content of log messages at each level, credentials not logged, and a bad log level refused |
 | `cors` | `cors` | `HEAD` routed to `GET` without a body (also streamed, and files in `stream`), automatic `OPTIONS` with `Allow`, CORS headers for allowed origins only, preflights answered before middleware, `*` |
+| `keepalive` | `hello` | two requests on one connection, pipelining, the request limit, the idle timeout, an idle connection giving way to a new client, `Connection: close` and HTTP/1.0, 404 and HEAD kept open, keep-alive off |
 | `tls` | `tls` | an unregistered application ID and a missing keystore stop the server with GSKit's reason; plain HTTP without TLS |
 
 HTTPS itself is not tested: it needs a certificate assigned in Digital

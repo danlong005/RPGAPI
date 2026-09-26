@@ -40,7 +40,10 @@ def send(head, body=b'', pieces=None, expect_continue=False, stall=0):
                 s.sendall(piece)
     except OSError:
         pass
-    data += receive_all(s)
+    if data:
+        data = read_response(s, b'POST', [data])
+    else:
+        data = read_response(s, b'POST')
     s.close()
     status, _, text = split(data)
     return status, text.decode(errors='replace'), got_continue

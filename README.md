@@ -16,8 +16,8 @@ server, and each request is handed to your procedure as a data structure.
   IFS without holding them in memory
 - Streamed responses of any size, and IFS files with caching headers and
   range requests
-- Several jobs serving one port, and timeouts so one slow client cannot hold a
-  job
+- Several jobs serving one port, keep-alive connections, and timeouts so one
+  slow client cannot hold a job
 - HTTPS, with a certificate from Digital Certificate Manager (DCM)
 - Logging to the job log at four levels, down to every request's headers and
   routing, to find out what happened when a problem is reported
@@ -241,4 +241,6 @@ See Settings in the [API Documentation](ApiDocumentation.md).
 `RPGAPI_Request` also gained `header_text`, so that `RPGAPI_getHeader` returns
 whole header values; that too needs a recompile. And `response.body` is now
 sent exactly as set, where it used to be trimmed: trim bodies set from
-fixed-length fields. The CORS settings added `cors_` fields to `RPGAPI_App`.
+fixed-length fields. The CORS settings added `cors_` fields to `RPGAPI_App`,
+and keep-alive the `keepalive_` fields; connections now stay open between
+requests (`RPGAPI_setKeepAlive(app : 0)` to close them as before).
