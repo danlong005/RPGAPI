@@ -237,4 +237,6 @@ signature error until they are. The setters now take the app first:
 `RPGAPI_setTlsApplication(app : id)` and `RPGAPI_setTlsKeystore(app : ...)`.
 See Settings in the [API Documentation](ApiDocumentation.md).
 `RPGAPI_Request` also gained `header_text`, so that `RPGAPI_getHeader` returns
-whole header values; that too needs a recompile.
+whole header values; that too needs a recompile. And `response.body` is now
+sent exactly as set, where it used to be trimmed: trim bodies set from
+fixed-length fields.

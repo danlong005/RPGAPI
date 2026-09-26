@@ -514,8 +514,10 @@ Setting the body of the response can be done like so.
 ```
 response.body = 'Here is the body!';
 ```
-The body is sent with blanks at its start and end removed. `response.body`
-holds up to 32,000 characters; for more, see Large responses and streaming.
+The body is sent exactly as it is set, blanks included. When you set it from a
+fixed-length (`char`) field, trim it, or its trailing blanks go out too:
+`response.body = %trim(row.name);`. `response.body` holds up to 32,000
+characters; for more, see Large responses and streaming.
 
 #### Status
 Once again setting the status is a simple thing to to do.

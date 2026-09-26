@@ -2752,8 +2752,8 @@ dcl-proc RPGAPI_sendResponse export;
 
       // Content-Length counts UTF-8 bytes, which is more than the length in
       // EBCDIC for any character outside ASCII, so convert the body first
-   utf8_body = RPGAPI_convert(%trim(response.body) :
-                              RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+      // the body is sent exactly as it was set, blanks and all
+   utf8_body = RPGAPI_convert(response.body : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
    head = RPGAPI_convert(RPGAPI_buildHead(response : %len(utf8_body)) :
                          RPGAPI_JOB_CCSID : RPGAPI_UTF8);
 

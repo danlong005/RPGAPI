@@ -250,6 +250,12 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] `RPGAPI_sendResponse` sent `%trim(response.body)`, dropping a body's
+  leading and trailing blanks; it is now sent exactly as set, as Express does.
+  Verified on PUB400 (2026-09-26, misc suite): a body set as `  Jurgen  ` (with
+  a u-umlaut) went out as 7 bytes without the blanks, now as 11 with them;
+  basic, hello, routes, bodies, stream, logging and examples suites pass.
+  Behaviour change: apps setting the body from a `char` field should trim it
 - [x] Header values were cut at about 1,010 characters: header lines are split
   into 1,024-character parts before the name is taken off. `RPGAPI_Request` now
   keeps the header lines whole in `header_text`, and `RPGAPI_getHeader` returns
@@ -297,9 +303,6 @@
   are unchanged. The README has the DCM setup steps
 
 ## Small fixes (independent)
-- [ ] `RPGAPI_sendResponse` sends `%trim(response.body)`: leading and trailing
-  blanks of a body are dropped. Send it exactly as set
-
 ## Features
 - [ ] Run HTTPS end to end on a system with DCM access: assign a certificate to
   an application ID, `RPGAPI_setTlsApplication`, then the request, upload,
