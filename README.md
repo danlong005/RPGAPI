@@ -5,8 +5,10 @@ A small RPGLE web framework for building web APIs on IBM i, in the spirit of
 Express. You register routes and middleware as RPG procedures, start the
 server, and each request is handed to your procedure as a data structure.
 
-- Routes with `{params}` for GET, POST, PUT, PATCH and DELETE, and middleware
-  for all routes or a path and everything below it
+- Routes with `{params}` for GET, POST, PUT, PATCH and DELETE (HEAD and OPTIONS
+  answered for you), and middleware for all routes or a path and everything
+  below it
+- CORS for browser front ends on other origins, preflights included
 - UTF-8 on the wire, converted to and from the job's CCSID
 - Request bodies up to 1MB in memory by default, and larger uploads streamed
   from the connection, with `Content-Length` or chunked encoding
@@ -239,4 +241,4 @@ See Settings in the [API Documentation](ApiDocumentation.md).
 `RPGAPI_Request` also gained `header_text`, so that `RPGAPI_getHeader` returns
 whole header values; that too needs a recompile. And `response.body` is now
 sent exactly as set, where it used to be trimmed: trim bodies set from
-fixed-length fields.
+fixed-length fields. The CORS settings added `cors_` fields to `RPGAPI_App`.

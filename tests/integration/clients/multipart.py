@@ -51,7 +51,9 @@ for pieces in [1, 40]:
 status, got = send(b'/partbytes', ct, body, 40)
 check('readPartBytes checksum', got == f'[doc bytes=3000000 checksum={checksum(blob)}]', got)
 check('reading only the third part', send(b'/third', ct, body, 7) == (200, 'third=last value=end'))
-check('not multipart: no parts', send(b'/form', b'application/json', b'{"a": 1}') == (200, 'parts=0'))
+# the app answers 'parts=' + count + ' ' + what it found: nothing, here
+got = send(b'/form', b'application/json', b'{"a": 1}')
+check('not multipart: no parts', got == (200, 'parts=0 '), got)
 check('no closing boundary: 400', send(b'/form', ct, body[:body.index(b'\r\n--' + b + b'--')])[0] == 400)
 check('no boundary at all: 400', send(b'/form', ct, b'just text\r\n')[0] == 400)
 

@@ -25,6 +25,9 @@ dcl-ds app likeds(RPGAPI_App);
 
 clear app;
 RPGAPI_setLogLevel(app : RPGAPI_LOG_INFO);
+   // a front end on another origin may call the API; its preflights are
+   // answered before checkKey, which they could not pass
+RPGAPI_setCors(app : 'https://app.example.com');
 RPGAPI_setMiddleware(app : '/api' : %paddr(checkKey));
 RPGAPI_get(app : '/health' : %paddr(health));
 RPGAPI_get(app : '/api/orders' : %paddr(orders));

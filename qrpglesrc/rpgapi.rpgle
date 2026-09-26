@@ -54,6 +54,16 @@ end-pr;
    // this is kept here rather than in RPGAPI_Request, whose layout apps use
 dcl-s RPGAPI_max_request_size int(10:0) inz(1048576);
 dcl-c RPGAPI_DEFAULT_REQUEST_SIZE 1048576;
+   // CORS, from the app's settings, and for the request being answered the
+   // Access-Control-Allow-Origin to send ('' for none)
+dcl-s RPGAPI_cors_origins varchar(2000);
+dcl-s RPGAPI_cors_credentials ind inz(*off);
+dcl-s RPGAPI_cors_max_age int(10:0) inz(0);
+dcl-s RPGAPI_cors_allow_headers varchar(1000);
+dcl-s RPGAPI_cors_expose_headers varchar(1000);
+dcl-s RPGAPI_cors_allow_origin varchar(1000);
+   // a HEAD request: its response is sent without a body
+dcl-s RPGAPI_head_request ind inz(*off);
    // how much is logged, RPGAPI_LOG_..., from the app's settings
 dcl-s RPGAPI_log_level int(10:0) inz(0);
    // for the line logged at the end of each request
@@ -314,6 +324,7 @@ dcl-proc RPGAPI_start export;
    dcl-ds response likeds(RPGAPI_Response) inz;
    dcl-ds request likeds(RPGAPI_Request) inz;
    dcl-s middleware_completed ind;
+   dcl-s allowed varchar(200);
 
    if %parms >= 2;
       config.port = port;
@@ -376,6 +387,19 @@ dcl-proc RPGAPI_start export;
 
          clear response;
          clear route_found;
+         RPGAPI_head_request = %trim(request.method) = HTTP_HEAD;
+         RPGAPI_cors_allow_origin = RPGAPI_corsOrigin(request);
+
+            // a browser's CORS preflight is answered here, before the
+            // middleware: it never carries credentials, so an auth middleware
+            // would refuse it
+         if %trim(request.method) = HTTP_OPTIONS and RPGAPI_cors_origins <> '' and
+            RPGAPI_getHeader(request : 'Access-Control-Request-Method') <> '' and
+            RPGAPI_getHeader(request : 'Origin') <> '';
+            response = RPGAPI_preflight(config : request);
+            RPGAPI_sendResponse(config : response);
+            iter;
+         endif;
 
             // run the matching middleware once, in the order it was added.
             // One that returns *off ends the request with the response it set
@@ -419,8 +443,19 @@ dcl-proc RPGAPI_start export;
             endfor;
 
             if not route_found;
-               RPGAPI_log(RPGAPI_LOG_DEBUG : 'no route matched');
                response = RPGAPI_setResponse(request :  HTTP_NOT_FOUND);
+                  // OPTIONS without a route of its own: which methods the
+                  // path has
+               if %trim(request.method) = HTTP_OPTIONS;
+                  allowed = RPGAPI_allowedMethods(config : request.route);
+                  if allowed <> '';
+                     response.status = HTTP_NO_CONTENT;
+                     RPGAPI_setHeader(response : 'Allow' : allowed);
+                  endif;
+               endif;
+               RPGAPI_log(RPGAPI_LOG_DEBUG : 'no route matched' +
+                          RPGAPI_choose(response.status = HTTP_NO_CONTENT :
+                                ': answered with the methods it has' : ''));
             endif;
          endif;
 
@@ -791,9 +826,9 @@ dcl-proc RPGAPI_acceptRequest export;
    endif;
    if RPGAPI_body_length > 0 or RPGAPI_body_streamed;
       RPGAPI_log(RPGAPI_LOG_DEBUG : 'body: ' + %char(RPGAPI_body_length) +
-                 ' bytes in memory' + %trim(RPGAPI_choose(RPGAPI_body_streamed :
-                 ', the rest streamed' : '')) +
-                 %trim(RPGAPI_choose(chunked : ', chunked' : '')));
+                 ' bytes in memory' + RPGAPI_choose(RPGAPI_body_streamed :
+                 ', the rest streamed' : '') +
+                 RPGAPI_choose(chunked : ', chunked' : ''));
    endif;
 
       // a body that fits is also handed over in request.body (a varchar,
@@ -1087,6 +1122,16 @@ dcl-proc RPGAPI_setMaxRequestSize export;
 end-proc;
 
 
+dcl-proc RPGAPI_setCors export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      origins varchar(2000) const;
+   end-pi;
+
+   config.cors_origins = %trim(origins);
+end-proc;
+
+
 dcl-proc RPGAPI_setLogLevel export;
    dcl-pi *n;
       config likeds(RPGAPI_App);
@@ -1158,6 +1203,12 @@ dcl-proc RPGAPI_applySettings;
    if config.write_timeout > 0;
       RPGAPI_WRITE_TIMEOUT = config.write_timeout;
    endif;
+
+   RPGAPI_cors_origins = %trim(config.cors_origins);
+   RPGAPI_cors_credentials = config.cors_credentials;
+   RPGAPI_cors_max_age = %max(config.cors_max_age : 0);
+   RPGAPI_cors_allow_headers = %trim(config.cors_allow_headers);
+   RPGAPI_cors_expose_headers = %trim(config.cors_expose_headers);
 
    RPGAPI_tls = RPGAPI_TLS_OFF;
    if %len(%trim(config.tls_application_id)) > 0;
@@ -2122,6 +2173,112 @@ dcl-proc RPGAPI_connectionWrite;
 end-proc;
 
 
+   // the Access-Control-Allow-Origin for a request: its Origin when that is
+   // allowed, '*' when any origin is and credentials are not; '' otherwise
+dcl-proc RPGAPI_corsOrigin;
+   dcl-pi *n varchar(1000);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-s origin varchar(1000);
+   dcl-s allowed varchar(2002);
+
+   if RPGAPI_cors_origins = '';
+      return '';
+   endif;
+   origin = RPGAPI_getHeader(request : 'Origin');
+   if origin = '';
+      return '';
+   endif;
+   if RPGAPI_cors_origins = '*';
+      if RPGAPI_cors_credentials;
+         return origin;
+      endif;
+      return '*';
+   endif;
+      // the list with a space around each origin, to match whole ones
+   allowed = ' ' + %scanrpl(',' : ' ' : RPGAPI_cors_origins) + ' ';
+   if %scan(' ' + origin + ' ' : allowed) > 0;
+      return origin;
+   endif;
+   RPGAPI_log(RPGAPI_LOG_DEBUG : 'CORS: origin ' + origin + ' is not allowed');
+   return '';
+end-proc;
+
+
+   // the answer to a CORS preflight: 204, with what the browser may send
+   // when the origin is allowed (buildHead adds the origin headers)
+dcl-proc RPGAPI_preflight;
+   dcl-pi *n likeds(RPGAPI_Response);
+      config likeds(RPGAPI_App);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-s methods varchar(200);
+   dcl-s headers varchar(1000);
+
+   response.status = HTTP_NO_CONTENT;
+   if RPGAPI_cors_allow_origin = '';
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'CORS preflight refused');
+      return response;
+   endif;
+
+   methods = RPGAPI_allowedMethods(config : request.route);
+   if methods = '';
+      methods = 'GET, HEAD, PUT, PATCH, POST, DELETE';
+   endif;
+   RPGAPI_setHeader(response : 'Access-Control-Allow-Methods' : methods);
+   headers = RPGAPI_cors_allow_headers;
+   if headers = '';
+      headers = RPGAPI_getHeader(request : 'Access-Control-Request-Headers');
+   endif;
+   if headers <> '';
+      RPGAPI_setHeader(response : 'Access-Control-Allow-Headers' : headers);
+   endif;
+   if RPGAPI_cors_max_age > 0;
+      RPGAPI_setHeader(response : 'Access-Control-Max-Age' :
+                       %char(RPGAPI_cors_max_age));
+   endif;
+   RPGAPI_log(RPGAPI_LOG_DEBUG : 'CORS preflight allowed: ' + methods);
+   return response;
+end-proc;
+
+
+   // the methods of the routes for a path, as for an Allow header: HEAD
+   // after GET, and OPTIONS last. '' when no route has the path
+dcl-proc RPGAPI_allowedMethods;
+   dcl-pi *n varchar(200);
+      config likeds(RPGAPI_App);
+      path varchar(250) const;
+   end-pi;
+   dcl-ds params likeds(RPGAPI_param_ds) dim(100);
+   dcl-s methods varchar(200);
+   dcl-s method varchar(10);
+   dcl-s index int(10:0);
+
+   for index = 1 to %elem(config.routes);
+      if config.routes(index).url = *blanks;
+         leave;
+      endif;
+      if RPGAPI_pathMatches(config.routes(index).url : path : *off : params);
+         method = %trim(config.routes(index).method);
+         if %scan(' ' + method + ',' : ' ' + methods + ',') = 0;
+            methods += RPGAPI_choose(methods <> '' : ', ' : '') + method;
+         endif;
+         if method = HTTP_GET and %scan(' HEAD,' : ' ' + methods + ',') = 0;
+            methods += ', HEAD';
+         endif;
+      endif;
+   endfor;
+   if methods = '';
+      return '';
+   endif;
+   if %scan(' OPTIONS,' : ' ' + methods + ',') = 0;
+      methods += ', OPTIONS';
+   endif;
+   return methods;
+end-proc;
+
+
    // whether messages of this level are logged, to skip building ones that
    // are not
 dcl-proc RPGAPI_logging;
@@ -2185,8 +2342,8 @@ dcl-proc RPGAPI_logRequestHeaders;
 
    RPGAPI_log(RPGAPI_LOG_DEBUG : 'request ' + %trim(request.method) + ' ' +
               %trim(request.route) +
-              %trim(RPGAPI_choose(request.query_string <> '' :
-                    '?' + %trim(request.query_string) : '')) + ' ' +
+              RPGAPI_choose(request.query_string <> '' :
+                    '?' + %trim(request.query_string) : '') + ' ' +
               %trim(request.protocol));
    for index = 1 to %elem(request.headers);
       if request.headers(index).name = *blanks;
@@ -2228,8 +2385,8 @@ dcl-proc RPGAPI_tlsDescription;
       return 'HTTPS with application ID ' + RPGAPI_tls_app_id;
    when RPGAPI_tls = RPGAPI_TLS_KEYSTORE;
       return 'HTTPS with keystore ' + RPGAPI_tls_keystore_path +
-             %trim(RPGAPI_choose(RPGAPI_tls_label <> '' :
-                   ' label ' + RPGAPI_tls_label : ''));
+             RPGAPI_choose(RPGAPI_tls_label <> '' :
+                   ' label ' + RPGAPI_tls_label : '');
    other;
       return 'plain HTTP';
    endsl;
@@ -2307,12 +2464,12 @@ dcl-proc RPGAPI_closeClient;
    if RPGAPI_logging(RPGAPI_LOG_INFO) and
       (RPGAPI_response_status > 0 or RPGAPI_request_method <> '');
       RPGAPI_log(RPGAPI_LOG_INFO :
-         %trim(RPGAPI_choose(RPGAPI_request_method <> '' :
-                             %trim(RPGAPI_request_method) : '-')) + ' ' +
-         %trim(RPGAPI_choose(RPGAPI_request_route <> '' :
-                             RPGAPI_request_route : '-')) + ' -> ' +
-         %trim(RPGAPI_choose(RPGAPI_response_status > 0 :
-                             %char(RPGAPI_response_status) : 'no response')) +
+         RPGAPI_choose(RPGAPI_request_method <> '' :
+                             %trim(RPGAPI_request_method) : '-') + ' ' +
+         RPGAPI_choose(RPGAPI_request_route <> '' :
+                             RPGAPI_request_route : '-') + ' -> ' +
+         RPGAPI_choose(RPGAPI_response_status > 0 :
+                             %char(RPGAPI_response_status) : 'no response') +
          ', ' + %char(RPGAPI_bytes_sent) + ' bytes, ' +
          %char(%div(%diff(%timestamp() : RPGAPI_request_started : *mseconds) :
                     1000)) + ' ms');
@@ -2652,7 +2809,9 @@ dcl-proc RPGAPI_routeMatches export;
       request likeds(RPGAPI_Request);
    end-pi;
 
-   if request.method <> route.method;
+      // a HEAD request is answered by a GET route, without the body
+   if request.method <> route.method and
+      not (%trim(request.method) = HTTP_HEAD and %trim(route.method) = HTTP_GET);
       clear request.params;
       return *off;
    endif;
@@ -2757,8 +2916,9 @@ dcl-proc RPGAPI_sendResponse export;
    head = RPGAPI_convert(RPGAPI_buildHead(response : %len(utf8_body)) :
                          RPGAPI_JOB_CCSID : RPGAPI_UTF8);
 
+      // a HEAD response has the Content-Length of the body, but not the body
    if RPGAPI_sendAll(%addr(head : *data) : %len(head)) and
-      %len(utf8_body) > 0;
+      %len(utf8_body) > 0 and not RPGAPI_head_request;
       RPGAPI_sendAll(%addr(utf8_body : *data) : %len(utf8_body));
    endif;
    RPGAPI_closeClient();
@@ -2800,6 +2960,24 @@ dcl-proc RPGAPI_buildHead export;
       head += %trim(response.headers(index).name) + ': ' +
               %trim(response.headers(index).value) + RPGAPI_CRLF;
    endfor;
+
+      // CORS, for an origin that is allowed, unless the procedure set its own
+   if RPGAPI_cors_allow_origin <> '' and
+      not RPGAPI_hasHeader(response : 'Access-Control-Allow-Origin');
+      head += 'Access-Control-Allow-Origin: ' + RPGAPI_cors_allow_origin +
+              RPGAPI_CRLF;
+      if RPGAPI_cors_allow_origin <> '*' and
+         not RPGAPI_hasHeader(response : 'Vary');
+         head += 'Vary: Origin' + RPGAPI_CRLF;
+      endif;
+      if RPGAPI_cors_credentials;
+         head += 'Access-Control-Allow-Credentials: true' + RPGAPI_CRLF;
+      endif;
+      if RPGAPI_cors_expose_headers <> '';
+         head += 'Access-Control-Expose-Headers: ' +
+                 RPGAPI_cors_expose_headers + RPGAPI_CRLF;
+      endif;
+   endif;
 
       // the CRLF that ends the last header plus one more make the blank line
    select;
@@ -2981,7 +3159,7 @@ dcl-proc RPGAPI_writeBytes export;
    dcl-s count int(10:0);
 
    RPGAPI_checkStream('RPGAPI_writeBytes');
-   if RPGAPI_connection_failed;
+   if RPGAPI_connection_failed or RPGAPI_head_request;
       return;
    endif;
    dow done < length;
@@ -3006,8 +3184,9 @@ dcl-proc RPGAPI_endResponse export;
    endif;
 
    RPGAPI_flushOutput();
-      // a chunked body ends with a chunk of size 0: 0 CR LF CR LF
-   if RPGAPI_stream = RPGAPI_STREAM_CHUNKED;
+      // a chunked body ends with a chunk of size 0: 0 CR LF CR LF. A HEAD
+      // response has no body at all
+   if RPGAPI_stream = RPGAPI_STREAM_CHUNKED and not RPGAPI_head_request;
       RPGAPI_sendAll(%addr(last_chunk) : %size(last_chunk));
    endif;
    RPGAPI_stream = RPGAPI_STREAM_ENDED;
@@ -3115,9 +3294,9 @@ dcl-proc RPGAPI_sendFile export;
 
    RPGAPI_log(RPGAPI_LOG_DEBUG : 'sendFile ' + path + ' (' + %char(size) +
               ' bytes): ' + %char(file_response.status) +
-              %trim(RPGAPI_choose(range_result > 0 : ' range ' + %char(first) +
-                    '-' + %char(last) : '')) +
-              %trim(RPGAPI_choose(range_result < 0 : ' range outside it' : '')));
+              RPGAPI_choose(range_result > 0 : ' range ' + %char(first) +
+                    '-' + %char(last) : '') +
+              RPGAPI_choose(range_result < 0 : ' range outside it' : ''));
    select;
    when file_response.status = HTTP_NOT_MODIFIED;
       close_port(descriptor);
@@ -3152,6 +3331,9 @@ dcl-proc RPGAPI_sendFile export;
    endsl;
 
    RPGAPI_beginStream(file_response : remaining);
+   if RPGAPI_head_request;
+      remaining = 0;
+   endif;
    dow remaining > 0;
       count = read(descriptor : %addr(buffer) : %min(remaining : %size(buffer)));
       if count <= 0;

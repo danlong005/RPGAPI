@@ -32,6 +32,9 @@ for name, ctype in [('big.bin', 'application/octet-stream'), ('huge.bin', 'appli
     check(f'sendFile {name}', status == 200 and headers.get('content-type') == ctype and
           headers.get('content-length') == str(len(want)) and hashlib.sha256(body).digest() == hashlib.sha256(want).digest(),
           (status, headers.get('content-type')))
+status, headers, body = get('/file?name=big.bin', method='HEAD')
+check('HEAD of a file: its headers, not the file', status == 200 and headers.get('content-length') == '2000000' and
+      'etag' in headers and body == b'', (status, headers, len(body)))
 for name in ['missing.txt', '../secret.txt', 'sub/../../secret.txt']:
     status, _, body = get('/file?name=' + name)
     check(f'sendFile {name}: the procedure answers 404', (status, body) == (404, b'no such file'), (status, body))

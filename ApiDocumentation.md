@@ -46,6 +46,11 @@
           tls_keystore varchar(1024);
           tls_password varchar(128);
           tls_label varchar(128);
+          cors_origins varchar(2000);              // see CORS
+          cors_credentials ind;
+          cors_max_age int(10:0);
+          cors_allow_headers varchar(1000);
+          cors_expose_headers varchar(1000);
         end-ds;
 
         dcl-ds RPGAPI_header_ds qualified template;
@@ -128,6 +133,7 @@ Set them with these procedures, which check the values, before
 | `max_upload_size` | `RPGAPI_setMaxUploadSize(app : bytes)` | 0, off |
 | `read_timeout`, `write_timeout` | `RPGAPI_setTimeouts(app : readSeconds : writeSeconds)` | 30, 30 |
 | `tls_...` | `RPGAPI_setTlsApplication(app : id)` or `RPGAPI_setTlsKeystore(app : path : password : label)` | plain HTTP |
+| `cors_...` | `RPGAPI_setCors(app : origins)`, and the other `cors_` fields; see CORS | no CORS |
 
 A setter given a value it does not accept ends your program with escape
 message `CPF9898` saying why. Every job serving the app, including the extra
@@ -241,6 +247,50 @@ RPGAPI_get(app : '/api/v1/memberships' : %paddr(MBR_index));
 ```
 A request that matches no route gets `404 Not Found`. An app can have up to
 250 routes and 100 middleware.
+
+##### HEAD and OPTIONS
+- A `HEAD` request is answered by the `GET` route for its path (unless you add
+  a `HEAD` route), with the same status and headers, including the
+  `Content-Length` the body would have, but without the body. Your procedure
+  runs as for `GET`, and sees `request.method = 'HEAD'`. Streamed responses
+  and `RPGAPI_sendFile` send only their headers too.
+- An `OPTIONS` request for a path that has routes, but no `OPTIONS` route of
+  its own, is answered with `204` and an `Allow` header listing their methods,
+  such as `GET, HEAD, POST, OPTIONS`. It goes through middleware first.
+  `HTTP_HEAD` and `HTTP_OPTIONS` name the methods for `RPGAPI_setRoute`.
+
+#### CORS
+A page from another origin (scheme, host and port), such as a front end on
+`https://app.example.com` calling the API on `https://api.example.com`, may only
+use the API's responses when the API allows that origin. Name the origins:
+
+```
+RPGAPI_setCors(app : 'https://app.example.com https://admin.example.com');
+app.cors_credentials = *on;          // let the browser send cookies along
+app.cors_max_age = 600;              // cache preflight answers 10 minutes
+app.cors_expose_headers = 'X-Total'; // headers scripts may read
+RPGAPI_start(app);
+```
+
+| Field | Default | |
+| --- | --- | --- |
+| `cors_origins` | blank: no CORS | origins, separated by spaces or commas, or `*` for any |
+| `cors_credentials` | `*off` | send `Access-Control-Allow-Credentials: true` |
+| `cors_max_age` | 0: not sent | seconds a browser may cache a preflight answer |
+| `cors_allow_headers` | blank: the ones asked for | request headers allowed in preflight answers |
+| `cors_expose_headers` | blank | response headers scripts may read |
+
+- A request from an allowed origin gets `Access-Control-Allow-Origin` with its
+  origin (or `*` when any origin is allowed without credentials), with
+  `Vary: Origin`, on every response, errors included. Other origins get no
+  CORS headers, so the browser keeps the response from the page.
+- A preflight (an `OPTIONS` request with `Origin` and
+  `Access-Control-Request-Method`) is answered with `204` before any
+  middleware runs, since browsers never send credentials with it: an auth
+  middleware would refuse it. It lists the methods of the routes for the path
+  in `Access-Control-Allow-Methods`.
+- Headers you set yourself, such as `Access-Control-Allow-Origin`, are left
+  as you set them.
 
 ### Middleware
 
@@ -667,6 +717,7 @@ fails when the app is bound.
 | Procedure | Purpose |
 | --- | --- |
 | `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
+| `RPGAPI_setCors(app : origins)` | Allow browsers on these origins to call the app; see CORS |
 | `RPGAPI_setLogLevel(app : level)` | How much to log; see Logging |
 | `RPGAPI_setTimeouts(app : readSeconds : writeSeconds)` | How long clients have to send a request and take a response |
 | `RPGAPI_setTlsApplication(app : application_id)` | Serve HTTPS with the certificate of a DCM application ID |

@@ -250,6 +250,17 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] CORS, `OPTIONS` and `HEAD`. `HEAD` is answered by `GET` routes with
+  their headers and no body (also streamed responses and sendFile, which then
+  does not read the file); an `OPTIONS` request without its own route gets 204
+  with `Allow` for the path's methods; `RPGAPI_setCors` and the `cors_` app
+  fields add `Access-Control-*` headers for allowed origins, and preflights
+  are answered before middleware. Verified on PUB400 (2026-09-26, new cors
+  suite, 18 checks): before, OPTIONS and HEAD got 404 and there was no CORS;
+  now HEAD /items has GET's Content-Length and no body, OPTIONS lists `GET,
+  HEAD, POST, OPTIONS`, allowed origins get the headers (also on a 401),
+  others none, a preflight to a key-protected path gets 204 with methods,
+  headers and max age, and `*` works. Layout change: recompile apps
 - [x] `RPGAPI_sendResponse` sent `%trim(response.body)`, dropping a body's
   leading and trailing blanks; it is now sent exactly as set, as Express does.
   Verified on PUB400 (2026-09-26, misc suite): a body set as `  Jurgen  ` (with
@@ -309,9 +320,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] CORS, `OPTIONS` and `HEAD`: browser preflight requests (`OPTIONS`) get a
-  404 and `HEAD` is not routed. A CORS setting on the app (allowed origins,
-  methods, headers), and `HEAD` / `OPTIONS` answered for existing routes
 - [ ] Keep-alive: every response closes the connection (`Connection: close`),
   so clients reconnect for every request. Keep connections open for further
   requests, with an idle timeout and a request limit per connection

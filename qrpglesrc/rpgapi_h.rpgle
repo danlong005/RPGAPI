@@ -82,6 +82,17 @@ dcl-ds RPGAPI_App qualified template;
    tls_keystore varchar(1024);
    tls_password varchar(128);
    tls_label varchar(128);
+      // CORS: origins allowed to call the app from a browser, separated by
+      // spaces or commas, or '*' for any. Blank: no CORS headers
+   cors_origins varchar(2000);
+      // whether browsers may send cookies and credentials along
+   cors_credentials ind;
+      // seconds a browser may cache a preflight answer: not sent
+   cors_max_age int(10:0);
+      // request headers allowed: blank, the ones the browser asks for
+   cors_allow_headers varchar(1000);
+      // response headers scripts may read beyond the simple ones
+   cors_expose_headers varchar(1000);
 end-ds;
 
    // log levels, for RPGAPI_setLogLevel: each also logs the levels above it.
@@ -215,6 +226,14 @@ end-pr;
 dcl-pr RPGAPI_setMaxRequestSize;
    config likeds(RPGAPI_App);
    bytes int(10:0) const;
+end-pr;
+
+   // CORS: lets pages from these origins call the app from a browser.
+   // origins are separated by spaces or commas, or '*' for any. The other
+   // cors_ fields of the app fine-tune it
+dcl-pr RPGAPI_setCors;
+   config likeds(RPGAPI_App);
+   origins varchar(2000) const;
 end-pr;
 
    // how much to log: RPGAPI_LOG_OFF, _ERROR, _WARN, _INFO or _DEBUG

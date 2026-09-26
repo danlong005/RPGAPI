@@ -8,6 +8,8 @@ dcl-c HTTP_POST 'POST';
 dcl-c HTTP_PUT 'PUT';       
 dcl-c HTTP_PATCH 'PATCH';   
 dcl-c HTTP_DELETE 'DELETE'; 
+dcl-c HTTP_HEAD 'HEAD';
+dcl-c HTTP_OPTIONS 'OPTIONS';
 
 dcl-c HTTP_OK 200;          
 dcl-c HTTP_CREATED 201;    

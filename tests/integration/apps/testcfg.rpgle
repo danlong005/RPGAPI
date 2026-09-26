@@ -3,7 +3,7 @@
    // shared by the test apps: testcfg_h.rpgle goes at the top of each, and
    // this, the procedure, at the end. It applies the settings the runner leaves in the
    // data area TESTCFG in the program's own library, as
-   // port;log level;max request size;max upload size;timeout;jobs;work dir;tls
+   // port;log level;max request size;max upload size;timeout;jobs;work dir;tls;cors
    // Empty fields are left at RPGAPI's defaults. tls is APP:<id> or
    // KDB:<path>:<password>:<label>
 
@@ -11,7 +11,7 @@ dcl-proc testSettings;
    dcl-pi *n;
       app likeds(RPGAPI_App);
    end-pi;
-   dcl-s fields varchar(500) dim(8);
+   dcl-s fields varchar(500) dim(9);
    dcl-s tls varchar(500) dim(4);
    dcl-s index int(10:0);
    dcl-s text char(500);
@@ -49,6 +49,7 @@ dcl-proc testSettings;
       app.jobs = %int(fields(6));
    endif;
    testWorkDir = fields(7);
+   testCorsOrigins = fields(9);
    if fields(8) <> '';
       tls = %split(fields(8) : ':');
       if tls(1) = 'APP';
