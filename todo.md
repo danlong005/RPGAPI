@@ -302,7 +302,6 @@
   every earlier test passes, over the new read/write layer, and raw responses
   are unchanged. The README has the DCM setup steps
 
-## Small fixes (independent)
 ## Features
 - [ ] Run HTTPS end to end on a system with DCM access: assign a certificate to
   an application ID, `RPGAPI_setTlsApplication`, then the request, upload,
