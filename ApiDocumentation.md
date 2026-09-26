@@ -399,6 +399,17 @@ its port, as Express's `req.hostname`. For `Host: api.example.com:8080` it is
 `api.example.com`, for `Host: [::1]:3000` it is `[::1]`, and it is blank when
 the request has no `Host` header.
 
+#### Cookies
+`RPGAPI_getCookie` returns a cookie the browser sent, from the `Cookie` header:
+
+```
+session_id = RPGAPI_getCookie(request : 'session');
+```
+The name is matched exactly (cookie names are case-sensitive), a value in
+quotes comes back without them, and `%XX` escapes are decoded, as Express's
+`req.cookies` does, so a value set with `RPGAPI_setCookie` comes back as it was
+set. A cookie that was not sent gives `''`.
+
 #### Params
 These are the route params that came in on the request. To define route params in your route see the section on routing. You can access the params using the following api method
 
@@ -596,6 +607,52 @@ Up to 100 headers can be set. `Connection`, `Content-Length` and
 `Transfer-Encoding` are set by RPGAPI from how the body is sent; values you set
 for them are left out.
 
+#### Cookies
+`RPGAPI_setCookie` adds a `Set-Cookie` header; call it once per cookie. Without
+options the cookie is for the whole site (`Path=/`) and lasts until the browser
+closes:
+
+```
+RPGAPI_setCookie(response : 'theme' : 'dark');
+```
+For the other attributes, pass an `RPGAPI_CookieOptions`:
+
+```
+dcl-ds options likeds(RPGAPI_CookieOptions) inz(*likeds);
+
+options.max_age = 3600;          // seconds; Expires is sent too
+options.http_only = *on;         // not readable from JavaScript
+options.secure = *on;            // HTTPS only
+options.same_site = 'Lax';       // Strict, Lax or None
+RPGAPI_setCookie(response : 'session' : session_id : options);
+```
+| Field | Attribute | Default |
+| --- | --- | --- |
+| `path` | `Path` | `/` |
+| `domain` | `Domain` | none: only the host that set it |
+| `max_age` | `Max-Age` and `Expires` | 0: until the browser closes |
+| `http_only` | `HttpOnly` | off |
+| `secure` | `Secure` | off |
+| `same_site` | `SameSite` (`Strict`, `Lax` or `None`) | none: the browser decides |
+
+This sends `Set-Cookie: session=...; Max-Age=3600; Path=/; Expires=...;
+HttpOnly; Secure; SameSite=Lax`. The value is sent `%XX` encoded as UTF-8, as
+Express does, so it can hold spaces, `;` and characters outside ASCII;
+`RPGAPI_getCookie` decodes it. Browsers need `secure` for `SameSite=None`.
+
+`RPGAPI_clearCookie` tells the browser to delete a cookie (`Max-Age=0` and an
+`Expires` in 1970). Pass the same `path` and `domain` it was set with:
+
+```
+RPGAPI_clearCookie(response : 'session');
+```
+A name that is not one a cookie can have (it has to be letters, digits or
+``!#$%&'*+-.^_`|~``), a `path` or `domain` with a `;`, an unknown `same_site`,
+or a cookie longer than the 1,024 characters a response header holds ends your
+procedure with an escape message (CPF9898) that says which; the request is
+answered with a 500, and the message is logged at
+`RPGAPI_LOG_ERROR`.
+
 #### Body
 Setting the body of the response can be done like so.
 
@@ -768,6 +825,9 @@ fails when the app is bound.
 | `RPGAPI_getQueryParam(request : name)` | A query string value |
 | `RPGAPI_getHeader(request : name)` | A request header |
 | `RPGAPI_setHeader(response : name : value)` | Add a response header |
+| `RPGAPI_getCookie(request : name)` | A cookie the client sent |
+| `RPGAPI_setCookie(response : name : value : options?)` | Set a cookie; see Cookies under Responses |
+| `RPGAPI_clearCookie(response : name : options?)` | Delete a cookie |
 | `RPGAPI_setMaxRequestSize(app : bytes)` | The largest body read into memory (1MB) |
 | `RPGAPI_setMaxUploadSize(app : bytes)` | The largest body streamed from the connection (0, off) |
 | `RPGAPI_bodyLength(request)` | The body's size in bytes, -1 while unknown |

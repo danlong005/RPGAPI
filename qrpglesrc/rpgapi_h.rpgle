@@ -48,6 +48,23 @@ dcl-ds RPGAPI_Response qualified template;
    status int(10:0);
 end-ds;
 
+   // options for RPGAPI_setCookie and RPGAPI_clearCookie: declare it with
+   // inz(*likeds) and set what you need
+dcl-ds RPGAPI_CookieOptions qualified template inz;
+      // blank: / (the whole site)
+   path varchar(256);
+      // blank: only the host that set it
+   domain varchar(256);
+      // seconds the cookie lasts; 0: until the browser closes
+   max_age int(10:0);
+      // not readable from JavaScript
+   http_only ind;
+      // only sent over HTTPS
+   secure ind;
+      // Strict, Lax or None (None needs secure); blank: the browser decides
+   same_site varchar(6);
+end-ds;
+
    // a part of a multipart/form-data body, from RPGAPI_nextPart
 dcl-ds RPGAPI_Part qualified template;
    name varchar(256);
@@ -155,6 +172,24 @@ dcl-pr RPGAPI_setHeader;
    response likeds(RPGAPI_Response);
    header_name char(50) const;
    header_value varchar(1024) const;
+end-pr;
+
+dcl-pr RPGAPI_getCookie varchar(4096);
+   request likeds(RPGAPI_Request) const;
+   name varchar(256) const;
+end-pr;
+
+dcl-pr RPGAPI_setCookie;
+   response likeds(RPGAPI_Response);
+   name varchar(256) const;
+   value varchar(1024) const;
+   options likeds(RPGAPI_CookieOptions) const options(*nopass);
+end-pr;
+
+dcl-pr RPGAPI_clearCookie;
+   response likeds(RPGAPI_Response);
+   name varchar(256) const;
+   options likeds(RPGAPI_CookieOptions) const options(*nopass);
 end-pr;
 
 dcl-pr RPGAPI_routeMatches ind;

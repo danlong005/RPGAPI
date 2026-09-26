@@ -50,6 +50,11 @@ dcl-pr iconv_close int(10:0) extproc('iconv_close');
    converter likeds(RPGAPI_iconv_t) value;
 end-pr;
 
+   // seconds since 1970-01-01 UTC
+dcl-pr RPGAPI_time int(10:0) extproc('time');
+   timer pointer value;
+end-pr;
+
    // the request being read. One job handles one connection at a time, so
    // this is kept here rather than in RPGAPI_Request, whose layout apps use
 dcl-s RPGAPI_max_request_size int(10:0) inz(1048576);
@@ -2922,12 +2927,12 @@ end-proc;
    // escape that is not two hex digits, or bytes that are not UTF-8, are left
    // as they were sent
 dcl-proc RPGAPI_urlDecode;
-   dcl-pi *n varchar(1024);
-      value varchar(1024) const;
+   dcl-pi *n varchar(4096);
+      value varchar(4096) const;
       plus_is_space ind const;
    end-pi;
-   dcl-s utf8 varchar(3072);
-   dcl-s decoded varchar(3072);
+   dcl-s utf8 varchar(12288);
+   dcl-s decoded varchar(12288);
    dcl-s index int(10:0);
    dcl-s high int(10:0);
    dcl-s low int(10:0);
@@ -3094,6 +3099,270 @@ dcl-proc RPGAPI_setHeader export;
    endfor;
 end-proc;
 
+
+   // the value of the cookie called name (case matters) from the Cookie
+   // header, unquoted and with its %XX escapes decoded; blank when the
+   // request has none
+dcl-proc RPGAPI_getCookie export;
+   dcl-pi *n varchar(4096);
+      request likeds(RPGAPI_Request) const;
+      name varchar(256) const;
+   end-pi;
+   dcl-s cookies varchar(32000);
+   dcl-s value varchar(4096);
+   dcl-s start int(10:0);
+   dcl-s stop int(10:0);
+   dcl-s equals int(10:0);
+
+      // name=value; name2=value2. The first cookie with the name wins
+   cookies = RPGAPI_getHeader(request : 'Cookie');
+   start = 1;
+   dow start <= %len(cookies);
+      stop = %scan(';' : cookies : start);
+      if stop = 0;
+         stop = %len(cookies) + 1;
+      endif;
+      equals = %scan('=' : cookies : start);
+      if equals > start and equals < stop and
+         %trim(%subst(cookies : start : equals - start)) = %trim(name);
+         value = '';
+         if stop - equals > 1;
+            value = %trim(%subst(cookies : equals + 1 : stop - equals - 1));
+         endif;
+         if %len(value) >= 2 and %subst(value : 1 : 1) = '"' and
+            %subst(value : %len(value) : 1) = '"';
+            value = %subst(value : 2 : %len(value) - 2);
+         endif;
+         return RPGAPI_urlDecode(value : *off);
+      endif;
+      start = stop + 1;
+   enddo;
+   return '';
+end-proc;
+
+
+   // adds a Set-Cookie header. The value is sent %XX encoded (as UTF-8), so
+   // any text can be stored; RPGAPI_getCookie decodes it. Without options
+   // the cookie is for the whole site (Path=/) and lasts until the browser
+   // closes. Ends with an escape message when the name is not one a cookie
+   // can have, or the header is longer than a response header holds
+dcl-proc RPGAPI_setCookie export;
+   dcl-pi *n;
+      response likeds(RPGAPI_Response);
+      name varchar(256) const;
+      value varchar(1024) const;
+      options likeds(RPGAPI_CookieOptions) const options(*nopass);
+   end-pi;
+   dcl-ds settings likeds(RPGAPI_CookieOptions) inz(*likeds);
+
+   if %parms() >= 4;
+      settings = options;
+   endif;
+   RPGAPI_addCookie(response : name : RPGAPI_cookieEncode(value) : settings :
+                    settings.max_age > 0);
+end-proc;
+
+
+   // tells the browser to delete a cookie. The path and domain have to be
+   // the ones it was set with
+dcl-proc RPGAPI_clearCookie export;
+   dcl-pi *n;
+      response likeds(RPGAPI_Response);
+      name varchar(256) const;
+      options likeds(RPGAPI_CookieOptions) const options(*nopass);
+   end-pi;
+   dcl-ds settings likeds(RPGAPI_CookieOptions) inz(*likeds);
+
+   if %parms() >= 3;
+      settings = options;
+   endif;
+   settings.max_age = 0;
+   RPGAPI_addCookie(response : name : '' : settings : *on);
+end-proc;
+
+
+   // the Set-Cookie header for RPGAPI_setCookie and RPGAPI_clearCookie.
+   // With expiring on, Max-Age and Expires are sent (Max-Age=0 deletes it)
+dcl-proc RPGAPI_addCookie;
+   dcl-pi *n;
+      response likeds(RPGAPI_Response);
+      name varchar(256) const;
+      encoded varchar(4096) const;
+      settings likeds(RPGAPI_CookieOptions) const;
+      expiring ind const;
+   end-pi;
+   dcl-s cookie varchar(8192);
+   dcl-s same_site varchar(6);
+   dcl-s expires int(20:0);
+
+   if not RPGAPI_cookieToken(%trim(name));
+      RPGAPI_cookieFailed('Cookie name ''' + %trim(name) + ''' is not one ' +
+                          'a cookie can have: it has to be letters, digits ' +
+                          'or !#$%&''*+-.^_`|~');
+   endif;
+   if not RPGAPI_cookieText(settings.path) or
+      not RPGAPI_cookieText(settings.domain);
+      RPGAPI_cookieFailed('Cookie ''' + %trim(name) + ''' has a path or ' +
+                          'domain with a ; or a character that is not ASCII');
+   endif;
+   select;
+   when %upper(%trim(settings.same_site)) = '';
+   when %upper(%trim(settings.same_site)) = 'STRICT';
+      same_site = 'Strict';
+   when %upper(%trim(settings.same_site)) = 'LAX';
+      same_site = 'Lax';
+   when %upper(%trim(settings.same_site)) = 'NONE';
+      same_site = 'None';
+   other;
+      RPGAPI_cookieFailed('Cookie ''' + %trim(name) + ''' has SameSite ''' +
+                          %trim(settings.same_site) + ''': it has to be ' +
+                          'Strict, Lax or None');
+   endsl;
+
+   cookie = %trim(name) + '=' + encoded;
+   if expiring;
+      cookie += '; Max-Age=' + %char(%max(settings.max_age : 0));
+   endif;
+   if %trim(settings.domain) <> '';
+      cookie += '; Domain=' + %trim(settings.domain);
+   endif;
+   cookie += '; Path=' + RPGAPI_choose(%trim(settings.path) = '' : '/' :
+                                       %trim(settings.path));
+   if expiring;
+         // for browsers that do not know Max-Age
+      if settings.max_age > 0;
+            // an int holds dates up to 2038
+         expires = %min(RPGAPI_time(*null) + %int(settings.max_age) :
+                        2147483647);
+         cookie += '; Expires=' + RPGAPI_httpDate(expires);
+      else;
+         cookie += '; Expires=' + RPGAPI_httpDate(0);
+      endif;
+   endif;
+   if settings.http_only;
+      cookie += '; HttpOnly';
+   endif;
+   if settings.secure;
+      cookie += '; Secure';
+   endif;
+   if same_site <> '';
+      cookie += '; SameSite=' + same_site;
+   endif;
+
+   if %len(cookie) > %len(response.headers(1).value : *max);
+      RPGAPI_cookieFailed('Cookie ''' + %trim(name) + ''' is ' +
+                          %char(%len(cookie)) + ' characters with its ' +
+                          'options; a response header holds ' +
+                          %char(%len(response.headers(1).value : *max)));
+   endif;
+   RPGAPI_setHeader(response : 'Set-Cookie' : cookie);
+end-proc;
+
+
+   // ends RPGAPI_setCookie or RPGAPI_clearCookie, and the procedure that
+   // called it, with an escape message
+dcl-proc RPGAPI_cookieFailed;
+   dcl-pi *n;
+      error_text varchar(512) const;
+   end-pi;
+   dcl-s message_key char(4);
+      // bytes provided 0: a failure to send is signalled as an exception
+   dcl-s error_code char(8) inz(*allx'00');
+
+      // counter 3: past RPGAPI_addCookie and the exported procedure
+   send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                         %len(error_text) : '*ESCAPE' : '*' : 3 :
+                         message_key : error_code );
+end-proc;
+
+
+   // text as UTF-8 %XX escapes, leaving what encodeURIComponent leaves:
+   // letters, digits and - _ . ! ~ * ' ( )
+dcl-proc RPGAPI_cookieEncode;
+   dcl-pi *n varchar(4096);
+      value varchar(1024) const;
+   end-pi;
+   dcl-s utf8 varchar(3072);
+   dcl-s encoded varchar(9216);
+   dcl-s index int(10:0);
+   dcl-ds one_byte;
+      character char(1);
+      number uns(3:0) overlay(character);
+   end-ds;
+      // in ASCII
+   dcl-c UNRESERVED x'2D5F2E217E2A272829';
+   dcl-c HEX_DIGITS x'30313233343536373839414243444546';
+   dcl-c PERCENT x'25';
+
+   if %len(value) = 0;
+      return '';
+   endif;
+   utf8 = RPGAPI_convert(value : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+   for index = 1 to %len(utf8);
+      character = %subst(utf8 : index : 1);
+      if (number >= 48 and number <= 57) or (number >= 65 and number <= 90) or
+         (number >= 97 and number <= 122) or %scan(character : UNRESERVED) > 0;
+         encoded += character;
+      else;
+         encoded += PERCENT +
+                    %subst(HEX_DIGITS : %div(number : 16) + 1 : 1) +
+                    %subst(HEX_DIGITS : %rem(number : 16) + 1 : 1);
+      endif;
+   endfor;
+   return RPGAPI_convert(encoded : RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
+end-proc;
+
+
+   // whether text is a token (RFC 9110), as a cookie name has to be:
+   // printable ASCII without separators
+dcl-proc RPGAPI_cookieToken;
+   dcl-pi *n ind;
+      text varchar(256) const;
+   end-pi;
+   dcl-s utf8 varchar(768);
+   dcl-s index int(10:0);
+   dcl-ds one_byte;
+      character char(1);
+      number uns(3:0) overlay(character);
+   end-ds;
+      // ( ) < > @ , ; : \ " / [ ] ? = { } in ASCII
+   dcl-c SEPARATORS x'28293C3E402C3B3A5C222F5B5D3F3D7B7D';
+
+   if %len(text) = 0;
+      return *off;
+   endif;
+   utf8 = RPGAPI_convert(text : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+   for index = 1 to %len(utf8);
+      character = %subst(utf8 : index : 1);
+      if number <= 32 or number >= 127 or %scan(character : SEPARATORS) > 0;
+         return *off;
+      endif;
+   endfor;
+   return *on;
+end-proc;
+
+
+   // whether text can go in a cookie attribute: printable ASCII, no ;
+dcl-proc RPGAPI_cookieText;
+   dcl-pi *n ind;
+      text varchar(256) const;
+   end-pi;
+   dcl-s utf8 varchar(768);
+   dcl-s index int(10:0);
+   dcl-ds one_byte;
+      character char(1);
+      number uns(3:0) overlay(character);
+   end-ds;
+
+   utf8 = RPGAPI_convert(%trim(text) : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+   for index = 1 to %len(utf8);
+      character = %subst(utf8 : index : 1);
+      if number < 32 or number >= 127 or number = 59;
+         return *off;
+      endif;
+   endfor;
+   return *on;
+end-proc;
 
 
 dcl-proc RPGAPI_routeMatches export;

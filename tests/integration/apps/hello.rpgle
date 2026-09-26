@@ -17,6 +17,10 @@ RPGAPI_get(app : '/moved' : %paddr(extra));
 RPGAPI_get(app : '/q' : %paddr(query));
 RPGAPI_get(app : '/host' : %paddr(host));
 RPGAPI_get(app : '/header' : %paddr(header));
+RPGAPI_get(app : '/cookie/get' : %paddr(cookieGet));
+RPGAPI_get(app : '/cookie/set' : %paddr(cookieSet));
+RPGAPI_get(app : '/cookie/clear' : %paddr(cookieClear));
+RPGAPI_get(app : '/cookie/bad' : %paddr(cookieBad));
 testSettings(app);
 RPGAPI_start(app);
 
@@ -108,6 +112,64 @@ dcl-proc header;
    if %len(value) >= 10;
       response.body += ' tail=' + %subst(value : %len(value) - 9);
    endif;
+   return response;
+end-proc;
+
+   // the cookie named by ?name=, between < and >
+dcl-proc cookieGet;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+
+   response.status = HTTP_OK;
+   response.body = '<' + RPGAPI_getCookie(request :
+                            RPGAPI_getQueryParam(request : 'name')) + '>';
+   return response;
+end-proc;
+
+   // a session cookie with every option, and a plain one
+dcl-proc cookieSet;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-ds options likeds(RPGAPI_CookieOptions) inz(*likeds);
+
+   options.path = '/app';
+   options.max_age = 3600;
+   options.http_only = *on;
+   options.secure = *on;
+   options.same_site = 'Lax';
+   RPGAPI_setCookie(response : 'session' : 'hello world' : options);
+   RPGAPI_setCookie(response : 'plain' : 'Jürgen; x=1');
+   response.status = HTTP_OK;
+   response.body = 'set';
+   return response;
+end-proc;
+
+dcl-proc cookieClear;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-ds options likeds(RPGAPI_CookieOptions) inz(*likeds);
+
+   options.path = '/app';
+   RPGAPI_clearCookie(response : 'session' : options);
+   response.status = HTTP_OK;
+   return response;
+end-proc;
+
+   // a name a cookie cannot have: ends the procedure with an error
+dcl-proc cookieBad;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+
+   RPGAPI_setCookie(response : 'a b' : 'x');
+   response.status = HTTP_OK;
    return response;
 end-proc;
 

@@ -40,6 +40,43 @@ check('short header', got == 'len=3', got)
 got = get('/header?name=X-Missing')[2].decode()
 check('missing header is empty', got == 'len=0', got)
 
+for cookie, name, want in [('a=1; session=abc%20def; quoted="x y"; empty=', 'session', 'abc def'),
+                           ('a=1; session=abc%20def; quoted="x y"; empty=', 'quoted', 'x y'),
+                           ('a=1; session=abc%20def; quoted="x y"; empty=', 'empty', ''),
+                           ('a=1; session=abc%20def; quoted="x y"; empty=', 'missing', ''),
+                           ('ab=2; a=1', 'a', '1'),
+                           ('A=upper; a=lower', 'a', 'lower'),
+                           ('u=J%C3%BCrgen', 'u', 'J\u00fcrgen')]:
+    got = get(f'/cookie/get?name={name}', f'Cookie: {cookie}')[2].decode()
+    check(f'getCookie {name} from "{cookie}"', got == f'<{want}>', got)
+check('getCookie without a Cookie header', get('/cookie/get?name=a')[2] == b'<>')
+
+import email.utils, re
+data = exchange(b'GET /cookie/set HTTP/1.1\r\nHost: x\r\n\r\n')
+lines = [l for l in data.split(CRLF + CRLF)[0].decode().split('\r\n') if l.lower().startswith('set-cookie:')]
+check('two Set-Cookie headers', len(lines) == 2, lines)
+session = lines[0][len('Set-Cookie: '):] if lines else ''
+m = re.fullmatch(r'session=hello%20world; Max-Age=3600; Path=/app; Expires=(.+); HttpOnly; Secure; SameSite=Lax', session)
+check('setCookie with every option', m is not None, session)
+if m:
+    expires = email.utils.parsedate_to_datetime(m.group(1)).timestamp()
+    check('Expires is Max-Age from now', abs(expires - (time.time() + 3600)) < 10, m.group(1))
+check('setCookie with no options: encoded, Path=/', len(lines) > 1 and
+      lines[1] == 'Set-Cookie: plain=J%C3%BCrgen%3B%20x%3D1; Path=/', lines[1:])
+data = exchange(b'GET /cookie/clear HTTP/1.1\r\nHost: x\r\n\r\n')
+check('clearCookie', b'Set-Cookie: session=; Max-Age=0; Path=/app; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n' in data,
+      data.split(CRLF + CRLF)[0])
+check('a cookie name with a space: 500', get('/cookie/bad')[0] == 500)
+
+import subprocess, os
+jar = args.work + '/cookies.txt'
+base = f'http://127.0.0.1:{args.port}'
+subprocess.run(['curl', '-s', '-c', jar, base + '/cookie/set'], capture_output=True)
+got = subprocess.run(['curl', '-s', '-b', jar, base + '/cookie/get?name=plain'], capture_output=True).stdout.decode()
+check('curl cookie jar round trip', got == '<J\u00fcrgen; x=1>', got)
+if os.path.exists(jar):
+    os.remove(jar)
+
 status, headers, _ = get('/moved')
 check('302 with Location', status == 302 and headers.get('location') == '/hello', (status, headers))
 data = exchange(b'GET /conflict HTTP/1.1\r\nHost: x\r\n\r\n')

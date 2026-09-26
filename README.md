@@ -9,6 +9,7 @@ server, and each request is handed to your procedure as a data structure.
   answered for you), and middleware for all routes or a path and everything
   below it
 - CORS for browser front ends on other origins, preflights included
+- Cookies read and set, with `Max-Age`, `HttpOnly`, `Secure` and `SameSite`
 - UTF-8 on the wire, converted to and from the job's CCSID
 - Request bodies up to 1MB in memory by default, and larger uploads streamed
   from the connection, with `Content-Length` or chunked encoding

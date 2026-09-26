@@ -250,6 +250,17 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Cookie helpers, as in Express: `RPGAPI_getCookie(request : name)` (exact
+  name, first one wins, quotes removed, `%XX` decoded),
+  `RPGAPI_setCookie(response : name : value : options?)` with an
+  `RPGAPI_CookieOptions` (`path`, `domain`, `max_age` with `Expires`,
+  `http_only`, `secure`, `same_site`; value `%XX` encoded as UTF-8) and
+  `RPGAPI_clearCookie`. A bad name, path, domain or SameSite, or a cookie over
+  1,024 characters, ends the procedure with CPF9898 (a 500). Verified on
+  PUB400 (2026-09-26, hello suite): values from a Cookie header (encoded,
+  quoted, empty, missing, `ab` vs `a`, case), two Set-Cookie headers with
+  every option and Expires = now + Max-Age, clearCookie, a name with a space
+  gives 500, and a curl cookie jar round trip of `Jürgen; x=1`
 - [x] Worker replacement and graceful shutdown. The main job keeps its
   workers' process IDs and, between its requests, checks them with
   `waitpid(WNOHANG)`, starting a new worker for one that ended (WARN logged,
@@ -344,9 +355,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Cookie helpers: `RPGAPI_getCookie(request : name)` and
-  `RPGAPI_setCookie(response : name : value : options)` (`Path`, `Max-Age`,
-  `HttpOnly`, `Secure`, `SameSite`)
 - [ ] gzip compression of text and JSON responses when the client accepts it
 - [ ] Get the unit tests running: make the iRPGUnit library a Makefile
   variable, try installing iRPGUnit into a library we own on PUB400, and run
