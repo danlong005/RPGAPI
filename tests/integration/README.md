@@ -45,7 +45,7 @@ time, so a queue that runs one job at a time is fine.
 | `bodies` | `bodies` | bodies in memory, chunked, 100-continue and the 413/431/400/501 refusals; 50MB streamed uploads with flat memory, `saveBody`, stalled uploads (408); the request and upload limits |
 | `multipart` | `bodies` | `multipart/form-data` from curl and by hand, in random pieces, with fake delimiters, skipped parts, bad bodies, and a 30MB file |
 | `stream` | `stream` | streamed and chunked responses, HTTP/1.0, `sendFile` with types, 304/206/416 and `If-Range`, and the write timeout |
-| `jobs` | `jobs` | 4 jobs share requests, a stalled client holds only one, all have the library list they were started with, and all end with the main job |
+| `jobs` | `jobs` | 4 jobs share requests, a stalled client holds only one, all have the library list they were started with, a worker ended with `*IMMED` is replaced and serves, a controlled `ENDJOB` lets requests in flight finish (with 4 jobs and with 1) and then ends them all |
 | `logging` | `logging` | the number and content of log messages at each level, credentials not logged, and a bad log level refused |
 | `cors` | `cors` | `HEAD` routed to `GET` without a body (also streamed, and files in `stream`), automatic `OPTIONS` with `Allow`, CORS headers for allowed origins only, preflights answered before middleware, `*` |
 | `keepalive` | `hello` | two requests on one connection, pipelining, the request limit, the idle timeout, an idle connection giving way to a new client, `Connection: close` and HTTP/1.0, 404 and HEAD kept open, keep-alive off |

@@ -114,7 +114,7 @@ stop_app() {
 }
 
 client() {
-  "$PYTHON" "$TESTS/clients/$1.py" --port "$PORT" --work "$WORK" --timeout "$TIMEOUT" "$2" > "$WORK/client.out" 2>&1
+  RPGAPI_TEST_JOB="$JOB" "$PYTHON" "$TESTS/clients/$1.py" --port "$PORT" --work "$WORK" --timeout "$TIMEOUT" "$2" > "$WORK/client.out" 2>&1
   status=$?
   cat "$WORK/client.out"
   PASSED=$((PASSED + $(grep -c '^PASS ' "$WORK/client.out")))
@@ -201,7 +201,8 @@ for suite_name in $SUITES; do
     stream)    compile stream && suite stream ";;;$T;" stream ;;
     jobs)      compile jobs && {
                  suite jobs ";;;;4" jobs "$LIB QGPL QTEMP" "$LIB QGPL QTEMP"
-                 [ "$(running JOBS)" = "0" ] && pass "jobs: all 4 jobs end with the main job" || fail "jobs: jobs left running"; } ;;
+                 [ "$(running JOBS)" = "0" ] && pass "jobs: all 4 jobs end with the main job" || fail "jobs: jobs left running"
+                 suite jobs ";;;;1" jobs single; } ;;
     logging)   compile logging && {
                  for level in 0 1 2 3 4; do suite logging "$level;1000;;$T;" logging $level; done
                  fails_to_start logging "9;1000;;$T;" "" "is not a level"; } ;;

@@ -157,7 +157,23 @@ one of the jobs that is free. Keep in mind that:
   and whatever it does before `RPGAPI_start` it does in every job
 - the jobs have the same name and library list as the one you started
 - to stop the server, end the job you started; the others end within a few
-  seconds. A job that ends on its own is not replaced
+  seconds of it, each once it has finished the request it is on
+- a job that ends while the server runs (it failed, or someone ended it) is
+  replaced by the job you started, once that job is between requests, and
+  logged at WARN. At most 5 are replaced a minute, so a job that keeps failing
+  does not keep the server busy starting it
+
+#### Stopping the server
+`ENDJOB` ends a job controlled by default (`OPTION(*CNTRLD) DELAY(30)`), and
+so does `ENDSBS *CNTRLD`. RPGAPI then takes no new requests and lets the ones
+in progress finish before the job ends, within the delay. An idle kept-open
+connection is closed. `ENDJOB OPTION(*IMMED)` stops at once, cutting off
+requests in progress.
+
+```
+ENDJOB JOB(MYAPP)                        // finish the requests in progress
+ENDJOB JOB(MYAPP) OPTION(*IMMED)         // stop now
+```
 
 #### HTTPS
 Call one of these before `RPGAPI_start` to serve HTTPS instead of HTTP:

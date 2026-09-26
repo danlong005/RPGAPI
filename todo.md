@@ -250,6 +250,18 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Worker replacement and graceful shutdown. The main job keeps its
+  workers' process IDs and, between its requests, checks them with
+  `waitpid(WNOHANG)`, starting a new worker for one that ended (WARN logged,
+  at most 5 a minute, then an ERROR and a pause). Every job checks `%shtdn`
+  between requests and in keep-alive waits (1s slices): with `ENDJOB *CNTRLD`
+  (the default) or `ENDSBS *CNTRLD` it takes no new requests, finishes the one
+  in progress and ends; workers end once the main job has. Verified on PUB400
+  (2026-09-26, jobs suite): a worker ended with *IMMED is replaced and the new
+  job serves; 4 in-flight 3s requests all complete after a controlled end of
+  the main job, then all jobs end; the same with 1 job. Limit: the main job
+  replaces workers only between its own requests, so while it is busy with a
+  long request, replacement waits
 - [x] Keep-alive, on by default: connections stay open 5s for the next request,
   up to 100 (`RPGAPI_setKeepAlive`, `keepalive_` app fields; 0 turns it off).
   Closed after `Connection: close` / HTTP/1.0 without keep-alive, refusals,
@@ -332,8 +344,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Replace worker jobs that end unexpectedly, and shut down gracefully:
-  with `ENDJOB *CNTRLD` finish the requests in progress before ending
 - [ ] Cookie helpers: `RPGAPI_getCookie(request : name)` and
   `RPGAPI_setCookie(response : name : value : options)` (`Path`, `Max-Age`,
   `HttpOnly`, `Secure`, `SameSite`)

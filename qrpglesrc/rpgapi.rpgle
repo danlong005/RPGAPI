@@ -171,8 +171,28 @@ end-ds;
 
    // a worker job finds the listening socket it inherited in this variable
 dcl-c RPGAPI_WORKER_VAR 'RPGAPI_LISTEN_FD';
-   // how often, in milliseconds, a worker checks that the main job still runs
-dcl-c RPGAPI_WORKER_CHECK_MS 5000;
+   // how often, in milliseconds, a job between requests checks on the other
+   // jobs and on being ended: whether the main job still runs (a worker),
+   // whether the workers do (the main job), and whether its job is being
+   // ended with *CNTRLD (%shtdn)
+dcl-c RPGAPI_WORKER_CHECK_MS 1000;
+   // the main job's worker jobs, by process ID: 0 is a worker that ended and
+   // is still to be replaced. Replacements are limited to
+   // RPGAPI_MAX_RESTARTS a minute, so a worker that keeps failing does not
+   // keep the main job busy starting it
+dcl-s RPGAPI_worker_pids int(10:0) dim(64);
+dcl-s RPGAPI_worker_total int(10:0) inz(0);
+dcl-s RPGAPI_restart_window timestamp;
+dcl-s RPGAPI_restarts int(10:0) inz(0);
+dcl-s RPGAPI_restarts_held ind inz(*off);
+dcl-c RPGAPI_MAX_RESTARTS 5;
+dcl-c WNOHANG 1;
+
+dcl-pr waitpid int(10:0) extproc('waitpid');
+   process_id int(10:0) value;
+   status int(10:0);
+   options int(10:0) value;
+end-pr;
 
 dcl-ds RPGAPI_inheritance_t qualified template inz;
    flags uns(10:0);
@@ -548,6 +568,15 @@ dcl-proc RPGAPI_acceptConnection;
       if main_job_pid > 0 and kill(main_job_pid : 0) < 0;
          return *off;
       endif;
+         // ENDJOB *CNTRLD (the default), ENDSBS *CNTRLD: no new requests
+      if %shtdn;
+         RPGAPI_log(RPGAPI_LOG_INFO : 'the job is being ended: no more ' +
+                    'requests are taken');
+         return *off;
+      endif;
+      if main_job_pid = 0;
+         RPGAPI_checkWorkers(config);
+      endif;
 
       poll_fds(1).fd = config.socket_descriptor;
       poll_fds(1).events = POLLIN;
@@ -616,6 +645,7 @@ dcl-proc RPGAPI_waitForNextRequest;
    dcl-s until timestamp;
    dcl-s wait_ms int(20:0);
    dcl-s peeked char(1);
+   dcl-s ready int(10:0);
 
       // pipelined: the client sent it along with the one before
    if RPGAPI_input_start <= RPGAPI_input_end;
@@ -625,17 +655,22 @@ dcl-proc RPGAPI_waitForNextRequest;
    until = %timestamp() + %seconds(RPGAPI_keepalive_timeout);
    dow *on;
       wait_ms = %div(%diff(until : %timestamp() : *mseconds) : 1000);
-      if wait_ms <= 0;
+      if wait_ms <= 0 or %shtdn;
          leave;
       endif;
+         // in slices, to notice the job being ended
+      wait_ms = %min(wait_ms : RPGAPI_WORKER_CHECK_MS);
       poll_fds(1).fd = RPGAPI_connection;
       poll_fds(1).events = POLLIN;
       poll_fds(1).revents = 0;
       poll_fds(2).fd = config.socket_descriptor;
       poll_fds(2).events = POLLIN;
       poll_fds(2).revents = 0;
-      if poll(poll_fds : 2 : wait_ms) <= 0;
+      ready = poll(poll_fds : 2 : wait_ms);
+      if ready < 0;
          leave;
+      elseif ready = 0;
+         iter;
       endif;
       if poll_fds(1).revents <> 0;
             // readable is also what a close looks like: peek, so that a client
@@ -670,6 +705,40 @@ dcl-proc RPGAPI_startWorkers;
       config likeds(RPGAPI_App);
       count int(10:0) const;
    end-pi;
+   dcl-s index int(10:0);
+   dcl-s pid int(10:0);
+   dcl-s error_text varchar(512);
+   dcl-s message_key char(4);
+      // bytes provided 0: a failure to send is signalled as an exception
+   dcl-s error_code char(8) inz(*allx'00');
+
+   RPGAPI_log(RPGAPI_LOG_DEBUG : 'starting ' + %char(count) +
+              ' worker job(s) running ' + RPGAPI_jobProgram());
+   RPGAPI_worker_total = %min(count : %elem(RPGAPI_worker_pids));
+   for index = 1 to RPGAPI_worker_total;
+      pid = RPGAPI_spawnWorker(config : error_text);
+      if pid < 0;
+         error_text = 'Starting worker job ' + %char(index) + ' of ' +
+                      %char(count) + ' failed: ' + error_text;
+         RPGAPI_log(RPGAPI_LOG_ERROR : error_text);
+         send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                               %len(error_text) : '*ESCAPE' : '*' : 1 :
+                               message_key : error_code );
+      endif;
+      RPGAPI_worker_pids(index) = pid;
+   endfor;
+end-proc;
+
+
+   // starts a worker job running the program this job was started with; it
+   // inherits the listening socket as descriptor 0 and finds it through
+   // RPGAPI_WORKER_VAR. Returns its process ID, or -1 with the reason in
+   // problem
+dcl-proc RPGAPI_spawnWorker;
+   dcl-pi *n int(10:0);
+      config likeds(RPGAPI_App);
+      problem varchar(512);
+   end-pi;
    dcl-s path varchar(64);
    dcl-s path_z char(65);
    dcl-s variable_z char(32);
@@ -677,12 +746,8 @@ dcl-proc RPGAPI_startWorkers;
    dcl-ds inherit likeds(RPGAPI_inheritance_t) inz(*likeds);
    dcl-s argv pointer dim(2);
    dcl-s envp pointer dim(2);
-   dcl-s index int(10:0);
+   dcl-s pid int(10:0);
    dcl-s error_number int(10:0) based(error_number_ptr);
-   dcl-s error_text varchar(512);
-   dcl-s message_key char(4);
-      // bytes provided 0: a failure to send is signalled as an exception
-   dcl-s error_code char(8) inz(*allx'00');
 
    path = RPGAPI_jobProgram();
    path_z = path + x'00';
@@ -694,20 +759,70 @@ dcl-proc RPGAPI_startWorkers;
    envp(1) = %addr(variable_z);
    envp(2) = *null;
 
-   RPGAPI_log(RPGAPI_LOG_DEBUG : 'starting ' + %char(count) +
-              ' worker job(s) running ' + path);
-   for index = 1 to count;
-      if spawn(%addr(path_z) : 1 : fd_map : inherit : argv : envp) < 0;
-         error_number_ptr = get_errno();
-         error_text = 'Starting worker job ' + %char(index) + ' of ' +
-                      %char(count) + ' (' + path + ') failed: ' +
-                      %str(strerror(error_number)) +
-                      ' (errno ' + %char(error_number) + ')';
-         RPGAPI_log(RPGAPI_LOG_ERROR : error_text);
-         send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
-                               %len(error_text) : '*ESCAPE' : '*' : 1 :
-                               message_key : error_code );
+   pid = spawn(%addr(path_z) : 1 : fd_map : inherit : argv : envp);
+   if pid < 0;
+      error_number_ptr = get_errno();
+      problem = path + ': ' + %str(strerror(error_number)) +
+                ' (errno ' + %char(error_number) + ')';
+   endif;
+   return pid;
+end-proc;
+
+
+   // in the main job, between requests: notices worker jobs that have ended
+   // and starts new ones in their place, unless the main job is being ended
+dcl-proc RPGAPI_checkWorkers;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+   end-pi;
+   dcl-s index int(10:0);
+   dcl-s status int(10:0);
+   dcl-s pid int(10:0);
+   dcl-s problem varchar(512);
+
+   for index = 1 to RPGAPI_worker_total;
+      if RPGAPI_worker_pids(index) > 0 and
+         waitpid(RPGAPI_worker_pids(index) : status : WNOHANG) =
+         RPGAPI_worker_pids(index);
+         RPGAPI_log(RPGAPI_LOG_WARN : 'worker job ' + %char(index) +
+                    ' (process ' + %char(RPGAPI_worker_pids(index)) +
+                    ') ended, status ' + %char(status));
+         RPGAPI_worker_pids(index) = 0;
       endif;
+   endfor;
+   if %shtdn;
+      return;
+   endif;
+
+   for index = 1 to RPGAPI_worker_total;
+      if RPGAPI_worker_pids(index) <> 0;
+         iter;
+      endif;
+         // at most RPGAPI_MAX_RESTARTS a minute
+      if %diff(%timestamp() : RPGAPI_restart_window : *seconds) >= 60;
+         RPGAPI_restart_window = %timestamp();
+         RPGAPI_restarts = 0;
+         RPGAPI_restarts_held = *off;
+      endif;
+      if RPGAPI_restarts >= RPGAPI_MAX_RESTARTS;
+         if not RPGAPI_restarts_held;
+            RPGAPI_log(RPGAPI_LOG_ERROR : 'worker jobs keep ending: ' +
+                       %char(RPGAPI_MAX_RESTARTS) + ' started in the last ' +
+                       'minute; no more until the minute is over');
+            RPGAPI_restarts_held = *on;
+         endif;
+         return;
+      endif;
+      RPGAPI_restarts += 1;
+      pid = RPGAPI_spawnWorker(config : problem);
+      if pid < 0;
+         RPGAPI_log(RPGAPI_LOG_ERROR : 'starting a worker job in place of ' +
+                    'one that ended failed: ' + problem);
+         return;
+      endif;
+      RPGAPI_worker_pids(index) = pid;
+      RPGAPI_log(RPGAPI_LOG_WARN : 'started worker job ' + %char(index) +
+                 ' again (process ' + %char(pid) + ')');
    endfor;
 end-proc;
 

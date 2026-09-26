@@ -16,8 +16,9 @@ server, and each request is handed to your procedure as a data structure.
   IFS without holding them in memory
 - Streamed responses of any size, and IFS files with caching headers and
   range requests
-- Several jobs serving one port, keep-alive connections, and timeouts so one
-  slow client cannot hold a job
+- Several jobs serving one port, replaced when one ends, keep-alive
+  connections, timeouts so one slow client cannot hold a job, and a controlled
+  `ENDJOB` that lets requests in progress finish
 - HTTPS, with a certificate from Digital Certificate Manager (DCM)
 - Logging to the job log at four levels, down to every request's headers and
   routing, to find out what happened when a problem is reported
@@ -112,7 +113,8 @@ The library holding the binding directory has to be in the library list while
 you compile, or name it in the program: `ctl-opt bnddir('MYLIB/RPGAPI')`.
 
 `RPGAPI_start` serves requests until the job ends, so run the app in its own
-job and end that job to stop it:
+job and end that job to stop it; a plain `ENDJOB` lets the requests in
+progress finish:
 ```
 SBMJOB CMD(CALL PGM(MYLIB/MYAPP)) JOB(MYAPP)
 ENDJOB JOB(MYAPP)
