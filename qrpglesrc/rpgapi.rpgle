@@ -73,6 +73,9 @@ dcl-s RPGAPI_cors_allow_origin varchar(1000);
    // open, and whether it is open, waiting for the next request
 dcl-s RPGAPI_keepalive_timeout int(10:0) inz(5);
 dcl-s RPGAPI_keepalive_requests int(10:0) inz(100);
+   // ms after a response during which a kept-open connection is not given up
+   // for a new client: about a round trip, for its next request to arrive
+dcl-c RPGAPI_REUSE_GRACE_MS 250;
 dcl-s RPGAPI_connection_requests int(10:0) inz(0);
 dcl-s RPGAPI_keep_connection ind inz(*off);
 dcl-s RPGAPI_connection_open ind inz(*off);
@@ -661,13 +664,16 @@ dcl-proc RPGAPI_waitForNextRequest;
    dcl-s wait_ms int(20:0);
    dcl-s peeked char(1);
    dcl-s ready int(10:0);
+   dcl-s answered timestamp;
+   dcl-s grace_ms int(20:0);
 
       // pipelined: the client sent it along with the one before
    if RPGAPI_input_start <= RPGAPI_input_end;
       return *on;
    endif;
 
-   until = %timestamp() + %seconds(RPGAPI_keepalive_timeout);
+   answered = %timestamp();
+   until = answered + %seconds(RPGAPI_keepalive_timeout);
    dow *on;
       wait_ms = %div(%diff(until : %timestamp() : *mseconds) : 1000);
       if wait_ms <= 0 or %shtdn;
@@ -687,6 +693,23 @@ dcl-proc RPGAPI_waitForNextRequest;
       elseif ready = 0;
          iter;
       endif;
+         // a new client is waiting. This one may be sending its next request
+         // right now: closing would cut that request off (a reset). Only a
+         // connection quiet for RPGAPI_REUSE_GRACE_MS since its response is
+         // given up for the new one
+      if poll_fds(1).revents = 0 and poll_fds(2).revents <> 0;
+         grace_ms = RPGAPI_REUSE_GRACE_MS -
+                    %div(%diff(%timestamp() : answered : *mseconds) : 1000);
+         ready = 0;
+         if grace_ms > 0;
+            ready = poll(poll_fds : 1 : grace_ms);
+         endif;
+         if ready <= 0;
+            RPGAPI_log(RPGAPI_LOG_DEBUG : 'closing an idle kept-open ' +
+                       'connection for a new one');
+            leave;
+         endif;
+      endif;
       if poll_fds(1).revents <> 0;
             // readable is also what a close looks like: peek, so that a client
             // closing it is not taken for a request (not possible with TLS)
@@ -696,11 +719,6 @@ dcl-proc RPGAPI_waitForNextRequest;
          endif;
          RPGAPI_log(RPGAPI_LOG_DEBUG : 'the client closed its kept-open ' +
                     'connection');
-         leave;
-      endif;
-      if poll_fds(2).revents <> 0;
-         RPGAPI_log(RPGAPI_LOG_DEBUG : 'closing an idle kept-open connection ' +
-                    'for a new one');
          leave;
       endif;
    enddo;

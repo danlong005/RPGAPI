@@ -78,6 +78,28 @@ check('a new client is served at once, not after the idle one', status == 200 an
 check('the idle connection was closed for it', closed(idle, 1))
 idle.close()
 
+# several clients reusing their connections, one job: a new connection
+# waiting must not cost a client the request it is sending on its kept one
+import http.client
+errors, served = [], []
+def reuser():
+    conn = http.client.HTTPConnection('127.0.0.1', args.port, timeout=15)
+    for _ in range(24):
+        try:
+            conn.request('GET', '/hello')
+            response = conn.getresponse()
+            if response.read() == b'hello world':
+                served.append(1)
+            else:
+                errors.append(response.status)
+        except Exception as e:
+            errors.append(repr(e)[:60])
+            conn.close()
+    conn.close()
+in_threads(*[reuser] * 4)
+check(f'4 clients reusing connections: all 96 requests answered ({len(errors)} failed)',
+      len(served) == 96 and not errors, sorted(set(map(str, errors)))[:3])
+
 s, p = open_connection()
 status, headers, body = ask(s, p, b'GET /header?name=X-A HTTP/1.1\r\nHost: x\r\nX-A: one\r\n\r\n')
 status2, headers2, body2 = ask(s, p, b'GET /header?name=X-A HTTP/1.1\r\nHost: x\r\n\r\n')

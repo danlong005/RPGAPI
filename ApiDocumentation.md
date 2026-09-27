@@ -211,9 +211,13 @@ Responses say `Connection: keep-alive` and `Keep-Alive: timeout=5`.
   `RPGAPI_setKeepAlive(app : 15 : 1000)` changes that, and
   `RPGAPI_setKeepAlive(app : 0)` turns keep-alive off.
 - Each job serves one connection at a time, so a job waiting on an idle kept
-  connection closes it as soon as a new connection is waiting: keep-alive
-  never keeps other clients waiting. Clients open a new connection when they
-  find theirs closed.
+  connection closes it when a new connection is waiting: keep-alive does not
+  keep other clients waiting. A connection is only closed like this once it
+  has been quiet for 250ms after its response, so a client sending its next
+  request right away is answered, not cut off. A new client therefore waits
+  at most 250ms for an idle connection's job, and a busy connection keeps its
+  job until its request limit. Clients open a new connection when they find
+  theirs closed.
 - The connection is closed instead after a request the client sent with
   `Connection: close` (or HTTP/1.0 without `Connection: keep-alive`), a
   refused request (413, 431, ...), a request body your procedure did not read

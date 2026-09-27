@@ -250,6 +250,16 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Several clients reusing their connections on one job had about half of
+  their requests reset: a job waiting on a kept-open connection closed it as
+  soon as a new connection was waiting, usually just as its client sent the
+  next request. Found with a light load test (4 clients, kept-open
+  connections, against a one-job app: 199 of 400 reset). A kept-open
+  connection is now given up for a new one only once it has been quiet for
+  250ms after its response (`RPGAPI_REUSE_GRACE_MS`). Verified on PUB400
+  (2026-09-27, keepalive suite): 4 clients x 24 requests on kept connections,
+  47 of 96 reset before, none after; a new client is still served at once
+  after an idle connection
 - [x] Responses with a body took about 200ms longer than they should: the head
   and the body were two writes, and with Nagle's algorithm TCP held the body
   back until the client acknowledged the head, which clients delay by up to
