@@ -352,6 +352,30 @@ dcl-pr send_program_message extpgm('QMHSNDPM');
    error_code char(8);
 end-pr;
 
+   // an API error code that returns the message instead of signalling it
+dcl-ds RPGAPI_error_code_t qualified template inz;
+   bytes_provided int(10:0) inz(256);
+   bytes_available int(10:0) inz(0);
+   message_id char(7);
+   reserved char(1);
+   message_data char(240);
+end-ds;
+
+   // a profile handle for a user and password, and releasing it
+dcl-pr get_profile_handle extpgm('QSYGETPH');
+   user char(10) const;
+   password char(512) const options(*varsize);
+   handle char(12);
+   error_code likeds(RPGAPI_error_code_t);
+   password_length int(10:0) const;
+   password_ccsid int(10:0) const;
+end-pr;
+
+dcl-pr release_profile_handle extpgm('QSYRLSPH');
+   handle char(12) const;
+   error_code likeds(RPGAPI_error_code_t);
+end-pr;
+
 dcl-proc RPGAPI_start export;
    dcl-pi *n;
       config likeds(RPGAPI_App);
@@ -3361,6 +3385,183 @@ dcl-proc RPGAPI_setHeader export;
          index = %elem(response.headers) + 1;
       endif;
    endfor;
+end-proc;
+
+
+   // whether password is the password of the IBM i user profile user. Only
+   // checks it: the job does not run as the user. message_id tells why not
+   // (CPF22E2 wrong password, which is also the answer for a user that does
+   // not exist, CPF22E3 disabled, ...), for the app's log. User names starting with * and the special values
+   // *NOPWD, *NOPWDCHK and *NOPWDSTS, which would get a handle without a
+   // password, are refused before the system is asked. Every wrong password
+   // counts toward the system's limit on sign-on attempts (QMAXSIGN)
+dcl-proc RPGAPI_checkUserProfile export;
+   dcl-pi *n ind;
+      user varchar(256) const;
+      password varchar(256) const;
+      message_id char(7) options(*nopass);
+   end-pi;
+   dcl-s profile varchar(256);
+   dcl-s special varchar(256);
+   dcl-s handle char(12);
+   dcl-ds error likeds(RPGAPI_error_code_t) inz(*likeds);
+   dcl-ds release_error likeds(RPGAPI_error_code_t) inz(*likeds);
+
+   if %parms() >= 3;
+      message_id = '';
+   endif;
+   profile = %upper(%trim(user));
+   special = %upper(%trim(password));
+   if profile = '' or %len(profile) > 10 or %subst(profile : 1 : 1) = '*' or
+      %scan(' ' : profile) > 0 or password = '' or
+      special = '*NOPWD' or special = '*NOPWDCHK' or special = '*NOPWDSTS';
+      RPGAPI_log(RPGAPI_LOG_WARN : 'user profile check refused for ''' +
+                 %trim(user) + ''': not a user name and password');
+      return *off;
+   endif;
+
+      // the password as it is, in the job's CCSID (0)
+   get_profile_handle(profile : password : handle : error :
+                      %len(password) : 0);
+   if error.bytes_available > 0;
+      if %parms() >= 3;
+         message_id = error.message_id;
+      endif;
+      RPGAPI_log(RPGAPI_LOG_WARN : 'user profile check failed for ' +
+                 profile + ': ' + error.message_id);
+      return *off;
+   endif;
+   release_profile_handle(handle : release_error);
+   return *on;
+end-proc;
+
+
+   // the token of an Authorization: Bearer <token> header (an API key, a
+   // JWT, an OAuth access token); blank when there is none
+dcl-proc RPGAPI_getBearerToken export;
+   dcl-pi *n varchar(16000);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-s value varchar(32000);
+
+   value = RPGAPI_getHeader(request : 'Authorization');
+   if not RPGAPI_startsWith(value : 'Bearer ');
+      return '';
+   endif;
+   return %trim(%subst(value : 8));
+end-proc;
+
+
+   // the user and password of an Authorization: Basic header (curl -u, a
+   // browser's login prompt): *on when there is one. They are split at the
+   // first colon, so the password may contain colons, and read as UTF-8
+dcl-proc RPGAPI_getBasicAuth export;
+   dcl-pi *n ind;
+      request likeds(RPGAPI_Request) const;
+      user varchar(256);
+      password varchar(256);
+   end-pi;
+   dcl-s value varchar(32000);
+   dcl-s decoded varchar(8192);
+   dcl-s text varchar(8192);
+   dcl-s colon int(10:0);
+   dcl-s valid ind;
+
+   user = '';
+   password = '';
+   value = RPGAPI_getHeader(request : 'Authorization');
+   if not RPGAPI_startsWith(value : 'Basic ') or %len(value) > 12000;
+      return *off;
+   endif;
+   monitor;
+      decoded = RPGAPI_base64Decode(RPGAPI_convert(%trim(%subst(value : 7)) :
+                                                   RPGAPI_JOB_CCSID :
+                                                   RPGAPI_UTF8) : valid);
+      if not valid or decoded = '';
+         return *off;
+      endif;
+      text = RPGAPI_convert(decoded : RPGAPI_UTF8 : RPGAPI_JOB_CCSID);
+   on-error;
+         // bytes that are not UTF-8
+      return *off;
+   endmon;
+   colon = %scan(':' : text);
+   if colon = 0;
+      return *off;
+   endif;
+   if colon > 1;
+      user = %subst(text : 1 : %min(colon - 1 : 256));
+   endif;
+   if colon < %len(text);
+      password = %subst(text : colon + 1 : %min(%len(text) - colon : 256));
+   endif;
+   return *on;
+end-proc;
+
+
+   // the bytes of base64 text (in ASCII); valid is *off for text that is not
+   // base64. The URL-safe - and _ are taken too, and padding is optional
+dcl-proc RPGAPI_base64Decode;
+   dcl-pi *n varchar(8192);
+      text varchar(12000) const;
+      valid ind;
+   end-pi;
+   dcl-s decoded varchar(8192);
+   dcl-s index int(10:0);
+   dcl-s value int(10:0);
+   dcl-s buffer int(10:0) inz(0);
+   dcl-s bits int(10:0) inz(0);
+   dcl-s divisor int(10:0);
+   dcl-s count int(10:0);
+   dcl-s characters int(10:0) inz(0);
+   dcl-ds one_byte;
+      character char(1);
+      number uns(3:0) overlay(character);
+   end-ds;
+
+   valid = *off;
+   for index = 1 to %len(text);
+      character = %subst(text : index : 1);
+      select;
+      when number >= 65 and number <= 90;
+         value = number - 65;
+      when number >= 97 and number <= 122;
+         value = number - 71;
+      when number >= 48 and number <= 57;
+         value = number + 4;
+      when number = 43 or number = 45;
+         value = 62;
+      when number = 47 or number = 95;
+         value = 63;
+      when number = 61;
+            // = padding ends the data
+         leave;
+      other;
+         return '';
+      endsl;
+      characters += 1;
+      buffer = buffer * 64 + value;
+      bits += 6;
+      if bits >= 8;
+         bits -= 8;
+         divisor = 1;
+         for count = 1 to bits;
+            divisor *= 2;
+         endfor;
+         number = %div(buffer : divisor);
+         buffer = %rem(buffer : divisor);
+         if %len(decoded) = %len(decoded : *max);
+            return '';
+         endif;
+         decoded += character;
+      endif;
+   endfor;
+      // a single character left over cannot make a byte
+   if %rem(characters : 4) = 1;
+      return '';
+   endif;
+   valid = *on;
+   return decoded;
 end-proc;
 
 

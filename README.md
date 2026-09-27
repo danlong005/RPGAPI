@@ -18,6 +18,8 @@ server, and each request is handed to your procedure as a data structure.
 - Request bodies up to 1MB in memory by default, and larger uploads streamed
   from the connection, with `Content-Length` or chunked encoding
 - HTML form bodies (`application/x-www-form-urlencoded`) read field by field
+- Basic and Bearer credentials read from the `Authorization` header, and users
+  and passwords checked against IBM i user profiles
 - Forms with files (`multipart/form-data`), read part by part and saved to the
   IFS without holding them in memory
 - Streamed responses of any size, and IFS files with caching headers and

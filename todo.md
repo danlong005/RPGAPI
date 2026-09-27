@@ -250,6 +250,25 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] `RPGAPI_checkUserProfile(user : password : message_id?)`: the password
+  of an IBM i user profile, checked with QSYGETPH and the handle released
+  with QSYRLSPH at once. User names starting with `*` or over 10
+  characters, an empty password and `*NOPWD`, `*NOPWDCHK`, `*NOPWDSTS` are
+  refused before the system is asked. The docs warn that every wrong
+  password counts toward QMAXSIGN. Verified on PUB400 (2026-09-27, hello
+  suite): an unknown user gives CPF22E2 (as a wrong password does, so a
+  client cannot tell), and the special values and bad names are refused
+  without asking; never a wrong password for a real profile. The right
+  password is only tested with RPGAPI_TEST_USER and RPGAPI_TEST_PASSWORD set
+  (not done: no test profile on PUB400)
+- [x] Authentication helpers: `RPGAPI_getBearerToken(request)` and
+  `RPGAPI_getBasicAuth(request : user : password)` (base64 decoded in RPG,
+  UTF-8, split at the first colon, scheme in any case). Verified on PUB400
+  (2026-09-27, hello suite): user:pass, a:b:c, an empty password,
+  Jürgen/Grüße, lower-case "basic", bearer tokens (also 5,000 characters),
+  curl -u, and no credentials for no header, bad base64, no colon, empty
+  values, Digest and "Bearerabc"; the logging suite shows Authorization
+  still not logged
 - [x] Working with JSON, in the docs rather than helpers in RPGAPI: a section
   in ApiDocumentation.md on SQL's JSON functions (`JSON_OBJECT`,
   `JSON_ARRAYAGG`, `JSON_TABLE`, `JSON_VALUE`, `IS JSON`), `DATA-INTO` /
@@ -446,9 +465,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Authentication helpers: `RPGAPI_getBasicAuth(request : user : password)`,
-  `RPGAPI_getBearerToken(request)`, and optionally checking a user and
-  password against the IBM i user profile (QSYGETPH)
 - [ ] Route groups: register routes under a prefix such as `/api/v1` once
 - [ ] Serve a directory of static files: `RPGAPI_serveStatic(app : '/web' :
   '/www/myapp')` on top of `RPGAPI_sendFile`

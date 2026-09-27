@@ -107,6 +107,49 @@ out = subprocess.run(['curl', '-s', '--data-urlencode', 'comment=Gr\u00fc\u00dfe
                       f'http://127.0.0.1:{args.port}/form?field=comment'], capture_output=True).stdout.decode()
 check('curl --data-urlencode round trip', out == '<Gr\u00fc\u00dfe & more; 50% off>', out)
 
+import base64
+def auth(value=None):
+    status, headers, body = get('/auth', *([f'Authorization: {value}'] if value is not None else []))
+    return status, body.decode(), headers
+def basic(text):
+    return 'Basic ' + base64.b64encode(text.encode()).decode()
+for header, want in [(basic('user:pass'), 'basic:user|pass'),
+                     (basic('a:b:c'), 'basic:a|b:c'),
+                     (basic('user:'), 'basic:user|'),
+                     (basic('J\u00fcrgen:Gr\u00fc\u00dfe'), 'basic:J\u00fcrgen|Gr\u00fc\u00dfe'),
+                     ('basic ' + base64.b64encode(b'lower:case').decode(), 'basic:lower|case'),
+                     ('Bearer abc.def-ghi_jkl', 'bearer:abc.def-ghi_jkl'),
+                     ('bearer   spaced', 'bearer:spaced')]:
+    status, body, _ = auth(header)
+    check(f'Authorization "{header[:30]}" gives {want}', (status, body) == (200, want), (status, body))
+for header in [None, 'Basic !!!notbase64', basic('nocolon'), 'Basic ', 'Bearer ', 'Digest x=1', 'Bearerabc']:
+    status, body, headers = auth(header)
+    check(f'Authorization {header!r}: nothing, 401 with a challenge',
+          (status, body) == (401, 'none') and headers.get('www-authenticate') == 'Basic realm="test"', (status, body))
+token = 'e' * 5000
+check('a 5,000-character bearer token', auth('Bearer ' + token)[1] == 'bearer:' + token)
+import subprocess
+out = subprocess.run(['curl', '-s', '-u', 'curl user:p@ss:w0rd', f'http://127.0.0.1:{args.port}/auth'],
+                     capture_output=True).stdout.decode()
+check('curl -u', out == 'basic:curl user|p@ss:w0rd', out)
+
+    # IBM i user profiles. Never a wrong password for a real profile: it
+    # counts toward QMAXSIGN and could disable it
+import os
+def profile(user, password):
+    return get('/profile', 'Authorization: ' + basic(f'{user}:{password}'))[2].decode()
+got = profile('NOSUCHU1', 'whatever')
+check('a user that does not exist: no, CPF22E2 as for a wrong password', got == 'no:CPF22E2', got)
+for user, password in [('LONGDM', '*NOPWD'), ('longdm', ' *nopwdchk '), ('LONGDM', '*NOPWDSTS'),
+                       ('*CURRENT', 'x'), ('LONGDM', ''), ('TOOLONGNAME1', 'x'), ('A B', 'x')]:
+    got = profile(user, password)
+    check(f'refused before asking the system: {user!r} / {password!r}', got == 'no:', got)
+if os.environ.get('RPGAPI_TEST_USER') and os.environ.get('RPGAPI_TEST_PASSWORD'):
+    got = profile(os.environ['RPGAPI_TEST_USER'], os.environ['RPGAPI_TEST_PASSWORD'])
+    check('the right password for RPGAPI_TEST_USER', got == 'ok', got)
+else:
+    print('SKIP the right password: set RPGAPI_TEST_USER and RPGAPI_TEST_PASSWORD for a test profile')
+
 status, headers, _ = get('/moved')
 check('302 with Location', status == 302 and headers.get('location') == '/hello', (status, headers))
 data = exchange(b'GET /conflict HTTP/1.1\r\nHost: x\r\n\r\n')

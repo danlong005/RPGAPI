@@ -195,6 +195,28 @@ dcl-pr RPGAPI_setHeader;
    header_value varchar(1024) const;
 end-pr;
 
+   // whether password is the password of the IBM i user profile user;
+   // message_id tells why not. Every wrong password counts toward the
+   // system's limit on sign-on attempts (QMAXSIGN)
+dcl-pr RPGAPI_checkUserProfile ind;
+   user varchar(256) const;
+   password varchar(256) const;
+   message_id char(7) options(*nopass);
+end-pr;
+
+   // the token of an Authorization: Bearer header; blank when there is none
+dcl-pr RPGAPI_getBearerToken varchar(16000);
+   request likeds(RPGAPI_Request) const;
+end-pr;
+
+   // the user and password of an Authorization: Basic header; *on when
+   // there is one
+dcl-pr RPGAPI_getBasicAuth ind;
+   request likeds(RPGAPI_Request) const;
+   user varchar(256);
+   password varchar(256);
+end-pr;
+
    // a field of an HTML form body (application/x-www-form-urlencoded),
    // decoded; occurrence picks the nth field with that name (1)
 dcl-pr RPGAPI_getFormParam varchar(32000);

@@ -23,6 +23,8 @@ RPGAPI_get(app : '/cookie/clear' : %paddr(cookieClear));
 RPGAPI_get(app : '/cookie/bad' : %paddr(cookieBad));
 RPGAPI_get(app : '/ip' : %paddr(ip));
 RPGAPI_post(app : '/form' : %paddr(form));
+RPGAPI_get(app : '/auth' : %paddr(auth));
+RPGAPI_get(app : '/profile' : %paddr(profile));
 testSettings(app);
 RPGAPI_start(app);
 
@@ -204,6 +206,52 @@ dcl-proc form;
    else;
       response.body = '<' + RPGAPI_getFormParam(request : field :
                                                 %int(occurrence)) + '>';
+   endif;
+   return response;
+end-proc;
+
+   // the credentials sent: basic:<user>|<password>, bearer:<token> or none
+dcl-proc auth;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-s user varchar(256);
+   dcl-s password varchar(256);
+   dcl-s token varchar(16000);
+
+   response.status = HTTP_OK;
+   token = RPGAPI_getBearerToken(request);
+   select;
+   when RPGAPI_getBasicAuth(request : user : password);
+      response.body = 'basic:' + user + '|' + password;
+   when token <> '';
+      response.body = 'bearer:' + token;
+   other;
+      response.status = HTTP_UNAUTHORIZED;
+      RPGAPI_setHeader(response : 'WWW-Authenticate' : 'Basic realm="test"');
+      response.body = 'none';
+   endsl;
+   return response;
+end-proc;
+
+   // checks Basic credentials against the IBM i user profiles: ok, or
+   // no:<message ID>
+dcl-proc profile;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-s user varchar(256);
+   dcl-s password varchar(256);
+   dcl-s message_id char(7);
+
+   response.status = HTTP_OK;
+   RPGAPI_getBasicAuth(request : user : password);
+   if RPGAPI_checkUserProfile(user : password : message_id);
+      response.body = 'ok';
+   else;
+      response.body = 'no:' + %trim(message_id);
    endif;
    return response;
 end-proc;

@@ -430,6 +430,87 @@ quotes comes back without them, and `%XX` escapes are decoded, as Express's
 `req.cookies` does, so a value set with `RPGAPI_setCookie` comes back as it was
 set. A cookie that was not sent gives `''`.
 
+#### Authentication
+Two procedures read the credentials a client sends in the `Authorization`
+header:
+
+```
+   // Authorization: Bearer <token>: API keys, JWTs, OAuth access tokens
+token = RPGAPI_getBearerToken(request);
+
+   // Authorization: Basic ...: curl -u, a browser's login prompt
+if RPGAPI_getBasicAuth(request : user : password);
+   ...
+endif;
+```
+
+`RPGAPI_getBearerToken` returns the token, or `''` when the request has none.
+`RPGAPI_getBasicAuth` decodes the user and password and returns `*on`, or
+`*off` when there are none (no header, another scheme, or a value that is not
+base64 or has no `:`). The password may contain colons; both are read as UTF-8
+and are up to 256 characters. The scheme is matched in any case.
+
+Checking them is up to your app, usually in middleware, so a route never runs
+without them. Answer `401`; for Basic, add a `WWW-Authenticate` header, so a
+browser asks for a user and password:
+
+```
+dcl-proc needLogin;
+   dcl-pi *n ind;
+      request likeds(RPGAPI_Request) const;
+      response likeds(RPGAPI_Response);
+   end-pi;
+   dcl-s user varchar(256);
+   dcl-s password varchar(256);
+
+   if RPGAPI_getBasicAuth(request : user : password) and
+      validLogin(user : password);             // your check
+      return *on;
+   endif;
+   response.status = HTTP_UNAUTHORIZED;
+   RPGAPI_setHeader(response : 'WWW-Authenticate' : 'Basic realm="orders"');
+   return *off;
+end-proc;
+```
+
+Basic credentials are only encoded, not encrypted, and a bearer token lets
+anyone who has it in: serve them over HTTPS (see HTTPS in the README). RPGAPI
+does not write the `Authorization` header to the log.
+
+##### Checking IBM i user profiles
+`RPGAPI_checkUserProfile` checks a user and password against the system's user
+profiles, so an API can use the IBM i sign-on its users already have:
+
+```
+if RPGAPI_getBasicAuth(request : user : password) and
+   RPGAPI_checkUserProfile(user : password : message_id);
+   ...                                        // signed on as user
+endif;
+```
+
+It returns `*on` when the password is right, using the system's
+`QSYGETPH` API; the handle it gets is released at once, so your job keeps
+running as its own user. `message_id` tells you why not, for your log (not for
+the client): `CPF22E2` for a wrong password, which the system also answers for
+a user that does not exist, `CPF22E3` for a disabled profile, `CPF22E4` for an
+expired password. Before asking the system, it refuses a user name starting
+with `*` (such as `*CURRENT`) or longer than 10 characters, an empty password,
+and `*NOPWD`, `*NOPWDCHK` and `*NOPWDSTS`, which would otherwise get a handle
+without any password.
+
+Know what it means before you use it:
+
+- Every wrong password counts toward the system's limit on sign-on attempts
+  (system value `QMAXSIGN`), exactly as at a sign-on screen. A client that
+  guesses can disable a real user's profile, which then cannot sign on
+  anywhere until it is re-enabled. Allow it only over HTTPS, only for the
+  users who need it, and consider limiting attempts per client address
+  (`request.remote_ip`).
+- A client that has the password can use the API as that user: use it for
+  users you would trust with it, and check what each may do in your app.
+- Checking a password takes the system some time; for many requests from the
+  same client, sign on once and give the client a token of your own.
+
 #### Client address
 `request.remote_ip` is the client's IP address, as Express's `req.ip`, for
 logging, limits or allowing only some addresses. `request.connection_ip` is
@@ -1067,6 +1148,9 @@ include it.
 | `RPGAPI_getQueryParam(request : name)` | A query string value |
 | `RPGAPI_getFormParam(request : name : occurrence?)` | A field of an HTML form body; see Forms |
 | `RPGAPI_getHeader(request : name)` | A request header |
+| `RPGAPI_getBearerToken(request)` | The token of `Authorization: Bearer`; see Authentication |
+| `RPGAPI_getBasicAuth(request : user : password)` | The user and password of `Authorization: Basic`; see Authentication |
+| `RPGAPI_checkUserProfile(user : password : message_id?)` | Whether the password is right for an IBM i user profile; see Checking IBM i user profiles |
 | `RPGAPI_setHeader(response : name : value)` | Add a response header |
 | `RPGAPI_getCookie(request : name)` | A cookie the client sent |
 | `RPGAPI_setCookie(response : name : value : options?)` | Set a cookie; see Cookies under Responses |
