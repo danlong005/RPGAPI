@@ -1,0 +1,75 @@
+**free
+
+   // RPGAPI's own procedures, for the RPGAPI module and its unit tests. The
+   // service program does not export them, so apps cannot call them: an app
+   // includes only rpgapi_h.rpgle, which this needs first
+
+/if not defined(RPGAPI_INT_H)
+/define RPGAPI_INT_H
+
+   // closes the connection and the listening socket
+dcl-pr RPGAPI_stop;
+   config likeds(RPGAPI_App) const;
+end-pr;
+
+   // the next request on the connection, read and parsed
+dcl-pr RPGAPI_acceptRequest likeds(RPGAPI_Request);
+   config likeds(RPGAPI_App);
+end-pr;
+
+   // a request's line and headers, as text in the job's CCSID
+dcl-pr RPGAPI_parse likeds(RPGAPI_Request);
+   raw_request varchar(32000) const;
+end-pr;
+
+   // whether a route is for this request; fills request.params
+dcl-pr RPGAPI_routeMatches ind;
+   route likeds(RPGAPI_route_ds);
+   request likeds(RPGAPI_Request);
+end-pr;
+
+   // whether middleware is for this request's path (* for all); fills
+   // request.params
+dcl-pr RPGAPI_mwMatches ind;
+   route likeds(RPGAPI_route_ds);
+   request likeds(RPGAPI_Request);
+end-pr;
+
+   // sends a response that was not streamed, and finishes the request
+dcl-pr RPGAPI_sendResponse;
+   config likeds(RPGAPI_App) const;
+   response likeds(RPGAPI_Response) const;
+end-pr;
+
+   // the status line and headers of a response
+dcl-pr RPGAPI_buildHead varchar(32766);
+   response likeds(RPGAPI_Response) const;
+   body_length int(10:0) const;
+end-pr;
+
+   // opens the listening socket on the app's port
+dcl-pr RPGAPI_setup;
+   config likeds(RPGAPI_App);
+end-pr;
+
+   // an empty response with a status
+dcl-pr RPGAPI_setResponse likeds(RPGAPI_Response);
+   request likeds(RPGAPI_Request);
+   status zoned(3:0) const;
+end-pr;
+
+   // text without CR and LF
+dcl-pr RPGAPI_cleanString varchar(32000);
+   dirty_string varchar(32000) const;
+end-pr;
+
+   // the reason phrase of an HTTP status, such as Not Found
+dcl-pr RPGAPI_getMessage char(40);
+   status zoned(3:0) const;
+end-pr;
+
+   // fills HTTP_messages
+dcl-pr RPGAPI_initHttp;
+end-pr;
+
+/endif

@@ -141,18 +141,6 @@ dcl-pr RPGAPI_start;
    workers int(10:0) options(*nopass) const;
 end-pr;
 
-dcl-pr RPGAPI_stop;
-   config likeds(RPGAPI_App) const;
-end-pr;
-
-dcl-pr RPGAPI_acceptRequest likeds(RPGAPI_Request);
-   config likeds(RPGAPI_App);
-end-pr;
-
-dcl-pr RPGAPI_parse likeds(RPGAPI_Request);
-   raw_request varchar(32000) const;
-end-pr;
-
 dcl-pr RPGAPI_getParam varchar(1024);
    request likeds(RPGAPI_Request) const;
    param char(50) const;
@@ -190,30 +178,6 @@ dcl-pr RPGAPI_clearCookie;
    response likeds(RPGAPI_Response);
    name varchar(256) const;
    options likeds(RPGAPI_CookieOptions) const options(*nopass);
-end-pr;
-
-dcl-pr RPGAPI_routeMatches ind;
-   route likeds(RPGAPI_route_ds);
-   request likeds(RPGAPI_Request);
-end-pr;
-
-dcl-pr RPGAPI_mwMatches ind;
-   route likeds(RPGAPI_route_ds);
-   request likeds(RPGAPI_Request);
-end-pr;
-
-dcl-pr RPGAPI_sendResponse;
-   config likeds(RPGAPI_App) const;
-   response likeds(RPGAPI_Response) const;
-end-pr;
-
-dcl-pr RPGAPI_buildHead varchar(32766);
-   response likeds(RPGAPI_Response) const;
-   body_length int(10:0) const;
-end-pr;
-
-dcl-pr RPGAPI_setup;
-   config likeds(RPGAPI_App);
 end-pr;
 
 dcl-pr RPGAPI_setRoute;
@@ -418,22 +382,6 @@ dcl-pr RPGAPI_readBodyBytes int(10:0);
    request likeds(RPGAPI_Request) const;
    buffer pointer value;
    size int(10:0) const;
-end-pr;
-
-dcl-pr RPGAPI_setResponse likeds(RPGAPI_Response);
-   request likeds(RPGAPI_Request);
-   status zoned(3:0) const;
-end-pr;
-
-dcl-pr RPGAPI_cleanString varchar(32000);
-   dirty_string varchar(32000) const;
-end-pr;
-
-dcl-pr RPGAPI_getMessage char(40);
-   status zoned(3:0) const;
-end-pr;
-
-dcl-pr RPGAPI_initHttp;
 end-pr;
 
 /endif

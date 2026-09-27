@@ -809,9 +809,10 @@ SELECT message_timestamp, message_text
   them while looking into a problem, and WARN or ERROR otherwise.
 
 ### Procedure reference
-These are the procedures the service program exports. `rpgapi_h.rpgle` also
-declares procedures RPGAPI uses internally; calling one of those from an app
-fails when the app is bound.
+These are the procedures the service program exports, which are the ones
+`rpgapi_h.rpgle` declares. RPGAPI's internal procedures are in
+`rpgapi_int_h.rpgle`, for RPGAPI itself and its unit tests; apps do not
+include it.
 
 | Procedure | Purpose |
 | --- | --- |

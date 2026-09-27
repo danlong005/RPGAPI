@@ -2,6 +2,7 @@
 
 ctl-opt option(*nodebugio:*srcstmt) nomain;
 /include 'rpgapi_h.rpgle'
+/include 'rpgapi_int_h.rpgle'
 /include 'socket_h.rpgle'
 
    // HTTP text is UTF-8 on the wire and the job's CCSID in the program

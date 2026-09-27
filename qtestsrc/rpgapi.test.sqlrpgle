@@ -4,6 +4,7 @@ ctl-opt nomain option(*nodebugio:*srcstmt);
 
 /copy RPGUNIT1,TESTCASE
 /include '../qrpglesrc/rpgapi_h.rpgle'
+/include '../qrpglesrc/rpgapi_int_h.rpgle'
 
 dcl-c CRLF x'0d25';
 dcl-c DBL_CRLF x'0d250d25';

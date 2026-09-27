@@ -250,6 +250,16 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] The public header had RPGAPI's internal procedures mixed in:
+  `rpgapi_h.rpgle` declared `RPGAPI_stop`, `acceptRequest`, `parse`,
+  `routeMatches`, `mwMatches`, `sendResponse`, `buildHead`, `setup`,
+  `setResponse`, `cleanString`, `getMessage` and `initHttp`, which the service
+  program does not export, so an app calling one compiled and then failed to
+  bind. They are now in `rpgapi_int_h.rpgle`, included only by the module and
+  the unit tests; nothing else changed. Verified on PUB400 (2026-09-27): an
+  app calling `RPGAPI_setResponse` compiled against the old header (and
+  failed at bind), and against the new one is refused at compile (RNF7030);
+  the build, every example and the full run pass
 - [x] A YAJL example, `examples/yajl-orders.rpgle`: a request body read with
   `DATA-INTO` and YAJLINTO, the response built with YAJL's generator, and a
   status built with `DATA-GEN` and YAJLDTAGEN. YAJL is not a dependency of
@@ -419,17 +429,10 @@
   the tests added since (they have never been compiled)
 
 ## Cleanup
-- [ ] Move the internal procedures out of the public header: `rpgapi_h.rpgle`
-  declares `RPGAPI_stop`, `acceptRequest`, `parse`, `routeMatches`,
-  `mwMatches`, `sendResponse`, `buildHead`, `setup`, `setResponse`,
-  `cleanString`, `getMessage` and `initHttp`, which are not exported: an app
-  calling one compiles and then fails to bind. Put them in a private header
-  (e.g. `rpgapi_int_h.rpgle`) for the module and the unit tests, so the
-  public header is exactly what apps can use. Do it together with the next item
 - [ ] Decide whether `RPGAPI_stop` (stop the server from code) and
-  `RPGAPI_setResponse(request : status)` (a response with a status and its
-  message, like Express's `res.sendStatus`) should be exported for apps
-  instead of moved
+  `RPGAPI_setResponse(request : status)` (an empty response with a status,
+  like Express's `res.sendStatus`) should be exported for apps; they are
+  internal (`rpgapi_int_h.rpgle`) for now
 - [ ] The unit tests in `qtestsrc` have never been compiled or run: check they
   still match the code (e.g. `RPGAPI_urlDecode` now takes 4096 characters)
   when iRPGUnit is available (see Features)
