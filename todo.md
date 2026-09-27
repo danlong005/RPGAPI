@@ -250,6 +250,20 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Custom 404 and error handlers: `RPGAPI_setNotFound(app : %paddr(proc))`
+  (a route procedure, run when no route matches, after middleware; status 0
+  is sent as 404; automatic OPTIONS answers still come first) and
+  `RPGAPI_setErrorHandler(app : %paddr(proc))`, given the request and an
+  `RPGAPI_Error` (status, message ID and text) when a route, middleware or
+  the not-found handler fails, a body fails while it is read, or a request is
+  refused before routing; not once a streamed response has begun. A handler
+  that fails too is logged and the plain status sent. New `app` fields
+  `not_found_handler` and `error_handler` (recompile). Verified on PUB400
+  (2026-09-27, new handlers suite): JSON 404 for GET, HEAD (no body) and
+  OPTIONS, status 0 as 404, MCH1211 from a route and from middleware, a
+  failing handler giving a plain 500, 413 from a chunked body read in the
+  route (CPF9898) and before routing (no ID), 431, a streamed failure cut
+  off; the logging suite shows the log unchanged without handlers
 - [x] The public header had RPGAPI's internal procedures mixed in:
   `rpgapi_h.rpgle` declared `RPGAPI_stop`, `acceptRequest`, `parse`,
   `routeMatches`, `mwMatches`, `sendResponse`, `buildHead`, `setup`,
@@ -398,10 +412,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Custom 404 and error handlers: `RPGAPI_setNotFound(app : %paddr(proc))`
-  and `RPGAPI_setErrorHandler(app : %paddr(proc))`, the error handler given
-  the escape message's ID and text, so an API can answer with its own (JSON)
-  error body and log failures its own way
 - [ ] The client's IP address (`req.ip`): a `remote_ip` field on the request,
   with an option to trust `X-Forwarded-For` behind a proxy (nginx, IBM HTTP
   Server)

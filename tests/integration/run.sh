@@ -23,7 +23,7 @@ TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive examples yajl"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive handlers examples yajl"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
@@ -237,6 +237,7 @@ for suite_name in $SUITES; do
                  KEEPALIVE="2,3"; suite hello ";;;;" keepalive on
                  KEEPALIVE="0,1"; suite hello ";;;;" keepalive off
                  KEEPALIVE=""; } ;;
+    handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
     examples)  compile_example hello.rpgle EXHELLO
                compile_example notes-api.sqlrpgle EXNOTES
                compile_example table-export.sqlrpgle EXEXPORT

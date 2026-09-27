@@ -30,6 +30,11 @@ RPGAPI_setKeepAlive(app : 10 : 500);            // 5 seconds, 100 requests
    // Certificate Manager (see HTTPS in the README). Without it: plain HTTP
 // RPGAPI_setTlsApplication(app : 'MYCO_RPGAPI_MYAPI');
 
+   // JSON answers for requests no route matches and for requests that fail,
+   // instead of RPGAPI's plain 404 and 500
+RPGAPI_setNotFound(app : %paddr(notFound));
+RPGAPI_setErrorHandler(app : %paddr(failed));
+
 RPGAPI_get(app : '/status' : %paddr(status));
 RPGAPI_start(app);
 
@@ -46,5 +51,34 @@ dcl-proc status;
    response.status = HTTP_OK;
    RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
    response.body = '{"status":"up","host":"' + %trim(request.hostname) + '"}';
+   return response;
+end-proc;
+
+
+dcl-proc notFound;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+
+   response.status = HTTP_NOT_FOUND;
+   RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+   response.body = '{"error":"not found"}';
+   return response;
+end-proc;
+
+
+   // the details (error.message_id and message_text) are in the job log at
+   // RPGAPI_LOG_ERROR and above; clients get only the status
+dcl-proc failed;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+      error likeds(RPGAPI_Error) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+
+   response.status = error.status;
+   RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+   response.body = '{"error":' + %char(error.status) + '}';
    return response;
 end-proc;

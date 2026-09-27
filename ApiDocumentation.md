@@ -53,6 +53,17 @@
           cors_expose_headers varchar(1000);
           keepalive_timeout int(10:0);             // see Keep-alive
           keepalive_requests int(10:0);
+          not_found_handler pointer(*proc);        // see Not found and errors
+          error_handler pointer(*proc);
+        end-ds;
+
+        //
+        // what went wrong, for an error handler
+        //
+        dcl-ds RPGAPI_Error qualified template;
+          status int(10:0);
+          message_id char(7);
+          message_text varchar(400);
         end-ds;
 
         dcl-ds RPGAPI_header_ds qualified template;
@@ -760,6 +771,76 @@ for a GET it answers:
   Several ranges get the whole file, and so does a range whose `If-Range`
   names an older version of the file
 
+### Not found and errors
+Without handlers, a request no route matches is answered with a plain `404`,
+and a request that fails with a plain `500` (or `400`, `408`, `413`, `431` or
+`501` for a request RPGAPI refused). An API usually wants its own answer, such
+as a JSON error body. Two procedures set that up, like a catch-all route and
+an error-handling middleware in Express:
+
+```
+RPGAPI_setNotFound(app : %paddr(notFound));
+RPGAPI_setErrorHandler(app : %paddr(failed));
+```
+
+**The not-found handler** is a route procedure (request in, response out). It
+runs when no route matches, after the middleware, so middleware that refuses a
+request (such as an API key check) still answers first. A status left at 0 is
+sent as `404`. An `OPTIONS` request for a path that has routes is still
+answered by RPGAPI with the methods it allows.
+
+```
+dcl-proc notFound;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+
+   response.status = HTTP_NOT_FOUND;
+   RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+   response.body = '{"error":"no route for ' + %trim(request.route) + '"}';
+   return response;
+end-proc;
+```
+
+**The error handler** gets the request and an `RPGAPI_Error`, and returns the
+response to send. It is called when:
+
+- a route, a middleware or the not-found handler ends with an escape message
+  (a failed operation, such as a division by zero, `MCH1211`, or a message
+  your code sent). `status` is `500`, and `message_id` and `message_text` are
+  the escape message;
+- a request body fails while your procedure reads it (too large, a timeout,
+  bad chunked or multipart data). `status` is `413`, `408` or `400`, and the
+  message is RPGAPI's `CPF9898`, such as `The request body ...`;
+- a request is refused before any procedure runs (a body over the limits,
+  headers too large, a bad request line). `status` is `413`, `431`, `400` or
+  `501`, `message_id` is blank and `message_text` is the status's reason
+  phrase, such as `Content Too Large`. The request's fields may be blank.
+
+```
+dcl-proc failed;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+      error likeds(RPGAPI_Error) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+
+   response.status = error.status;
+   RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+   response.body = '{"error":"' + %char(error.status) + '","id":"' +
+                   %trim(error.message_id) + '"}';
+   return response;
+end-proc;
+```
+
+A status left at 0 is sent as `error.status`. The failure is still logged
+(at `RPGAPI_LOG_ERROR`, "answered by the error handler"), so send the message
+text to clients only if they should see it. The handler is not called once a
+streamed response has begun: the client has its status already, so the
+connection is closed as before. If the error handler fails too, both failures
+are logged and the client gets the plain status.
+
 ### Logging
 RPGAPI can log what it does to the job log of the job serving each request,
 to find out what happened when someone reports a problem. It is off unless
@@ -818,6 +899,8 @@ include it.
 | --- | --- |
 | `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
 | `RPGAPI_setCors(app : origins)` | Allow browsers on these origins to call the app; see CORS |
+| `RPGAPI_setNotFound(app : %paddr(proc))` | Answer requests no route matches; see Not found and errors |
+| `RPGAPI_setErrorHandler(app : %paddr(proc))` | Answer requests that fail; see Not found and errors |
 | `RPGAPI_setKeepAlive(app : seconds : maxRequests?)` | How long connections stay open between requests, 0 for not at all |
 | `RPGAPI_setLogLevel(app : level)` | How much to log; see Logging |
 | `RPGAPI_setTimeouts(app : readSeconds : writeSeconds)` | How long clients have to send a request and take a response |

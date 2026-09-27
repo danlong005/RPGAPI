@@ -114,6 +114,23 @@ dcl-ds RPGAPI_App qualified template;
       // next request (0: 5, below 0: off), and requests per connection (0: 100)
    keepalive_timeout int(10:0);
    keepalive_requests int(10:0);
+      // procedures answering when no route matches, and when a request fails:
+      // RPGAPI's plain 404 and 500 when not set (RPGAPI_setNotFound,
+      // RPGAPI_setErrorHandler)
+   not_found_handler pointer(*proc);
+   error_handler pointer(*proc);
+end-ds;
+
+   // what went wrong, for the error handler
+dcl-ds RPGAPI_Error qualified template;
+      // the status RPGAPI answers with unless the handler sets another: 500,
+      // or 400, 408, 413, 431 or 501 for a request or body that was refused
+   status int(10:0);
+      // the escape message that ended the procedure, and its text. For a
+      // request refused before any procedure ran: blank, and the status's
+      // reason phrase (such as Content Too Large)
+   message_id char(7);
+   message_text varchar(400);
 end-ds;
 
    // log levels, for RPGAPI_setLogLevel: each also logs the levels above it.
@@ -133,6 +150,14 @@ dcl-s RPGAPI_mwCallback_ptr pointer(*proc);
 dcl-pr RPGAPI_mwCallback ind extproc(RPGAPI_mwCallback_ptr);
    request likeds(RPGAPI_Request) const;
    response likeds(RPGAPI_Response);
+end-pr;
+
+   // an error handler: answers for a request that failed
+dcl-s RPGAPI_errorCallback_ptr pointer(*proc);
+dcl-pr RPGAPI_errorCallback extproc(RPGAPI_errorCallback_ptr)
+                            likeds(RPGAPI_Response);
+   request likeds(RPGAPI_Request) const;
+   error likeds(RPGAPI_Error) const;
 end-pr;
 
 dcl-pr RPGAPI_start;
@@ -229,6 +254,24 @@ end-pr;
 dcl-pr RPGAPI_setMaxRequestSize;
    config likeds(RPGAPI_App);
    bytes int(10:0) const;
+end-pr;
+
+   // a procedure to answer when no route matches, instead of the plain 404.
+   // It is a route procedure (request in, response out); a status left at 0
+   // is sent as 404
+dcl-pr RPGAPI_setNotFound;
+   config likeds(RPGAPI_App);
+   procedure pointer(*proc) const;
+end-pr;
+
+   // a procedure to answer when a request fails, instead of the plain 500:
+   // a route, middleware or the not-found handler ended with an escape
+   // message, a request body failed, or a request was refused. It gets the
+   // request and an RPGAPI_Error; a status left at 0 is sent as error.status.
+   // Not called once a streamed response has begun
+dcl-pr RPGAPI_setErrorHandler;
+   config likeds(RPGAPI_App);
+   procedure pointer(*proc) const;
 end-pr;
 
    // CORS: lets pages from these origins call the app from a browser.

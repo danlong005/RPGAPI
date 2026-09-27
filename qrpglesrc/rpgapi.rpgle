@@ -363,6 +363,7 @@ dcl-proc RPGAPI_start export;
    dcl-ds request likeds(RPGAPI_Request) inz;
    dcl-s middleware_completed ind;
    dcl-s allowed varchar(200);
+   dcl-ds failure likeds(RPGAPI_Error) inz;
 
    if %parms >= 2;
       config.port = port;
@@ -415,8 +416,11 @@ dcl-proc RPGAPI_start export;
             // complete request arrived in time, and there is nothing to answer
          if request.method = *blanks;
             if RPGAPI_reject_status > 0;
-               response = RPGAPI_setResponse(request : RPGAPI_reject_status);
-               RPGAPI_sendResponse(config : response);
+               clear failure;
+               failure.status = RPGAPI_reject_status;
+               failure.message_text =
+                  %trim(RPGAPI_getMessage(RPGAPI_reject_status));
+               RPGAPI_answerError(config : request : failure);
             else;
                RPGAPI_closeClient();
             endif;
@@ -481,19 +485,30 @@ dcl-proc RPGAPI_start export;
             endfor;
 
             if not route_found;
-               response = RPGAPI_setResponse(request :  HTTP_NOT_FOUND);
                   // OPTIONS without a route of its own: which methods the
                   // path has
+               allowed = '';
                if %trim(request.method) = HTTP_OPTIONS;
                   allowed = RPGAPI_allowedMethods(config : request.route);
-                  if allowed <> '';
-                     response.status = HTTP_NO_CONTENT;
-                     RPGAPI_setHeader(response : 'Allow' : allowed);
-                  endif;
                endif;
-               RPGAPI_log(RPGAPI_LOG_DEBUG : 'no route matched' +
-                          RPGAPI_choose(response.status = HTTP_NO_CONTENT :
-                                ': answered with the methods it has' : ''));
+               select;
+               when allowed <> '';
+                  response = RPGAPI_setResponse(request : HTTP_NO_CONTENT);
+                  RPGAPI_setHeader(response : 'Allow' : allowed);
+                  RPGAPI_log(RPGAPI_LOG_DEBUG : 'no route matched: answered ' +
+                             'with the methods it has');
+               when config.not_found_handler <> *null;
+                  RPGAPI_log(RPGAPI_LOG_DEBUG : 'no route matched: the ' +
+                             'not-found handler answers');
+                  RPGAPI_callback_ptr = config.not_found_handler;
+                  response = RPGAPI_callback(request);
+                  if response.status = 0;
+                     response.status = HTTP_NOT_FOUND;
+                  endif;
+               other;
+                  response = RPGAPI_setResponse(request : HTTP_NOT_FOUND);
+                  RPGAPI_log(RPGAPI_LOG_DEBUG : 'no route matched');
+               endsl;
             endif;
          endif;
 
@@ -504,24 +519,26 @@ dcl-proc RPGAPI_start export;
             RPGAPI_endResponse();
          endif;
       on-error;
-            // answer with a 500, or the status a request body failed with,
-            // and close the client socket, so the client is not left
-            // waiting and the descriptor is not leaked. Once a streamed
-            // response has begun, closing is all that is left
+            // answer with a 500, or the status a request body failed with
+            // (through the error handler, if the app has one), so the client
+            // is not left waiting and the descriptor is not leaked. Once a
+            // streamed response has begun, closing is all that is left
+         clear failure;
+         failure.status = HTTP_INTERNAL_SERVER;
+         if RPGAPI_reject_status > 0;
+            failure.status = RPGAPI_reject_status;
+         endif;
+         RPGAPI_lastException(failure);
             // a request body that failed has logged why itself
          if RPGAPI_reject_status = 0;
             RPGAPI_log(RPGAPI_LOG_ERROR : %trim(request.method) + ' ' +
                        %trim(request.route) + ' failed: ' +
-                       RPGAPI_lastException() + '; ' + RPGAPI_failureOutcome());
+                       RPGAPI_describeError(failure) + '; ' +
+                       RPGAPI_failureOutcome(config));
          endif;
          monitor;
             if RPGAPI_stream = RPGAPI_STREAM_NONE;
-               if RPGAPI_reject_status > 0;
-                  response = RPGAPI_setResponse(request : RPGAPI_reject_status);
-               else;
-                  response = RPGAPI_setResponse(request : HTTP_INTERNAL_SERVER);
-               endif;
-               RPGAPI_sendResponse(config : response);
+               RPGAPI_answerError(config : request : failure);
             else;
                RPGAPI_stream = RPGAPI_STREAM_ENDED;
                RPGAPI_closeClient();
@@ -1407,6 +1424,26 @@ dcl-proc RPGAPI_setCors export;
    end-pi;
 
    config.cors_origins = %trim(origins);
+end-proc;
+
+
+dcl-proc RPGAPI_setNotFound export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      procedure pointer(*proc) const;
+   end-pi;
+
+   config.not_found_handler = procedure;
+end-proc;
+
+
+dcl-proc RPGAPI_setErrorHandler export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      procedure pointer(*proc) const;
+   end-pi;
+
+   config.error_handler = procedure;
 end-proc;
 
 
@@ -2726,7 +2763,8 @@ end-proc;
    // caller's messages, as message ID and text: MCH1211 Attempt made to
    // divide by zero for fixed point operation. It stays in the job log
 dcl-proc RPGAPI_lastException;
-   dcl-pi *n varchar(400);
+   dcl-pi *n;
+      error likeds(RPGAPI_Error);
    end-pi;
    dcl-ds received len(4096) qualified;
       bytes_returned int(10:0) pos(1);
@@ -2735,36 +2773,102 @@ dcl-proc RPGAPI_lastException;
       text_length int(10:0) pos(161);
    end-ds;
    dcl-s error_code char(8) inz(*allx'00');
-   dcl-s text varchar(400);
 
+   error.message_id = '';
+   error.message_text = '';
    monitor;
-         // counter 1: the messages of RPGAPI_start, where the exception
+         // counter 1: the messages of the procedure that handled the
+         // exception (RPGAPI_start, RPGAPI_answerError), where it
          // ended up; received with *SAME, so it stays as it is
       receive_program_message(received : %size(received) : 'RCVM0200' :
                               '*' : 1 : '*EXCP' : ' ' : 0 : '*SAME' :
                               error_code);
       if received.bytes_returned = 0 or received.message_id = *blanks;
-         return 'no exception message found';
+         error.message_text = 'no exception message found';
+         return;
       endif;
-      text = received.message_id;
+      error.message_id = received.message_id;
       if received.text_length > 0 and
          176 + received.data_length + received.text_length <= %size(received);
-         text += ' ' + %subst(received : 177 + received.data_length :
-                              %min(received.text_length : 380));
+         error.message_text = %subst(received : 177 + received.data_length :
+                                     %min(received.text_length : 400));
       endif;
-      return text;
    on-error;
-      return 'its exception message could not be read';
+      error.message_text = 'its exception message could not be read';
    endmon;
+end-proc;
+
+
+   // an error as text for the log: message ID and text
+dcl-proc RPGAPI_describeError;
+   dcl-pi *n varchar(410);
+      error likeds(RPGAPI_Error) const;
+   end-pi;
+
+   return %trim(error.message_id + ' ' + error.message_text);
+end-proc;
+
+
+   // answers for a request that failed: with the app's error handler if it
+   // has one, else with just the status. A handler that fails too is logged,
+   // and the status is sent after all
+dcl-proc RPGAPI_answerError;
+   dcl-pi *n;
+      config likeds(RPGAPI_App) const;
+      request likeds(RPGAPI_Request) const;
+      failure likeds(RPGAPI_Error) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-ds second likeds(RPGAPI_Error) inz;
+
+   clear response;
+   response.status = failure.status;
+   if config.error_handler <> *null;
+      monitor;
+         RPGAPI_errorCallback_ptr = config.error_handler;
+         response = RPGAPI_errorCallback(request : failure);
+         if response.status = 0;
+            response.status = failure.status;
+         endif;
+         RPGAPI_log(RPGAPI_LOG_DEBUG : 'the error handler answered ' +
+                    %char(response.status));
+      on-error;
+         RPGAPI_lastException(second);
+         if RPGAPI_stream <> RPGAPI_STREAM_NONE;
+            RPGAPI_log(RPGAPI_LOG_ERROR : 'the error handler failed too: ' +
+                       RPGAPI_describeError(second) + '; its streamed ' +
+                       'response was cut off');
+            RPGAPI_stream = RPGAPI_STREAM_ENDED;
+            RPGAPI_closeClient();
+            return;
+         endif;
+         RPGAPI_log(RPGAPI_LOG_ERROR : 'the error handler failed too: ' +
+                    RPGAPI_describeError(second) + '; answered ' +
+                    %char(failure.status));
+         clear response;
+         response.status = failure.status;
+      endmon;
+   endif;
+
+      // the handler may have streamed its answer
+   if RPGAPI_stream = RPGAPI_STREAM_NONE;
+      RPGAPI_sendResponse(config : response);
+   else;
+      RPGAPI_endResponse();
+   endif;
 end-proc;
 
 
    // what happens after a procedure failed, for the log
 dcl-proc RPGAPI_failureOutcome;
    dcl-pi *n varchar(100);
+      config likeds(RPGAPI_App) const;
    end-pi;
 
    if RPGAPI_stream = RPGAPI_STREAM_NONE;
+      if config.error_handler <> *null;
+         return 'answered by the error handler';
+      endif;
       return 'answered 500';
    endif;
    return 'its streamed response was cut off';

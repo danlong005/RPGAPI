@@ -10,6 +10,8 @@ server, and each request is handed to your procedure as a data structure.
   below it
 - CORS for browser front ends on other origins, preflights included
 - Cookies read and set, with `Max-Age`, `HttpOnly`, `Secure` and `SameSite`
+- Your own answers for requests no route matches and for requests that fail,
+  such as JSON errors
 - UTF-8 on the wire, converted to and from the job's CCSID
 - Request bodies up to 1MB in memory by default, and larger uploads streamed
   from the connection, with `Content-Length` or chunked encoding
@@ -245,5 +247,6 @@ See Settings in the [API Documentation](ApiDocumentation.md).
 whole header values; that too needs a recompile. And `response.body` is now
 sent exactly as set, where it used to be trimmed: trim bodies set from
 fixed-length fields. The CORS settings added `cors_` fields to `RPGAPI_App`,
-and keep-alive the `keepalive_` fields; connections now stay open between
+and keep-alive the `keepalive_` fields, and the not-found and error handlers
+`not_found_handler` and `error_handler`; connections now stay open between
 requests (`RPGAPI_setKeepAlive(app : 0)` to close them as before).

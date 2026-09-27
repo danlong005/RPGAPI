@@ -11,7 +11,7 @@ build it, run it and try it with curl.
 | [api-key.rpgle](api-key.rpgle) | Middleware that checks an API key header and answers 401, a public health check, and INFO logging |
 | [static-files.rpgle](static-files.rpgle) | Serving an IFS directory with `RPGAPI_sendFile`: content types, caching (304) and ranges (206) |
 | [upload.rpgle](upload.rpgle) | A browser upload form, and `multipart/form-data` files saved to the IFS with `RPGAPI_savePart` |
-| [production.rpgle](production.rpgle) | Every setting in one place: jobs, limits, timeouts, logging and HTTPS |
+| [production.rpgle](production.rpgle) | Every setting in one place: jobs, limits, timeouts, logging, HTTPS, and JSON answers for 404s and errors |
 | [yajl-orders.rpgle](yajl-orders.rpgle) | JSON with YAJL: a request body read with `DATA-INTO` and YAJLINTO, a response built with YAJL's generator, and one with `DATA-GEN`. Needs YAJL in library YAJL, in the library list to build and run |
 | [memberships.sqlrpgle](memberships.sqlrpgle) | Middleware for all routes and for one path, and a route param read from a table you provide |
 
