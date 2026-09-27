@@ -43,7 +43,7 @@ time, so a queue that runs one job at a time is fine.
 | `timeouts` | `basic` | clients that send nothing, part of a body, or a byte a second are cut off at the read timeout; 10 clients connecting at once are all answered |
 | `routes` | `routes` | whole-path route matching, `{params}`, `*` segments, middleware prefixes |
 | `misc` | `misc` | `setRoute`, `patch`, 202, CR/LF, and five complete responses byte for byte |
-| `hello` | `hello` | the Quick Start app, URL decoding, `request.hostname`, requests without headers, redirects, statuses without a constant |
+| `hello` | `hello` | the Quick Start app, URL decoding, form fields (`getFormParam`: decoding, repeated names, long values, bodies over 32,000 bytes, other content types), `request.hostname`, requests without headers, redirects, statuses without a constant |
 | `bodies` | `bodies` | bodies in memory, chunked, 100-continue and the 413/431/400/501 refusals; 50MB streamed uploads with flat memory, `saveBody`, stalled uploads (408); the request and upload limits |
 | `multipart` | `bodies` | `multipart/form-data` from curl and by hand, in random pieces, with fake delimiters, skipped parts, bad bodies, and a 30MB file |
 | `stream` | `stream` | streamed and chunked responses, HTTP/1.0, `sendFile` with types, 304/206/416 and `If-Range`, and the write timeout |

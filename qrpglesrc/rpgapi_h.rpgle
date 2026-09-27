@@ -195,6 +195,14 @@ dcl-pr RPGAPI_setHeader;
    header_value varchar(1024) const;
 end-pr;
 
+   // a field of an HTML form body (application/x-www-form-urlencoded),
+   // decoded; occurrence picks the nth field with that name (1)
+dcl-pr RPGAPI_getFormParam varchar(32000);
+   request likeds(RPGAPI_Request) const;
+   name varchar(1024) const;
+   occurrence int(10:0) const options(*nopass);
+end-pr;
+
 dcl-pr RPGAPI_getCookie varchar(4096);
    request likeds(RPGAPI_Request) const;
    name varchar(256) const;

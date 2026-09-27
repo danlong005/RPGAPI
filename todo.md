@@ -250,6 +250,15 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Form bodies: `RPGAPI_getFormParam(request : name : occurrence?)` reads a
+  field of an `application/x-www-form-urlencoded` body from the bytes as sent
+  (so the whole in-memory body, past what `request.body` holds), decoded as
+  query params (+ and UTF-8 %XX), names in any case, the nth of a repeated
+  name; `''` for other content types and streamed bodies. `RPGAPI_urlDecode`
+  now takes values up to 32,000 characters. Verified on PUB400 (2026-09-27,
+  hello suite): umlauts and escaped & = %, repeated tags, NAME, empty and
+  valueless fields, a charset on the Content-Type, a JSON body, a
+  20,000-character field, a field after 40,000 bytes, curl --data-urlencode
 - [x] The client's IP address: `request.remote_ip` (Express's `req.ip`) and
   `request.connection_ip`, from `getpeername` after `accept`.
   `RPGAPI_setTrustedProxies(app : addresses)` (new `trusted_proxies` app
@@ -425,8 +434,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Form bodies (`application/x-www-form-urlencoded`):
-  `RPGAPI_getFormParam(request : name)`, decoded like query params
 - [ ] Working with JSON, in the docs rather than helpers in RPGAPI: a section in
   ApiDocumentation.md on SQL JSON functions (`JSON_OBJECT`, `JSON_ARRAYAGG`,
   `JSON_TABLE`, `IS JSON`), `DATA-INTO` / `DATA-GEN` with YAJL, and YAJL

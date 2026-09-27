@@ -22,6 +22,7 @@ RPGAPI_get(app : '/cookie/set' : %paddr(cookieSet));
 RPGAPI_get(app : '/cookie/clear' : %paddr(cookieClear));
 RPGAPI_get(app : '/cookie/bad' : %paddr(cookieBad));
 RPGAPI_get(app : '/ip' : %paddr(ip));
+RPGAPI_post(app : '/form' : %paddr(form));
 testSettings(app);
 RPGAPI_start(app);
 
@@ -183,6 +184,27 @@ dcl-proc ip;
 
    response.status = HTTP_OK;
    response.body = request.remote_ip + '|' + request.connection_ip;
+   return response;
+end-proc;
+
+   // the form field ?field= (its ?n= th, 1 when left out), between < and >
+dcl-proc form;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-s field varchar(1024);
+   dcl-s occurrence varchar(1024);
+
+   field = RPGAPI_getQueryParam(request : 'field');
+   occurrence = RPGAPI_getQueryParam(request : 'n');
+   response.status = HTTP_OK;
+   if occurrence = '';
+      response.body = '<' + RPGAPI_getFormParam(request : field) + '>';
+   else;
+      response.body = '<' + RPGAPI_getFormParam(request : field :
+                                                %int(occurrence)) + '>';
+   endif;
    return response;
 end-proc;
 

@@ -3191,12 +3191,12 @@ end-proc;
    // escape that is not two hex digits, or bytes that are not UTF-8, are left
    // as they were sent
 dcl-proc RPGAPI_urlDecode;
-   dcl-pi *n varchar(4096);
-      value varchar(4096) const;
+   dcl-pi *n varchar(32000);
+      value varchar(32000) const;
       plus_is_space ind const;
    end-pi;
-   dcl-s utf8 varchar(12288);
-   dcl-s decoded varchar(12288);
+   dcl-s utf8 varchar(96000);
+   dcl-s decoded varchar(96000);
    dcl-s index int(10:0);
    dcl-s high int(10:0);
    dcl-s low int(10:0);
@@ -3361,6 +3361,82 @@ dcl-proc RPGAPI_setHeader export;
          index = %elem(response.headers) + 1;
       endif;
    endfor;
+end-proc;
+
+
+   // a field of an application/x-www-form-urlencoded body (an HTML form),
+   // decoded: + is a space and %XX escapes are UTF-8. The name is matched in
+   // any case, as for query params; occurrence picks the nth field with it
+   // (checkboxes, multiple selects). Blank when the body is not a form, has
+   // no such field, or was too large to be read into memory
+dcl-proc RPGAPI_getFormParam export;
+   dcl-pi *n varchar(32000);
+      request likeds(RPGAPI_Request) const;
+      name varchar(1024) const;
+      occurrence int(10:0) const options(*nopass);
+   end-pi;
+   dcl-s wanted int(10:0) inz(1);
+   dcl-s found int(10:0) inz(0);
+   dcl-s start int(10:0) inz(1);
+   dcl-s stop int(10:0);
+   dcl-s equals int(10:0);
+   dcl-s field_name varchar(1024);
+   dcl-s value_length int(10:0);
+      // & and = in ASCII
+   dcl-c AMPERSAND x'26';
+   dcl-c EQUALS_SIGN x'3D';
+
+   if %parms() >= 3;
+      wanted = occurrence;
+   endif;
+   if wanted < 1 or not RPGAPI_startsWith(
+         %upper(RPGAPI_getHeader(request : 'Content-Type')) :
+         'APPLICATION/X-WWW-FORM-URLENCODED');
+      return '';
+   endif;
+      // the body as it was sent: all of it is in memory unless it was
+      // too large and is streamed from the connection
+   if RPGAPI_body_streamed or RPGAPI_body_ptr = *null or
+      RPGAPI_body_length = 0;
+      return '';
+   endif;
+
+   dow start <= RPGAPI_body_length;
+      stop = %scan(AMPERSAND : %subst(RPGAPI_body_bytes : 1 :
+                                      RPGAPI_body_length) : start);
+      if stop = 0;
+         stop = RPGAPI_body_length + 1;
+      endif;
+      if stop > start;
+         equals = %scan(EQUALS_SIGN : %subst(RPGAPI_body_bytes : 1 : stop - 1) :
+                        start);
+         if equals = 0;
+            equals = stop;
+         endif;
+         field_name = '';
+         if equals > start;
+            field_name = RPGAPI_urlDecode(RPGAPI_convert(
+                            %subst(RPGAPI_body_bytes : start :
+                                   %min(equals - start : 1024)) :
+                            RPGAPI_UTF8 : RPGAPI_JOB_CCSID) : *on);
+         endif;
+         if field_name <> '' and %upper(field_name) = %upper(%trim(name));
+            found += 1;
+            if found = wanted;
+               value_length = stop - equals - 1;
+               if value_length <= 0;
+                  return '';
+               endif;
+               return RPGAPI_urlDecode(RPGAPI_convert(
+                         %subst(RPGAPI_body_bytes : equals + 1 :
+                                %min(value_length : 32000)) :
+                         RPGAPI_UTF8 : RPGAPI_JOB_CCSID) : *on);
+            endif;
+         endif;
+      endif;
+      start = stop + 1;
+   enddo;
+   return '';
 end-proc;
 
 

@@ -609,6 +609,26 @@ query_string_param = RPGAPI_getQueryParam(request : 'q');
 ```
 Note: q would be the param name in the query string like `q=fish`
 
+#### Forms
+An HTML form sent with `method="post"` (and no `enctype`) arrives as an
+`application/x-www-form-urlencoded` body, `name=J%C3%BCrgen+Long&tag=a&tag=b`.
+`RPGAPI_getFormParam` reads a field from it, decoded as query params are:
+`+` is a space and `%XX` escapes are UTF-8.
+
+```
+name = RPGAPI_getFormParam(request : 'name');          // Jürgen Long
+second_tag = RPGAPI_getFormParam(request : 'tag' : 2); // b
+```
+
+The name is matched in any case, as for `RPGAPI_getQueryParam`. The optional
+third parameter picks the nth field with the name, for checkboxes and
+multiple selects; it is `''` past the last one. A field that was not sent, or
+was sent empty, gives `''`, and so does any body with another `Content-Type`.
+Values can be up to 32,000 characters, such as a long `<textarea>`, and the
+whole body is searched, also past what `request.body` holds; a body larger
+than the request size limit (1MB), which is streamed from the connection, is
+not. Forms with files (`enctype="multipart/form-data"`) are read with
+`RPGAPI_nextPart`; see Forms with files.
 
 #### Protocol
 The protocol that the request used can be accessed using the following variable 
@@ -944,6 +964,7 @@ include it.
 | `RPGAPI_setMiddleware(app : url : %paddr(proc))` | Add middleware for a path and everything below it, or `*` for all |
 | `RPGAPI_getParam(request : name)` | A route param |
 | `RPGAPI_getQueryParam(request : name)` | A query string value |
+| `RPGAPI_getFormParam(request : name : occurrence?)` | A field of an HTML form body; see Forms |
 | `RPGAPI_getHeader(request : name)` | A request header |
 | `RPGAPI_setHeader(response : name : value)` | Add a response header |
 | `RPGAPI_getCookie(request : name)` | A cookie the client sent |

@@ -17,6 +17,7 @@ server, and each request is handed to your procedure as a data structure.
 - UTF-8 on the wire, converted to and from the job's CCSID
 - Request bodies up to 1MB in memory by default, and larger uploads streamed
   from the connection, with `Content-Length` or chunked encoding
+- HTML form bodies (`application/x-www-form-urlencoded`) read field by field
 - Forms with files (`multipart/form-data`), read part by part and saved to the
   IFS without holding them in memory
 - Streamed responses of any size, and IFS files with caching headers and

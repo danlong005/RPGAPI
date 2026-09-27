@@ -83,6 +83,30 @@ for path in ['/hello/Dan', '/nope']:
     ms = curl_time(path)
     check(f'{path} arrives in under 50ms ({ms:.1f}ms)', ms < 50)
 
+FORM = 'application/x-www-form-urlencoded'
+def form(query, body, content_type=FORM):
+    body = body.encode() if isinstance(body, str) else body
+    return get(f'/form?{query}', f'Content-Type: {content_type}', f'Content-Length: {len(body)}',
+               method='POST', body=body)[2].decode()
+fields = 'name=J%C3%BCrgen+Long&comment=a%26b%3Dc+100%25&tag=x&tag=y&empty=&flag'
+for query, want in [('field=name', 'J\u00fcrgen Long'), ('field=comment', 'a&b=c 100%'),
+                    ('field=tag', 'x'), ('field=tag&n=2', 'y'), ('field=tag&n=3', ''),
+                    ('field=NAME', 'J\u00fcrgen Long'), ('field=empty', ''), ('field=flag', ''),
+                    ('field=missing', '')]:
+    got = form(query, fields)
+    check(f'getFormParam {query}', got == f'<{want}>', got)
+check('Content-Type with a charset', form('field=tag', 'tag=z', FORM + '; charset=UTF-8') == '<z>')
+check('a body that is not a form gives nothing', form('field=a', 'a=1', 'application/json') == '<>')
+long_value = 'w' * 20000
+got = form('field=text', 'text=' + long_value)
+check('a 20,000-character field', got == f'<{long_value}>', len(got))
+got = form('field=last', 'pad=' + 'p' * 40000 + '&last=end')
+check('a field after 40,000 bytes of body', got == '<end>', got[:40])
+import subprocess
+out = subprocess.run(['curl', '-s', '--data-urlencode', 'comment=Gr\u00fc\u00dfe & more; 50% off',
+                      f'http://127.0.0.1:{args.port}/form?field=comment'], capture_output=True).stdout.decode()
+check('curl --data-urlencode round trip', out == '<Gr\u00fc\u00dfe & more; 50% off>', out)
+
 status, headers, _ = get('/moved')
 check('302 with Location', status == 302 and headers.get('location') == '/hello', (status, headers))
 data = exchange(b'GET /conflict HTTP/1.1\r\nHost: x\r\n\r\n')
