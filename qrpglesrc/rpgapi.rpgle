@@ -560,6 +560,7 @@ dcl-proc RPGAPI_acceptConnection;
    end-pi;
    dcl-ds poll_fds likeds(PollFd) dim(1);
    dcl-s descriptor int(10:0);
+   dcl-s no_delay int(10:0) inz(1);
 
    if RPGAPI_connection_open and RPGAPI_waitForNextRequest(config);
       RPGAPI_startRequest();
@@ -594,6 +595,15 @@ dcl-proc RPGAPI_acceptConnection;
       descriptor = accept( config.socket_descriptor : *null : *null );
       if descriptor < 0;
          iter;
+      endif;
+
+         // each write goes out at once. Otherwise TCP holds a small write
+         // back until the client acknowledges the one before, which clients
+         // delay by up to 200ms: a streamed response's pieces would wait
+      if set_socket_options(descriptor : IPPROTO_TCP : TCP_NODELAY :
+                            %addr(no_delay) : %size(no_delay)) < 0;
+         RPGAPI_log(RPGAPI_LOG_WARN : 'TCP_NODELAY could not be set on the ' +
+                    'connection: small writes may be delayed');
       endif;
 
          // with TLS, a client that does not complete the handshake, such as
@@ -3468,7 +3478,8 @@ dcl-proc RPGAPI_sendResponse export;
       response likeds(RPGAPI_Response) const;
    end-pi;
    dcl-s return_code int(10:0) inz(0);
-   dcl-s head varchar(96000);
+      // the head, then the body
+   dcl-s head varchar(192000);
    dcl-s utf8_body varchar(96000);
 
       // Content-Length counts UTF-8 bytes, which is more than the length in
@@ -3478,11 +3489,12 @@ dcl-proc RPGAPI_sendResponse export;
    head = RPGAPI_convert(RPGAPI_buildHead(response : %len(utf8_body)) :
                          RPGAPI_JOB_CCSID : RPGAPI_UTF8);
 
-      // a HEAD response has the Content-Length of the body, but not the body
-   if RPGAPI_sendAll(%addr(head : *data) : %len(head)) and
-      %len(utf8_body) > 0 and not RPGAPI_head_request;
-      RPGAPI_sendAll(%addr(utf8_body : *data) : %len(utf8_body));
+      // a HEAD response has the Content-Length of the body, but not the body.
+      // One write for both, so the body goes out with the head
+   if not RPGAPI_head_request;
+      head += utf8_body;
    endif;
+   RPGAPI_sendAll(%addr(head : *data) : %len(head));
    RPGAPI_closeClient();
 end-proc;
 

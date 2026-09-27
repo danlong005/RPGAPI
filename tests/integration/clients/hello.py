@@ -77,6 +77,12 @@ check('curl cookie jar round trip', got == '<J\u00fcrgen; x=1>', got)
 if os.path.exists(jar):
     os.remove(jar)
 
+    # the head and body go in one write: a body is not held back until the
+    # client acknowledges the head (Nagle and delayed ACK, about 200ms)
+for path in ['/hello/Dan', '/nope']:
+    ms = curl_time(path)
+    check(f'{path} arrives in under 50ms ({ms:.1f}ms)', ms < 50)
+
 status, headers, _ = get('/moved')
 check('302 with Location', status == 302 and headers.get('location') == '/hello', (status, headers))
 data = exchange(b'GET /conflict HTTP/1.1\r\nHost: x\r\n\r\n')

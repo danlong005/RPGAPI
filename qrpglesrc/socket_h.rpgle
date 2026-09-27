@@ -67,6 +67,9 @@ dcl-c SO_SNDLOWAT 65;
 dcl-c SO_SNDTIMEO 70;
 dcl-c SO_TYPE 75;
 dcl-c SO_USELOOPBACK 80;
+   // setsockopt level and option for TCP itself (QSYSINC/NETINET)
+dcl-c IPPROTO_TCP 6;
+dcl-c TCP_NODELAY 10;
 dcl-c INADDR_ANY 0;
    // the most connections listen() will queue
 dcl-c SOMAXCONN 512;

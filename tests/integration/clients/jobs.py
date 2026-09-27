@@ -73,7 +73,8 @@ def drip():
 def others():
     time.sleep(1)
     in_threads(*[slow(n) for n in range(3)])
-threading.Thread(target=drip, daemon=True).start()
+dripping = threading.Thread(target=drip, daemon=True)
+dripping.start()
 others()
 check('requests behind a client sending a byte a second are answered by other jobs',
       all(t < 6 for t, _ in results.values()), results)
@@ -101,6 +102,9 @@ for _ in range(80):
         break
 check('the new worker job serves requests', served, number)
 
+# the job serving the dripping client would finish its request before
+# ending, up to the 30s read timeout: let it end first
+dripping.join(60)
 statuses = slow_requests(4, lambda: end_job(MAIN, '*CNTRLD) DELAY(60'))
 check('controlled end of the main job: requests in flight finish', statuses == [200] * 4, statuses)
 check('then every job ends', wait_for(lambda: not job_list(), 15), job_list())

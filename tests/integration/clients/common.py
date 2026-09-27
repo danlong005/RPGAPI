@@ -130,6 +130,18 @@ def exchange(request, pieces=None, pause=0.5, timeout=60):
     return data
 
 
+def curl_time(path, times=9):
+    """The median time curl takes for path, in ms, over fresh connections:
+    what a client waits for the whole response."""
+    import subprocess
+    totals = []
+    for _ in range(times):
+        out = subprocess.run(['curl', '-s', '-o', '/dev/null', '-w', '%{time_total}',
+                              f'http://127.0.0.1:{args.port}{path}'], capture_output=True, text=True).stdout
+        totals.append(float(out or 'inf') * 1000)
+    return sorted(totals)[len(totals) // 2]
+
+
 def split(data):
     """(status code, headers as a lower-case dict, body) of a response."""
     head, _, body = data.partition(CRLF + CRLF)

@@ -25,6 +25,11 @@ check('20,000-row JSON array parses', complete and len(data) == 20000 and
 status, headers, body = get('/length')
 check('Content-Length stream', headers.get('content-length') == '11' and body == b'hello world', (headers, body))
 
+    # streamed pieces go out as they are written (TCP_NODELAY)
+for path in ['/length', '/stream?rows=10', '/file?name=notes.txt']:
+    ms = curl_time(path)
+    check(f'{path} arrives in under 50ms ({ms:.1f}ms)', ms < 50)
+
 for name, ctype in [('big.bin', 'application/octet-stream'), ('huge.bin', 'application/octet-stream'),
                     ('data.json', 'application/json'), ('pic.png', 'image/png'), ('notes.txt', 'text/plain; charset=utf-8')]:
     status, headers, body = get('/file?name=' + name)

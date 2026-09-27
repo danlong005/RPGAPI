@@ -250,6 +250,19 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Responses with a body took about 200ms longer than they should: the head
+  and the body were two writes, and with Nagle's algorithm TCP held the body
+  back until the client acknowledged the head, which clients delay by up to
+  200ms. `RPGAPI_sendResponse` now sends both in one write, and every
+  connection gets `TCP_NODELAY`, which covers streamed responses and files
+  (head, chunk size lines and data are separate writes). Reported in
+  ibmi_ai's `rpgapi-response-delay.md`. Verified on PUB400 (2026-09-27, curl,
+  median of 9): `/hello/Dan` 219ms before; streamed `/length` 231ms,
+  chunked `/stream` 219ms and `sendFile` 206ms before; 2 to 7ms after (/hello/Dan 6.8ms),
+  as fast as a 404 with no body. Checks added to the hello and stream suites.
+  The jobs suite now waits for its byte-a-second client before ending the
+  main job: it had relied on the delay to finish first, and with fast
+  responses the worker serving it (correctly) finished it before ending
 - [x] Cookie helpers, as in Express: `RPGAPI_getCookie(request : name)` (exact
   name, first one wins, quotes removed, `%XX` decoded),
   `RPGAPI_setCookie(response : name : value : options?)` with an
