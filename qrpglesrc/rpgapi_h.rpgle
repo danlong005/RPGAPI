@@ -433,12 +433,6 @@ dcl-pr RPGAPI_getMessage char(40);
    status zoned(3:0) const;
 end-pr;
 
-dcl-pr RPGAPI_translate ExtPgm('QDCXLATE');
-   length packed(5:0) const;
-   data char(32766) options(*varsize);
-   table char(10) const;
-end-pr;
-
 dcl-pr RPGAPI_initHttp;
 end-pr;
 

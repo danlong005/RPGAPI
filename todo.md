@@ -250,6 +250,16 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] A YAJL example, `examples/yajl-orders.rpgle`: a request body read with
+  `DATA-INTO` and YAJLINTO, the response built with YAJL's generator, and a
+  status built with `DATA-GEN` and YAJLDTAGEN. YAJL is not a dependency of
+  RPGAPI; the example needs it in the library list to build and run (its
+  binding directory names the service programs as `*LIBL`). New `yajl`
+  integration suite runs the example on the test port (skipped without
+  YAJL). Verified on PUB400 (2026-09-27): 201 with the customer
+  `Jürgen "JJ" O\Brien` returned exactly, 0.50 as a valid number, totals,
+  `case=any` and extra fields, broken JSON and no items as 400 JSON errors,
+  and the `DATA-GEN` status
 - [x] Several clients reusing their connections on one job had about half of
   their requests reset: a job waiting on a kept-open connection closed it as
   soon as a new connection was waiting, usually just as its client sent the
@@ -378,12 +388,53 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
+- [ ] Custom 404 and error handlers: `RPGAPI_setNotFound(app : %paddr(proc))`
+  and `RPGAPI_setErrorHandler(app : %paddr(proc))`, the error handler given
+  the escape message's ID and text, so an API can answer with its own (JSON)
+  error body and log failures its own way
+- [ ] The client's IP address (`req.ip`): a `remote_ip` field on the request,
+  with an option to trust `X-Forwarded-For` behind a proxy (nginx, IBM HTTP
+  Server)
+- [ ] Form bodies (`application/x-www-form-urlencoded`):
+  `RPGAPI_getFormParam(request : name)`, decoded like query params
+- [ ] Working with JSON, in the docs rather than helpers in RPGAPI: a section in
+  ApiDocumentation.md on SQL JSON functions (`JSON_OBJECT`, `JSON_ARRAYAGG`,
+  `JSON_TABLE`, `IS JSON`), `DATA-INTO` / `DATA-GEN` with YAJL, and YAJL
+  directly; switch `examples/memberships.sqlrpgle` from hand-built JSON to
+  the SQL functions (the YAJL example is done)
+- [ ] Authentication helpers: `RPGAPI_getBasicAuth(request : user : password)`,
+  `RPGAPI_getBearerToken(request)`, and optionally checking a user and
+  password against the IBM i user profile (QSYGETPH)
+- [ ] Route groups: register routes under a prefix such as `/api/v1` once
+- [ ] Serve a directory of static files: `RPGAPI_serveStatic(app : '/web' :
+  '/www/myapp')` on top of `RPGAPI_sendFile`
+- [ ] A health check / statistics endpoint: uptime, requests served, worker
+  jobs
+- [ ] Security headers in one call, as Express's helmet
+  (`X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security`
+  with HTTPS, ...)
 - [ ] gzip compression of text and JSON responses when the client accepts it
 - [ ] Get the unit tests running: make the iRPGUnit library a Makefile
   variable, try installing iRPGUnit into a library we own on PUB400, and run
   the tests added since (they have never been compiled)
 
 ## Cleanup
+- [ ] Move the internal procedures out of the public header: `rpgapi_h.rpgle`
+  declares `RPGAPI_stop`, `acceptRequest`, `parse`, `routeMatches`,
+  `mwMatches`, `sendResponse`, `buildHead`, `setup`, `setResponse`,
+  `cleanString`, `getMessage` and `initHttp`, which are not exported: an app
+  calling one compiles and then fails to bind. Put them in a private header
+  (e.g. `rpgapi_int_h.rpgle`) for the module and the unit tests, so the
+  public header is exactly what apps can use. Do it together with the next item
+- [ ] Decide whether `RPGAPI_stop` (stop the server from code) and
+  `RPGAPI_setResponse(request : status)` (a response with a status and its
+  message, like Express's `res.sendStatus`) should be exported for apps
+  instead of moved
+- [ ] The unit tests in `qtestsrc` have never been compiled or run: check they
+  still match the code (e.g. `RPGAPI_urlDecode` now takes 4096 characters)
+  when iRPGUnit is available (see Features)
+- [ ] `.vscode/actions.json`: add actions to run the integration suites
+  (`tests/integration/run.sh`) and the load test (`tests/load/stress.py`)
 
 ## PUB400
 - [ ] `BUILD`, `QRPGLESRC` and `RPGWEB` in library `RPGAPI` survive `CLRLIB`

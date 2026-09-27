@@ -23,7 +23,7 @@ TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive examples"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive examples yajl"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
@@ -75,6 +75,26 @@ compile_example() {
   else
     fail "example $file does not compile (see $WORK/compile-$object.log)"
   fi
+}
+
+# compiles an example as $2 with its port changed to PORT, starts it, runs
+# client $3 against it, and ends it; libraries it needs as well in $4
+example_suite() {
+  file=$1 object=$2 extra=$4
+  sed "s/RPGAPI_start(app : 8080)/RPGAPI_start(app : $PORT)/" "$REPO/examples/$file" > "$WORK/$file"
+  cl "CHGATR OBJ('$WORK/$file') ATR(*CCSID) VALUE(1252)" >/dev/null
+  cl "DLTOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null
+  $QSH -c "liblist -a $LIB $extra >/dev/null 2>&1; system \"CRTBNDRPG PGM($LIB/$object) SRCSTMF('$WORK/$file') INCDIR('$REPO/qrpglesrc') TGTCCSID(*JOB)\"" </dev/null > "$WORK/compile-$object.log" 2>&1
+  if ! cl "CHKOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null; then
+    fail "example $file does not compile (see $WORK/compile-$object.log)"
+    return
+  fi
+  if start_app "$object" "$LIB $extra QGPL QTEMP"; then
+    client "$3"
+  else
+    fail "example $file did not start listening on port $PORT"
+  fi
+  stop_app "$object" || fail "example $file did not end"
 }
 
 # settings for the next app: log level;request limit;upload limit;timeout;jobs;tls;cors
@@ -225,6 +245,11 @@ for suite_name in $SUITES; do
                compile_example upload.rpgle EXUPLOAD
                compile_example production.rpgle EXPROD
                compile_example memberships.sqlrpgle EXMEMBERS ;;
+    yajl)      if cl "CHKOBJ OBJ(YAJL/YAJLINTO) OBJTYPE(*PGM)" >/dev/null; then
+                 example_suite yajl-orders.rpgle EXYAJL yajl YAJL
+               else
+                 echo "YAJL is not installed in library YAJL: skipped"
+               fi ;;
     *)         fail "no suite called $suite_name" ;;
   esac
 done
