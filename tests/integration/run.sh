@@ -23,7 +23,7 @@ TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers examples yajl"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers examples sqljson yajl"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
@@ -82,10 +82,15 @@ compile_example() {
 # client $3 against it, and ends it; libraries it needs as well in $4
 example_suite() {
   file=$1 object=$2 extra=$4
-  sed "s/RPGAPI_start(app : 8080)/RPGAPI_start(app : $PORT)/" "$REPO/examples/$file" > "$WORK/$file"
+  sed -e "s/RPGAPI_start(app : 8080)/RPGAPI_start(app : $PORT)/" \
+      -e "s/app.port = [0-9]*;/app.port = $PORT;/" "$REPO/examples/$file" > "$WORK/$file"
   cl "CHGATR OBJ('$WORK/$file') ATR(*CCSID) VALUE(1252)" >/dev/null
   cl "DLTOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null
-  $QSH -c "liblist -a $LIB $extra >/dev/null 2>&1; system \"CRTBNDRPG PGM($LIB/$object) SRCSTMF('$WORK/$file') INCDIR('$REPO/qrpglesrc') TGTCCSID(*JOB)\"" </dev/null > "$WORK/compile-$object.log" 2>&1
+  case $file in
+    *.sqlrpgle) command="CRTSQLRPGI OBJ($LIB/$object) SRCSTMF('$WORK/$file') CVTCCSID(*JOB) COMPILEOPT('INCDIR(''$REPO/qrpglesrc'') TGTCCSID(*JOB)')" ;;
+    *)          command="CRTBNDRPG PGM($LIB/$object) SRCSTMF('$WORK/$file') INCDIR('$REPO/qrpglesrc') TGTCCSID(*JOB)" ;;
+  esac
+  $QSH -c "liblist -a $LIB $extra >/dev/null 2>&1; system \"$command\"" </dev/null > "$WORK/compile-$object.log" 2>&1
   if ! cl "CHKOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null; then
     fail "example $file does not compile (see $WORK/compile-$object.log)"
     return
@@ -136,7 +141,7 @@ stop_app() {
 }
 
 client() {
-  RPGAPI_TEST_JOB="$JOB" "$PYTHON" "$TESTS/clients/$1.py" --port "$PORT" --work "$WORK" --timeout "$TIMEOUT" "$2" > "$WORK/client.out" 2>&1
+  RPGAPI_TEST_JOB="$JOB" RPGAPI_TEST_LIB="$LIB" "$PYTHON" "$TESTS/clients/$1.py" --port "$PORT" --work "$WORK" --timeout "$TIMEOUT" "$2" > "$WORK/client.out" 2>&1
   status=$?
   cat "$WORK/client.out"
   PASSED=$((PASSED + $(grep -c '^PASS ' "$WORK/client.out")))
@@ -253,6 +258,8 @@ for suite_name in $SUITES; do
                compile_example upload.rpgle EXUPLOAD
                compile_example production.rpgle EXPROD
                compile_example memberships.sqlrpgle EXMEMBERS ;;
+    sqljson)   example_suite notes-api.sqlrpgle EXNOTES notes
+               example_suite memberships.sqlrpgle EXMEMBERS memberships ;;
     yajl)      if cl "CHKOBJ OBJ(YAJL/YAJLINTO) OBJTYPE(*PGM)" >/dev/null; then
                  example_suite yajl-orders.rpgle EXYAJL yajl YAJL
                else

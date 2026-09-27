@@ -823,6 +823,107 @@ for a GET it answers:
   Several ranges get the whole file, and so does a range whose `If-Range`
   names an older version of the file
 
+### Working with JSON
+RPGAPI hands your procedure the request body as text and sends back the text
+you put in `response.body`: building and reading JSON is up to your program.
+Do not build JSON by joining strings with your data in them: a quote, a
+backslash or a line break in a value breaks the document (or lets a client
+change it). Let one of these do it; each escapes values properly and handles
+characters outside ASCII. Set `Content-Type: application/json` on the
+response either way.
+
+**SQL's JSON functions** are part of Db2 for i, so there is nothing to
+install, and they are the shortest way when the data comes from tables:
+
+```
+   // one row as an object
+exec sql select json_object('id' value id,
+                            'first_name' value trim(fname),
+                            'last_name' value trim(lname))
+           into :json
+           from members where id = :id;
+
+   // all rows as an array ('[]' when there are none)
+exec sql select coalesce(json_arrayagg(
+                  json_object('id' value id, 'title' value title)
+                  order by id), '[]')
+           into :json
+           from notes;
+
+   // fields of the request body; a missing one is null
+body = request.body;
+exec sql select title, text into :title :title_ind, :text :text_ind
+           from json_table(:body, 'lax $'
+                columns(title varchar(100) path 'lax $.title',
+                        text varchar(2000) path 'lax $.text'));
+
+   // one value, and whether the body is JSON at all
+exec sql values json_value(:body, 'lax $.customer') into :customer;
+exec sql values case when :body is json then 1 else 0 end into :valid;
+```
+
+`JSON_OBJECT` and `JSON_ARRAY` nest, and `ABSENT ON NULL` leaves out null
+values. See [notes-api.sqlrpgle](examples/notes-api.sqlrpgle) (a whole JSON
+API over a table) and [memberships.sqlrpgle](examples/memberships.sqlrpgle).
+
+**`DATA-INTO` and `DATA-GEN` with YAJL** map JSON onto RPG data structures,
+nested ones and arrays included. They need
+[YAJL](https://www.scottklement.com/yajl/), which many IBM i shops have
+installed; RPGAPI does not need it. The subfield names are the JSON names:
+
+```
+dcl-ds order qualified;
+   customer varchar(100);
+   num_items int(10:0);             // how many items came (countprefix)
+   dcl-ds items dim(20);
+      sku varchar(20);
+      qty int(10:0);
+   end-ds;
+end-ds;
+
+data-into order %data(request.body :
+                      'case=any countprefix=num_ allowmissing=yes allowextra=yes')
+                %parser('YAJL/YAJLINTO');
+
+data-gen status %data(json : 'doc=string output=clear')
+                %gen('YAJL/YAJLDTAGEN');
+```
+
+Put `DATA-INTO` in a `monitor` block and answer 400 when it fails: the client
+sent something that is not JSON, or not the shape you expect.
+
+**YAJL's generator** builds a document piece by piece, for output whose shape
+depends on the data:
+
+```
+yajl_genOpen(*off);                      // *on: indented, for reading
+yajl_beginObj();
+yajl_addChar('customer' : order.customer);
+yajl_beginArray('items');
+for index = 1 to order.num_items;
+   yajl_beginObj();
+   yajl_addChar('sku' : order.items(index).sku);
+   yajl_addNum('qty' : %char(order.items(index).qty));
+   yajl_endObj();
+endfor;
+yajl_endArray();
+yajl_endObj();
+yajl_copyBuf(0 : %addr(buffer) : %size(buffer) : length);  // 0: the job's CCSID
+yajl_genClose();
+response.body = %subst(buffer : 1 : length);
+```
+
+`yajl_addNum` takes the number as text, and `%char` of a decimal below 1 gives
+`.50`, which is not valid JSON: add the leading 0. See
+[yajl-orders.rpgle](examples/yajl-orders.rpgle), which uses all three YAJL
+ways; YAJL has to be in the library list to build and run it.
+
+`request.body` holds bodies of up to 32,000 characters. For larger JSON, read
+the body with `RPGAPI_readBody`, or save it with `RPGAPI_saveBody` and parse
+the file (`DATA-INTO` with `doc=file`, or YAJL's `yajl_stmf_load_tree`). For
+large responses,
+see Large responses and streaming.
+
 ### Not found and errors
 Without handlers, a request no route matches is answered with a plain `404`,
 and a request that fails with a plain `500` (or `400`, `408`, `413`, `431` or

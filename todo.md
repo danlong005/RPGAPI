@@ -250,6 +250,18 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Working with JSON, in the docs rather than helpers in RPGAPI: a section
+  in ApiDocumentation.md on SQL's JSON functions (`JSON_OBJECT`,
+  `JSON_ARRAYAGG`, `JSON_TABLE`, `JSON_VALUE`, `IS JSON`), `DATA-INTO` /
+  `DATA-GEN` with YAJL, and YAJL's generator, with a warning against joining
+  strings. `examples/memberships.sqlrpgle` builds its JSON with
+  `JSON_OBJECT` instead of by hand (its `JSON_escape` is gone) and answers
+  404 with a JSON error. New `sqljson` suite runs `notes-api` and
+  `memberships` for real (they were only compiled): JSON_TABLE and
+  JSON_OBJECT round-trip quotes, a backslash, a newline and umlauts,
+  JSON_ARRAYAGG lists in order, PUT, DELETE, 400s and 404s; memberships reads
+  a TESTDTA table the client creates. JSON_VALUE and IS JSON checked on
+  PUB400 by hand (2026-09-27)
 - [x] Form bodies: `RPGAPI_getFormParam(request : name : occurrence?)` reads a
   field of an `application/x-www-form-urlencoded` body from the bytes as sent
   (so the whole in-memory body, past what `request.body` holds), decoded as
@@ -434,11 +446,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Working with JSON, in the docs rather than helpers in RPGAPI: a section in
-  ApiDocumentation.md on SQL JSON functions (`JSON_OBJECT`, `JSON_ARRAYAGG`,
-  `JSON_TABLE`, `IS JSON`), `DATA-INTO` / `DATA-GEN` with YAJL, and YAJL
-  directly; switch `examples/memberships.sqlrpgle` from hand-built JSON to
-  the SQL functions (the YAJL example is done)
 - [ ] Authentication helpers: `RPGAPI_getBasicAuth(request : user : password)`,
   `RPGAPI_getBearerToken(request)`, and optionally checking a user and
   password against the IBM i user profile (QSYGETPH)

@@ -1,12 +1,17 @@
 **free
 
-   // Middleware on all routes and on one path, a route param, and SQL.
-   // MBR_show reads a table TESTDTA (ID, FNAME, LNAME) that you provide.
+   // Middleware on all routes and on one path, a route param, and SQL that
+   // builds the JSON (JSON_OBJECT escapes the names, so quotes and
+   // backslashes in them are safe). MBR_show reads a table TESTDTA
+   // (ID, FNAME, LNAME) in the library list that you provide, such as:
+   //   CREATE TABLE MYLIB.TESTDTA (ID DECIMAL(11, 0) NOT NULL PRIMARY KEY,
+   //                               FNAME CHAR(25), LNAME CHAR(25))
    // Build it with the RPGAPI binding directory's library in the library list:
    //   CRTSQLRPGI OBJ(MYLIB/APP) SRCSTMF('<clone>/examples/memberships.sqlrpgle')
    //              CVTCCSID(*JOB)
    //              COMPILEOPT('INCDIR(''<clone>/qrpglesrc'') TGTCCSID(*JOB)')
    // Try: curl http://your-ibm-i:3012/api/v1/memberships/1
+   //   -> {"id":1,"first_name":"Anna","last_name":"Berg"}
 
 ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI')
               dftactgrp(*no);
@@ -16,10 +21,6 @@ ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI')
 dcl-ds request likeds(RPGAPI_Request);
 dcl-ds response likeds(RPGAPI_Response);
 dcl-ds app likeds(RPGAPI_App);
-
-dcl-pr JSON_escape varchar(1000);
-   value varchar(1000) const;
-end-pr;
 
 clear app;
 app.port = 3012;
@@ -51,49 +52,27 @@ dcl-proc MBR_show;
       request likeds(RPGAPI_Request) const;
    end-pi;
    dcl-s id_number zoned(11:0) inz;
-   dcl-ds row qualified;
-      id zoned(11:0);
-      first_name char(25);
-      last_name char(25);
-   end-ds;
+   dcl-s json varchar(1000);
 
-   clear row;
    id_number = %dec(RPGAPI_getParam(request: 'id') : 11 : 0);
 
-   exec sql select id, fname, lname
-                  into :row
+      // the row as a JSON object, escaped by SQL
+   exec sql select json_object('id' value id,
+                               'first_name' value trim(fname),
+                               'last_name' value trim(lname))
+                  into :json
                   from testdta
                   where id = :id_number;
 
    clear response;
-   response.status = HTTP_OK;
    RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
-         
-   if row.id <> *zeros;
-      response.body = '{"id":' + %trim(%char(row.id)) +
-                      ',"first_name":"' +
-                            JSON_escape(%trim(row.first_name)) + '"' +
-                      ',"last_name":"' +
-                            JSON_escape(%trim(row.last_name)) + '"' +
-                      '}';
-   else;
+   if sqlcode = 100;
       response.status = HTTP_NOT_FOUND;
+      response.body = '{"error":"no such membership"}';
+   else;
+      response.status = HTTP_OK;
+      response.body = json;
    endif;
 
    return response;
-end-proc;
-
-
-       // Escapes the characters JSON requires to be escaped, so that a value
-       // containing a quote or a backslash cannot break the string it is
-       // concatenated into.
-dcl-proc JSON_escape;
-   dcl-pi *n varchar(1000);
-      value varchar(1000) const;
-   end-pi;
-
-         // backslashes first: escaping them afterwards would double the
-         // backslashes introduced when escaping the quotes
-   return %scanrpl('"' : '\"' :
-                %scanrpl('\' : '\\' : value));
 end-proc;

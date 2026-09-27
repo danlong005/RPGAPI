@@ -53,6 +53,7 @@ time, so a queue that runs one job at a time is fine.
 | `keepalive` | `hello` | two requests on one connection, 4 clients reusing connections without a reset, pipelining, the request limit, the idle timeout, an idle connection giving way to a new client, `Connection: close` and HTTP/1.0, 404 and HEAD kept open, keep-alive off |
 | `proxy` | `hello` | `request.remote_ip` and `connection_ip`: `X-Forwarded-For` ignored from untrusted clients, read from the right past trusted proxies (spoofed entries, IPv6, bad entries), and the leftmost with `*` |
 | `handlers` | `handlers` | custom not-found and error handlers: JSON 404s (also HEAD and OPTIONS), status 0 as 404, escape messages from routes and middleware, a failing handler, body failures and refusals (413, 431), a failed streamed response left alone |
+| `sqljson` | `examples/notes-api.sqlrpgle`, `examples/memberships.sqlrpgle` | JSON built and read by SQL: `JSON_TABLE` and `JSON_OBJECT` round-tripping quotes, backslashes, line breaks and umlauts, `JSON_ARRAYAGG`, PUT, DELETE, 400s and 404s; memberships reads a `TESTDTA` table the client creates |
 | `yajl` | `examples/yajl-orders.rpgle` | JSON read with `DATA-INTO` and YAJLINTO (escapes, `case=any`, extra fields, broken JSON as 400) and written with YAJL's generator and `DATA-GEN`; skipped when YAJL is not installed |
 | `tls` | `tls` | an unregistered application ID and a missing keystore stop the server with GSKit's reason; plain HTTP without TLS |
 

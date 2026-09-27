@@ -13,7 +13,7 @@ build it, run it and try it with curl.
 | [upload.rpgle](upload.rpgle) | A browser upload form, and `multipart/form-data` files saved to the IFS with `RPGAPI_savePart` |
 | [production.rpgle](production.rpgle) | Every setting in one place: jobs, limits, timeouts, logging, HTTPS, and JSON answers for 404s and errors |
 | [yajl-orders.rpgle](yajl-orders.rpgle) | JSON with YAJL: a request body read with `DATA-INTO` and YAJLINTO, a response built with YAJL's generator, and one with `DATA-GEN`. Needs YAJL in library YAJL, in the library list to build and run |
-| [memberships.sqlrpgle](memberships.sqlrpgle) | Middleware for all routes and for one path, and a route param read from a table you provide |
+| [memberships.sqlrpgle](memberships.sqlrpgle) | Middleware for all routes and for one path, and a route param read from a table you provide, as JSON built by `JSON_OBJECT` |
 
 All of them listen on port 8080 (memberships on 3012). Build them with the
 library holding the RPGAPI binding directory in your library list, and
@@ -22,4 +22,5 @@ library holding the RPGAPI binding directory in your library list, and
 
 The [integration tests](../tests/integration/README.md) compile every example
 (`run.sh examples`), so they keep building as RPGAPI changes, and run
-`yajl-orders` against its checks (`run.sh yajl`).
+`notes-api` and `memberships` (`run.sh sqljson`) and `yajl-orders`
+(`run.sh yajl`) against their checks.
