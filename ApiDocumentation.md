@@ -16,6 +16,8 @@
           query_string char(1024);
           route char(250);
           header_text varchar(32000);              // for RPGAPI_getHeader
+          remote_ip varchar(45);                   // see Client address
+          connection_ip varchar(45);
         end-ds;
 
         //
@@ -55,6 +57,7 @@
           keepalive_requests int(10:0);
           not_found_handler pointer(*proc);        // see Not found and errors
           error_handler pointer(*proc);
+          trusted_proxies varchar(1000);           // see Client address
         end-ds;
 
         //
@@ -148,6 +151,8 @@ Set them with these procedures, which check the values, before
 | `tls_...` | `RPGAPI_setTlsApplication(app : id)` or `RPGAPI_setTlsKeystore(app : path : password : label)` | plain HTTP |
 | `cors_...` | `RPGAPI_setCors(app : origins)`, and the other `cors_` fields; see CORS | no CORS |
 | `keepalive_timeout`, `keepalive_requests` | `RPGAPI_setKeepAlive(app : seconds : maxRequests)`; see Keep-alive | 5 seconds, 100 requests |
+| `trusted_proxies` | `RPGAPI_setTrustedProxies(app : addresses)`; see Client address | none |
+| `not_found_handler`, `error_handler` | `RPGAPI_setNotFound(app : %paddr(proc))`, `RPGAPI_setErrorHandler(app : %paddr(proc))`; see Not found and errors | plain 404 and 500 |
 
 A setter given a value it does not accept ends your program with escape
 message `CPF9898` saying why. Every job serving the app, including the extra
@@ -424,6 +429,33 @@ The name is matched exactly (cookie names are case-sensitive), a value in
 quotes comes back without them, and `%XX` escapes are decoded, as Express's
 `req.cookies` does, so a value set with `RPGAPI_setCookie` comes back as it was
 set. A cookie that was not sent gives `''`.
+
+#### Client address
+`request.remote_ip` is the client's IP address, as Express's `req.ip`, for
+logging, limits or allowing only some addresses. `request.connection_ip` is
+the address the connection came from. Without a proxy in front of the app,
+they are the same.
+
+Behind a proxy, such as nginx, IBM HTTP Server or a load balancer, every
+connection comes from the proxy, and the proxy passes the client's address in
+the `X-Forwarded-For` header. List the proxies' addresses, so that RPGAPI uses
+it:
+
+```
+RPGAPI_setTrustedProxies(app : '10.0.0.5 10.0.0.6');
+```
+
+Only a request whose connection comes from one of them gets `remote_ip` from
+`X-Forwarded-For`; anyone else could send the header with any address. The
+header lists every hop (`client, proxy1, proxy2`), and a client can put
+addresses of its own in front, so RPGAPI reads it from the right, skipping
+the trusted proxies: the first address that is not one of them is the client.
+`'*'` trusts every connection and takes the leftmost address; use it only when
+nothing can reach the app except through the proxy. Addresses are compared
+exactly (no ranges such as `10.0.0.0/8`).
+
+The INFO log line for each request shows `remote_ip`, as in
+`GET /hello from 203.0.113.9 -> 200, 11 bytes, 3 ms`.
 
 #### Params
 These are the route params that came in on the request. To define route params in your route see the section on routing. You can access the params using the following api method
@@ -899,6 +931,7 @@ include it.
 | --- | --- |
 | `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
 | `RPGAPI_setCors(app : origins)` | Allow browsers on these origins to call the app; see CORS |
+| `RPGAPI_setTrustedProxies(app : addresses)` | Proxies whose `X-Forwarded-For` gives the client's address; see Client address |
 | `RPGAPI_setNotFound(app : %paddr(proc))` | Answer requests no route matches; see Not found and errors |
 | `RPGAPI_setErrorHandler(app : %paddr(proc))` | Answer requests that fail; see Not found and errors |
 | `RPGAPI_setKeepAlive(app : seconds : maxRequests?)` | How long connections stay open between requests, 0 for not at all |

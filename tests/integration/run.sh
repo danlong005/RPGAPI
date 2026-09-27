@@ -23,7 +23,7 @@ TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive handlers examples yajl"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers examples yajl"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
@@ -31,6 +31,7 @@ FAILURES=""
 JOB=""
 CORS=""
 KEEPALIVE=""
+PROXIES=""
 
 cl() { system "$1" </dev/null 2>&1; }
 # the first value of an SQL query
@@ -98,9 +99,10 @@ example_suite() {
 }
 
 # settings for the next app: log level;request limit;upload limit;timeout;jobs;tls;cors
+# (and CORS, KEEPALIVE and PROXIES from the environment)
 configure() {
   cl "CRTDTAARA DTAARA($LIB/TESTCFG) TYPE(*CHAR) LEN(500)" >/dev/null
-  cl "CHGDTAARA DTAARA($LIB/TESTCFG) VALUE('$PORT;$1;$WORK;$2;$CORS;$KEEPALIVE')" >/dev/null
+  cl "CHGDTAARA DTAARA($LIB/TESTCFG) VALUE('$PORT;$1;$WORK;$2;$CORS;$KEEPALIVE;$PROXIES')" >/dev/null
 }
 
 # submits an app and waits for it to listen; library list in $2
@@ -237,6 +239,11 @@ for suite_name in $SUITES; do
                  KEEPALIVE="2,3"; suite hello ";;;;" keepalive on
                  KEEPALIVE="0,1"; suite hello ";;;;" keepalive off
                  KEEPALIVE=""; } ;;
+    proxy)     compile hello && {
+                 suite hello ";;;;" proxy none
+                 PROXIES="127.0.0.1 10.0.0.1"; suite hello ";;;;" proxy trusted
+                 PROXIES="*"; suite hello ";;;;" proxy any
+                 PROXIES=""; } ;;
     handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
     examples)  compile_example hello.rpgle EXHELLO
                compile_example notes-api.sqlrpgle EXNOTES

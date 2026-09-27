@@ -4,7 +4,7 @@
    // this, the procedure, at the end. It applies the settings the runner leaves in the
    // data area TESTCFG in the program's own library, as
    // port;log level;max request size;max upload size;timeout;jobs;work dir;tls;cors;
-   // keep-alive as seconds,max requests
+   // keep-alive as seconds,max requests;trusted proxies
    // Empty fields are left at RPGAPI's defaults. tls is APP:<id> or
    // KDB:<path>:<password>:<label>
 
@@ -12,7 +12,7 @@ dcl-proc testSettings;
    dcl-pi *n;
       app likeds(RPGAPI_App);
    end-pi;
-   dcl-s fields varchar(500) dim(10);
+   dcl-s fields varchar(500) dim(11);
    dcl-s keepalive varchar(500) dim(2);
    dcl-s tls varchar(500) dim(4);
    dcl-s index int(10:0);
@@ -55,6 +55,9 @@ dcl-proc testSettings;
    if fields(10) <> '';
       keepalive = %split(fields(10) : ',');
       RPGAPI_setKeepAlive(app : %int(keepalive(1)) : %int(keepalive(2)));
+   endif;
+   if fields(11) <> '';
+      RPGAPI_setTrustedProxies(app : fields(11));
    endif;
    if fields(8) <> '';
       tls = %split(fields(8) : ':');

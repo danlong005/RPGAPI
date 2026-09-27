@@ -21,6 +21,7 @@ RPGAPI_get(app : '/cookie/get' : %paddr(cookieGet));
 RPGAPI_get(app : '/cookie/set' : %paddr(cookieSet));
 RPGAPI_get(app : '/cookie/clear' : %paddr(cookieClear));
 RPGAPI_get(app : '/cookie/bad' : %paddr(cookieBad));
+RPGAPI_get(app : '/ip' : %paddr(ip));
 testSettings(app);
 RPGAPI_start(app);
 
@@ -170,6 +171,18 @@ dcl-proc cookieBad;
 
    RPGAPI_setCookie(response : 'a b' : 'x');
    response.status = HTTP_OK;
+   return response;
+end-proc;
+
+   // the client's address and the connection's: remote|connection
+dcl-proc ip;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+
+   response.status = HTTP_OK;
+   response.body = request.remote_ip + '|' + request.connection_ip;
    return response;
 end-proc;
 

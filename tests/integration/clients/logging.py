@@ -49,7 +49,7 @@ if level >= 1:
 if level >= 2:
     check('WARN gives the 413 and 501 reasons', any('answered 413' in m for m in log) and any('answered 501' in m for m in log))
 if level >= 3:
-    check('INFO line per request', any(m.startswith('RPGAPI INFO #1: GET /hello -> 200, ') and m.endswith(' ms') for m in log), log)
+    check('INFO line per request', any(m.startswith('RPGAPI INFO #1: GET /hello from 127.0.0.1 -> 200, ') and m.endswith(' ms') for m in log), log)
 if level >= 4:
     check('Authorization is not logged', not any('SECRET123' in m for m in log) and
           any('Authorization: (not logged)' in m for m in log))

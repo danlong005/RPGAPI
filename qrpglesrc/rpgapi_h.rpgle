@@ -40,6 +40,11 @@ dcl-ds RPGAPI_Request qualified template;
       // the header lines as sent (converted), each after a CR LF: where
       // RPGAPI_getHeader finds values longer than headers(n).value holds
    header_text varchar(32000);
+      // the client's IP address. From a trusted proxy (see
+      // RPGAPI_setTrustedProxies), the one it forwarded in X-Forwarded-For
+   remote_ip varchar(45);
+      // the address the connection came from: the client, or its proxy
+   connection_ip varchar(45);
 end-ds;
 
 dcl-ds RPGAPI_Response qualified template;
@@ -119,6 +124,9 @@ dcl-ds RPGAPI_App qualified template;
       // RPGAPI_setErrorHandler)
    not_found_handler pointer(*proc);
    error_handler pointer(*proc);
+      // proxies whose X-Forwarded-For gives the client's address, separated
+      // by spaces or commas, or '*' for any. Blank: none
+   trusted_proxies varchar(1000);
 end-ds;
 
    // what went wrong, for the error handler
@@ -254,6 +262,14 @@ end-pr;
 dcl-pr RPGAPI_setMaxRequestSize;
    config likeds(RPGAPI_App);
    bytes int(10:0) const;
+end-pr;
+
+   // proxies in front of the app (nginx, IBM HTTP Server, a load balancer):
+   // their IP addresses, separated by spaces or commas, or '*' for any. A
+   // request from one of them gets request.remote_ip from X-Forwarded-For
+dcl-pr RPGAPI_setTrustedProxies;
+   config likeds(RPGAPI_App);
+   proxies varchar(1000) const;
 end-pr;
 
    // a procedure to answer when no route matches, instead of the plain 404.

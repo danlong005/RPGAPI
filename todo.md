@@ -250,6 +250,19 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] The client's IP address: `request.remote_ip` (Express's `req.ip`) and
+  `request.connection_ip`, from `getpeername` after `accept`.
+  `RPGAPI_setTrustedProxies(app : addresses)` (new `trusted_proxies` app
+  field, '*' for any): only a connection from a trusted proxy gets
+  `remote_ip` from `X-Forwarded-For`, read from the right past the trusted
+  proxies (so entries a client puts in front are ignored); an entry that is
+  not an address stops it. The INFO log line shows the address ("GET /hello
+  from 127.0.0.1 -> 200, ..."), the DEBUG accept line too. Request and app
+  layouts changed (recompile). Verified on PUB400 (2026-09-27, new proxy
+  suite in three modes): untrusted header ignored; 203.0.113.9 through a
+  spoofed entry and a trusted chain; all-trusted gives the leftmost; IPv6;
+  a bad entry falls back to the connection; '*' takes the leftmost; logging
+  suite with the new line
 - [x] Custom 404 and error handlers: `RPGAPI_setNotFound(app : %paddr(proc))`
   (a route procedure, run when no route matches, after middleware; status 0
   is sent as 404; automatic OPTIONS answers still come first) and
@@ -412,9 +425,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] The client's IP address (`req.ip`): a `remote_ip` field on the request,
-  with an option to trust `X-Forwarded-For` behind a proxy (nginx, IBM HTTP
-  Server)
 - [ ] Form bodies (`application/x-www-form-urlencoded`):
   `RPGAPI_getFormParam(request : name)`, decoded like query params
 - [ ] Working with JSON, in the docs rather than helpers in RPGAPI: a section in

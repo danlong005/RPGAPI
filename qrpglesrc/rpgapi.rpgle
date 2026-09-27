@@ -63,6 +63,11 @@ dcl-c RPGAPI_DEFAULT_REQUEST_SIZE 1048576;
    // CORS, from the app's settings, and for the request being answered the
    // Access-Control-Allow-Origin to send ('' for none)
 dcl-s RPGAPI_cors_origins varchar(2000);
+   // proxies trusted for X-Forwarded-For: ' ' + addresses + ' ', or '*'
+dcl-s RPGAPI_trusted_proxies varchar(1002);
+   // the address the current connection came from, and the client's
+dcl-s RPGAPI_connection_ip varchar(45);
+dcl-s RPGAPI_request_ip varchar(45);
 dcl-s RPGAPI_cors_credentials ind inz(*off);
 dcl-s RPGAPI_cors_max_age int(10:0) inz(0);
 dcl-s RPGAPI_cors_allow_headers varchar(1000);
@@ -411,6 +416,9 @@ dcl-proc RPGAPI_start export;
       monitor;
          clear request;
          request = RPGAPI_acceptRequest(config);
+         request.connection_ip = RPGAPI_connection_ip;
+         request.remote_ip = RPGAPI_clientAddress(request);
+         RPGAPI_request_ip = request.remote_ip;
 
             // refused (413, 431, ...): answer with that status. Otherwise no
             // complete request arrived in time, and there is nothing to answer
@@ -618,6 +626,8 @@ dcl-proc RPGAPI_acceptConnection;
          iter;
       endif;
 
+      RPGAPI_connection_ip = RPGAPI_peerAddress(descriptor);
+
          // each write goes out at once. Otherwise TCP holds a small write
          // back until the client acknowledges the one before, which clients
          // delay by up to 200ms: a streamed response's pieces would wait
@@ -645,8 +655,8 @@ dcl-proc RPGAPI_acceptConnection;
       RPGAPI_input_start = 1;
       RPGAPI_input_end = 0;
       RPGAPI_startRequest();
-      RPGAPI_log(RPGAPI_LOG_DEBUG : 'connection accepted' +
-                 RPGAPI_tlsDescriptionShort());
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'connection accepted from ' +
+                 RPGAPI_connection_ip + RPGAPI_tlsDescriptionShort());
       return *on;
    enddo;
 end-proc;
@@ -660,6 +670,7 @@ dcl-proc RPGAPI_startRequest;
    RPGAPI_in_request = *on;
    RPGAPI_request_route = '';
    RPGAPI_request_method = '';
+   RPGAPI_request_ip = RPGAPI_connection_ip;
    RPGAPI_response_status = 0;
    RPGAPI_bytes_sent = 0;
    RPGAPI_keep_connection = *off;
@@ -1427,6 +1438,119 @@ dcl-proc RPGAPI_setCors export;
 end-proc;
 
 
+dcl-proc RPGAPI_setTrustedProxies export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      proxies varchar(1000) const;
+   end-pi;
+
+   config.trusted_proxies = %trim(proxies);
+end-proc;
+
+
+   // the IPv4 address of the other end of a connection, such as 10.1.2.3;
+   // blank when it cannot be had
+dcl-proc RPGAPI_peerAddress;
+   dcl-pi *n varchar(45);
+      descriptor int(10:0) const;
+   end-pi;
+   dcl-ds address likeds(socketaddr);
+   dcl-s length int(10:0);
+   dcl-ds octets;
+      whole uns(10:0);
+      first uns(3:0) overlay(whole);
+      second uns(3:0) overlay(whole : *next);
+      third uns(3:0) overlay(whole : *next);
+      fourth uns(3:0) overlay(whole : *next);
+   end-ds;
+
+   clear address;
+   length = %size(address);
+   if getpeername(descriptor : %addr(address) : length) < 0;
+      return '';
+   endif;
+      // in network order, as IBM i keeps numbers: first octet first
+   whole = address.sin_addr;
+   return %char(first) + '.' + %char(second) + '.' + %char(third) + '.' +
+          %char(fourth);
+end-proc;
+
+
+   // the client's address: the connection's, unless it comes from a trusted
+   // proxy. Then X-Forwarded-For (client, proxy1, proxy2, ...) is read from
+   // the right, past the trusted proxies: the first address that is not one
+   // is the client, as addresses further left could be made up. With '*',
+   // the leftmost. An entry that is not an address stops the search
+dcl-proc RPGAPI_clientAddress;
+   dcl-pi *n varchar(45);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-s forwarded varchar(32000);
+   dcl-s entries varchar(100) dim(50);
+   dcl-s count int(10:0) inz(0);
+   dcl-s comma int(10:0);
+   dcl-s index int(10:0);
+   dcl-s client varchar(45);
+
+   client = RPGAPI_connection_ip;
+   if RPGAPI_trusted_proxies = '' or not RPGAPI_trustedProxy(client);
+      return client;
+   endif;
+   forwarded = RPGAPI_getHeader(request : 'X-Forwarded-For');
+   dow forwarded <> '' and count < %elem(entries);
+      count += 1;
+      comma = %scan(',' : forwarded);
+      if comma = 0;
+         entries(count) = %trim(forwarded);
+         forwarded = '';
+      else;
+         entries(count) = %trim(%subst(forwarded : 1 : comma - 1));
+         forwarded = %trim(%subst(forwarded : comma) : ', ');
+      endif;
+   enddo;
+
+   if RPGAPI_trusted_proxies = '*';
+      if count > 0 and RPGAPI_isAddress(entries(1));
+         client = entries(1);
+      endif;
+      return client;
+   endif;
+   for index = count downto 1;
+      if not RPGAPI_isAddress(entries(index));
+         leave;
+      endif;
+      client = entries(index);
+      if not RPGAPI_trustedProxy(client);
+         leave;
+      endif;
+   endfor;
+   return client;
+end-proc;
+
+
+   // whether an address is one of the trusted proxies
+dcl-proc RPGAPI_trustedProxy;
+   dcl-pi *n ind;
+      address varchar(100) const;
+   end-pi;
+
+   return RPGAPI_trusted_proxies = '*' or
+          (address <> '' and %scan(' ' + address + ' ' : RPGAPI_trusted_proxies) > 0);
+end-proc;
+
+
+   // whether text looks like an IPv4 or IPv6 address
+dcl-proc RPGAPI_isAddress;
+   dcl-pi *n ind;
+      text varchar(100) const;
+   end-pi;
+
+   return %len(text) > 0 and %len(text) <= 45 and
+          %check('0123456789abcdefABCDEF.:' : text) = 0 and
+          (%scan('.' : text) > 0 or %scan(':' : text) > 0);
+end-proc;
+
+
 dcl-proc RPGAPI_setNotFound export;
    dcl-pi *n;
       config likeds(RPGAPI_App);
@@ -1531,6 +1655,11 @@ dcl-proc RPGAPI_applySettings;
    endif;
 
    RPGAPI_cors_origins = %trim(config.cors_origins);
+   RPGAPI_trusted_proxies = %trim(config.trusted_proxies);
+   if RPGAPI_trusted_proxies <> '' and RPGAPI_trusted_proxies <> '*';
+      RPGAPI_trusted_proxies = ' ' + %scanrpl(',' : ' ' : RPGAPI_trusted_proxies) +
+                               ' ';
+   endif;
    RPGAPI_cors_credentials = config.cors_credentials;
    RPGAPI_cors_max_age = %max(config.cors_max_age : 0);
    RPGAPI_cors_allow_headers = %trim(config.cors_allow_headers);
@@ -2889,7 +3018,9 @@ dcl-proc RPGAPI_closeClient;
          RPGAPI_choose(RPGAPI_request_method <> '' :
                              %trim(RPGAPI_request_method) : '-') + ' ' +
          RPGAPI_choose(RPGAPI_request_route <> '' :
-                             RPGAPI_request_route : '-') + ' -> ' +
+                             RPGAPI_request_route : '-') + ' from ' +
+         RPGAPI_choose(RPGAPI_request_ip <> '' : RPGAPI_request_ip : '-') +
+         ' -> ' +
          RPGAPI_choose(RPGAPI_response_status > 0 :
                              %char(RPGAPI_response_status) : 'no response') +
          ', ' + %char(RPGAPI_bytes_sent) + ' bytes, ' +

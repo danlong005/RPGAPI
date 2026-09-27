@@ -129,6 +129,13 @@ dcl-pr accept int(10:0) extproc('accept');
    address_length pointer value;
 end-pr;
 
+   // the address of the other end of a connection
+dcl-pr getpeername int(10:0) extproc('getpeername');
+   socket_descriptor int(10:0) value;
+   address pointer value;
+   address_length int(10:0);
+end-pr;
+
 dcl-pr inet_address int(10:0) extproc('inet_addr');
    ip_address pointer value;
 end-pr;
