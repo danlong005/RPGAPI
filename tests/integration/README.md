@@ -6,6 +6,8 @@ back byte for byte, including timings, memory use and the job log. They cover
 what the unit tests in `qtestsrc` cannot: sockets, several jobs, timeouts,
 large and streamed bodies, files and TLS set-up.
 
+For a light load test of a running server, see [`tests/load`](../load/README.md).
+
 ## Running them
 On the IBM i, in a clone of the repository, after building RPGAPI once
 (see the main README):
