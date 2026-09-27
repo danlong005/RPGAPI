@@ -4953,11 +4953,16 @@ dcl-proc RPGAPI_setRoute export;
    for index = 1 to %elem(config.routes) by 1;
       if config.routes(index).url = *blanks;
          config.routes(index).method = method;
-         config.routes(index).url = url;
+         config.routes(index).url = RPGAPI_prefixed(config : url);
          config.routes(index).procedure = procedure;
-         index = %elem(config.routes) + 1;
+         return;
       endif;
    endfor;
+   RPGAPI_registerFailed('Route ' + %trim(method) + ' ' +
+                         RPGAPI_prefixed(config : url) + ' is one more than ' +
+                         %char(%elem(config.routes)) + ' routes: an app ' +
+                         'holds no more than ' + %char(%elem(config.routes)) +
+                         ' routes');
 end-proc;
 
 
@@ -4968,14 +4973,87 @@ dcl-proc RPGAPI_setMiddleware export;
       procedure pointer(*proc) const;
    end-pi;
    dcl-s index int(10:0) inz;
+   dcl-s path varchar(32000);
 
+      // '*' in a group: the group's prefix and everything below it
+   path = url;
+   if %trim(url) = RPGAPI_GLOBAL_MIDDLEWARE and config.route_prefix <> '';
+      path = '/';
+   endif;
    for index = 1 to %elem(config.middlewares) by 1;
       if config.middlewares(index).url = *blanks;
-         config.middlewares(index).url = url;
+         config.middlewares(index).url = RPGAPI_prefixed(config : path);
          config.middlewares(index).procedure = procedure;
-         index = %elem(config.middlewares) + 1;
+         return;
       endif;
    endfor;
+   RPGAPI_registerFailed('Middleware for ' + RPGAPI_prefixed(config : path) +
+                         ' is one more than ' +
+                         %char(%elem(config.middlewares)) + ': an app ' +
+                         'holds no more than ' +
+                         %char(%elem(config.middlewares)) + ' middleware');
+end-proc;
+
+
+   // the path of a route or middleware with the app's prefix in front: the
+   // prefix without its last /, then the path with a / in front of it. '/'
+   // alone is the prefix itself
+dcl-proc RPGAPI_prefixed;
+   dcl-pi *n varchar(32000);
+      config likeds(RPGAPI_App) const;
+      url varchar(32000) const;
+   end-pi;
+   dcl-s path varchar(32000);
+
+   path = %trim(url);
+   if config.route_prefix = '' or path = RPGAPI_GLOBAL_MIDDLEWARE;
+      return path;
+   endif;
+   if path = '/' or path = '';
+      return config.route_prefix;
+   endif;
+   if %subst(path : 1 : 1) <> '/';
+      path = '/' + path;
+   endif;
+   return config.route_prefix + path;
+end-proc;
+
+
+   // ends RPGAPI_setRoute or RPGAPI_setMiddleware, and the app's call of
+   // RPGAPI_get or the like, with an escape message
+dcl-proc RPGAPI_registerFailed;
+   dcl-pi *n;
+      error_text varchar(512) const;
+   end-pi;
+   dcl-s message_key char(4);
+      // bytes provided 0: a failure to send is signalled as an exception
+   dcl-s error_code char(8) inz(*allx'00');
+
+      // counter 2: to the procedure that called RPGAPI_setRoute or
+      // RPGAPI_setMiddleware, the app or RPGAPI_get and the like, which the
+      // exception then ends in turn
+   send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
+                         %len(error_text) : '*ESCAPE' : '*' : 2 :
+                         message_key : error_code );
+end-proc;
+
+
+   // starts a group of routes: see rpgapi_h.rpgle
+dcl-proc RPGAPI_setPrefix export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      prefix varchar(1000) const;
+   end-pi;
+   dcl-s path varchar(1000);
+
+   path = %trim(prefix);
+   dow %len(path) > 0 and %subst(path : %len(path) : 1) = '/';
+      %len(path) -= 1;
+   enddo;
+   if path <> '' and %subst(path : 1 : 1) <> '/';
+      path = '/' + path;
+   endif;
+   config.route_prefix = path;
 end-proc;
 
 

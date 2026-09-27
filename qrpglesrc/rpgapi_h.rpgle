@@ -127,6 +127,9 @@ dcl-ds RPGAPI_App qualified template;
       // proxies whose X-Forwarded-For gives the client's address, separated
       // by spaces or commas, or '*' for any. Blank: none
    trusted_proxies varchar(1000);
+      // put before the path of each route and middleware registered from
+      // now on (RPGAPI_setPrefix). Blank: none
+   route_prefix varchar(1000);
 end-ds;
 
    // what went wrong, for the error handler
@@ -248,6 +251,14 @@ dcl-pr RPGAPI_setRoute;
    method char(10) const;
    url varchar(32000) const;
    procedure pointer(*proc) const;
+end-pr;
+
+   // a group of routes: the routes and middleware registered after this get
+   // prefix in front of their path, such as '/api/v1'; middleware for '*'
+   // then covers the prefix and everything below it. '' ends the group
+dcl-pr RPGAPI_setPrefix;
+   config likeds(RPGAPI_App);
+   prefix varchar(1000) const;
 end-pr;
 
 dcl-pr RPGAPI_setMiddleware;

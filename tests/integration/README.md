@@ -41,7 +41,7 @@ time, so a queue that runs one job at a time is fine.
 | --- | --- | --- |
 | `basic` | `basic` | requests in pieces, bodies ending in `@`, line breaks and spaces kept, UTF-8 and CCSID conversion |
 | `timeouts` | `basic` | clients that send nothing, part of a body, or a byte a second are cut off at the read timeout; 10 clients connecting at once are all answered |
-| `routes` | `routes` | whole-path route matching, `{params}`, `*` segments, middleware prefixes |
+| `routes` | `routes`, `toomany` | whole-path route matching, `{params}`, `*` segments, middleware prefixes, groups (`setPrefix`: group middleware kept to the group, `{params}` in a prefix); one route or middleware over the limit stops the app with a message |
 | `misc` | `misc` | `setRoute`, `patch`, 202, CR/LF, and five complete responses byte for byte |
 | `hello` | `hello` | the Quick Start app, URL decoding, form fields (`getFormParam`: decoding, repeated names, long values, bodies over 32,000 bytes, other content types), Basic and Bearer credentials (UTF-8, colons in passwords, `curl -u`, bad headers), `checkUserProfile` (an unknown user, and `*NOPWD`-style values and bad names refused before the system is asked; the right password only with `RPGAPI_TEST_USER` and `RPGAPI_TEST_PASSWORD` set), `request.hostname`, requests without headers, redirects, statuses without a constant |
 | `bodies` | `bodies` | bodies in memory, chunked, 100-continue and the 413/431/400/501 refusals; 50MB streamed uploads with flat memory, `saveBody`, stalled uploads (408); the request and upload limits |

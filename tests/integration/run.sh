@@ -217,7 +217,11 @@ for suite_name in $SUITES; do
   case $suite_name in
     basic)     compile basic && suite basic ";;;$T;" basic ;;
     timeouts)  compile basic && suite basic ";;;$T;" timeouts ;;
-    routes)    compile routes && suite routes ";;;;" routes ;;
+    routes)    compile routes && suite routes ";;;;" routes
+               compile toomany && {
+                 CORS="routes" fails_to_start toomany ";;;;" "" "more than 250 routes"
+                 CORS="middleware" fails_to_start toomany ";;;;" "" "more than 100 middleware"
+                 CORS=""; } ;;
     misc)      compile misc && suite misc ";;;;" misc ;;
     hello)     compile hello && suite hello ";;;;" hello ;;
     bodies)    compile bodies && {

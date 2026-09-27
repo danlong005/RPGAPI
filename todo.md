@@ -250,6 +250,16 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Route groups: `RPGAPI_setPrefix(app : prefix)` puts a prefix (new
+  `route_prefix` app field) in front of the routes and middleware added
+  after it; `'*'` middleware in a group covers only the group; `{params}` in
+  a prefix work; `''` ends the group. And route 251 or middleware 101, which
+  were silently dropped (never answering), now end the program with
+  CPF9898. Verified on PUB400 (2026-09-27, routes suite): /v1 routes behind
+  the group's key middleware, /v1 and /v1/ as the group's root, a {shop}
+  prefix, /items outside the group without a key, /v1x not in the group;
+  the new toomany app fails to start with the limit in its job log for
+  routes and for middleware
 - [x] `RPGAPI_checkUserProfile(user : password : message_id?)`: the password
   of an IBM i user profile, checked with QSYGETPH and the handle released
   with QSYRLSPH at once. User names starting with `*` or over 10
@@ -465,7 +475,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Route groups: register routes under a prefix such as `/api/v1` once
 - [ ] Serve a directory of static files: `RPGAPI_serveStatic(app : '/web' :
   '/www/myapp')` on top of `RPGAPI_sendFile`
 - [ ] A health check / statistics endpoint: uptime, requests served, worker

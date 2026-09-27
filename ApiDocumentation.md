@@ -58,6 +58,7 @@
           not_found_handler pointer(*proc);        // see Not found and errors
           error_handler pointer(*proc);
           trusted_proxies varchar(1000);           // see Client address
+          route_prefix varchar(1000);              // see Groups
         end-ds;
 
         //
@@ -303,8 +304,37 @@ RPGAPI_get(app : '/api/v1/memberships/new' : %paddr(MBR_new));
 RPGAPI_get(app : '/api/v1/memberships/{id}' : %paddr(MBR_show));
 RPGAPI_get(app : '/api/v1/memberships' : %paddr(MBR_index));
 ```
-A request that matches no route gets `404 Not Found`. An app can have up to
-250 routes and 100 middleware.
+A request that matches no route gets `404 Not Found` (see Not found and
+errors). An app can have up to 250 routes and 100 middleware; adding one more
+ends your program with escape message `CPF9898` saying so, instead of the
+route never answering.
+
+##### Groups
+Routes that share the start of their path, such as an API version, can be
+added as a group: `RPGAPI_setPrefix` puts a prefix in front of the path of
+every route and middleware added after it, until the next `RPGAPI_setPrefix`.
+`''` ends the group.
+
+```
+RPGAPI_setPrefix(app : '/api/v1');
+RPGAPI_setMiddleware(app : '*' : %paddr(needKey));   // /api/v1 and below only
+RPGAPI_get(app : '/notes' : %paddr(listNotes));       // GET /api/v1/notes
+RPGAPI_get(app : '/notes/{id}' : %paddr(getNote));    // GET /api/v1/notes/{id}
+RPGAPI_get(app : '/' : %paddr(apiInfo));              // GET /api/v1
+
+RPGAPI_setPrefix(app : '/shops/{shop}');
+RPGAPI_get(app : '/orders' : %paddr(shopOrders));     // RPGAPI_getParam(request : 'shop')
+
+RPGAPI_setPrefix(app : '');
+RPGAPI_get(app : '/status' : %paddr(status));         // GET /status, no key needed
+```
+
+In a group, middleware for `'*'` is for the group's paths only (the prefix
+and everything below it), so a check such as an API key covers the group and
+nothing else. A prefix can have `{params}`, and a missing `/` in front of the
+prefix or a path, or a `/` at the end of the prefix, is added or dropped.
+Groups do not nest: each `RPGAPI_setPrefix` replaces the last. The prefix is
+kept in `app.route_prefix`.
 
 ##### HEAD and OPTIONS
 - A `HEAD` request is answered by the `GET` route for its path (unless you add
@@ -1144,6 +1174,7 @@ include it.
 | `RPGAPI_get` / `post` / `put` / `patch` / `delete(app : url : %paddr(proc))` | Add a route for that method |
 | `RPGAPI_setRoute(app : method : url : %paddr(proc))` | Add a route for any method |
 | `RPGAPI_setMiddleware(app : url : %paddr(proc))` | Add middleware for a path and everything below it, or `*` for all |
+| `RPGAPI_setPrefix(app : prefix)` | Put a prefix in front of the routes and middleware added next; see Groups |
 | `RPGAPI_getParam(request : name)` | A route param |
 | `RPGAPI_getQueryParam(request : name)` | A query string value |
 | `RPGAPI_getFormParam(request : name : occurrence?)` | A field of an HTML form body; see Forms |
