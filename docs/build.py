@@ -230,7 +230,7 @@ TEMPLATE = r'''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{title}}</title>
 <!-- generated from ApiDocumentation.md by docs/build.py: change the Markdown
      and run it again rather than changing this file -->
@@ -245,12 +245,14 @@ TEMPLATE = r'''<!DOCTYPE html>
     --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #30363d;
     --side: #010409; --code-bg: #262c36; --pre-bg: #151b23; --accent: #4493f8;
     --accent-bg: #121d2f; --mark: #3b2e0a;
+    color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #30363d;
   --side: #010409; --code-bg: #262c36; --pre-bg: #151b23; --accent: #4493f8;
   --accent-bg: #121d2f; --mark: #3b2e0a;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html { scroll-padding-top: 1rem; }
@@ -273,7 +275,7 @@ pre code { background: none; padding: 0; font-size: 1em; }
   background: var(--side); border-right: 1px solid var(--line);
   display: flex; flex-direction: column;
 }
-.side-head { padding: 1.1rem 1rem 0.75rem; border-bottom: 1px solid var(--line); }
+.side-head { padding: calc(1.1rem + env(safe-area-inset-top, 0px)) 1rem 0.75rem; border-bottom: 1px solid var(--line); }
 .side-head .name { font-weight: 700; font-size: 1.15rem; color: var(--fg); }
 .side-head .links { font-size: 0.85rem; margin-top: 0.2rem; }
 .side-head .links a { margin-right: 0.75rem; }
@@ -281,7 +283,7 @@ pre code { background: none; padding: 0; font-size: 1em; }
   width: 100%; margin-top: 0.75rem; padding: 0.45rem 0.6rem; font: inherit; font-size: 0.9rem;
   color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
 }
-.nav { overflow-y: auto; padding: 0.5rem 0 2rem; flex: 1; }
+.nav { overflow-y: auto; padding: 0.5rem 0 calc(2rem + env(safe-area-inset-bottom, 0px)); flex: 1; }
 .group { margin: 0.35rem 0; }
 .group-title {
   display: block; padding: 0.3rem 1rem; font-weight: 600; font-size: 0.8rem;
@@ -314,7 +316,7 @@ ul { padding-left: 1.4rem; }
 li { margin: 0.2rem 0; }
 
 .menu {
-  display: none; position: fixed; top: 0.75rem; right: 0.75rem; z-index: 3;
+  display: none; position: fixed; top: calc(0.75rem + env(safe-area-inset-top, 0px)); right: 0.75rem; z-index: 3;
   padding: 0.4rem 0.75rem; font: inherit; font-size: 0.9rem; color: var(--fg);
   background: var(--side); border: 1px solid var(--line); border-radius: 6px;
 }
