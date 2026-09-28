@@ -250,6 +250,11 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Decided: `RPGAPI_stop` and `RPGAPI_setResponse` stay internal. A
+  route calling `RPGAPI_stop` would close its own client's connection
+  before answering and leave `RPGAPI_start` polling a closed socket, and
+  workers would not end; `RPGAPI_setResponse` only saves one line. A real
+  shutdown from code is its own item under Features
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default
@@ -498,16 +503,18 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
+- [ ] Shut down from code: `RPGAPI_shutdown()`, callable from a route (an
+  admin endpoint, a cutoff time), that makes every job act as on a
+  controlled ENDJOB (`%shtdn`): each finishes and answers its current
+  request, takes no more and ends, and the main job's workers end with it.
+  Needs a flag the jobs share, since a route runs in whichever job took the
+  request. Until then, `ENDJOB OPTION(*CNTRLD)` of the main job does this
 - [ ] gzip compression of text and JSON responses when the client accepts it
 - [ ] Get the unit tests running: make the iRPGUnit library a Makefile
   variable, try installing iRPGUnit into a library we own on PUB400, and run
   the tests added since (they have never been compiled)
 
 ## Cleanup
-- [ ] Decide whether `RPGAPI_stop` (stop the server from code) and
-  `RPGAPI_setResponse(request : status)` (an empty response with a status,
-  like Express's `res.sendStatus`) should be exported for apps; they are
-  internal (`rpgapi_int_h.rpgle`) for now
 - [ ] The unit tests in `qtestsrc` have never been compiled or run: check they
   still match the code (e.g. `RPGAPI_urlDecode` now takes 32,000 characters)
   when iRPGUnit is available (see Features)
