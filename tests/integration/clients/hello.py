@@ -161,6 +161,10 @@ check('CR LF in a header value cannot inject a header',
 check('no security headers unless the app asks for them',
       not any(h in get('/hello')[1] for h in ['x-content-type-options', 'content-security-policy', 'x-frame-options']))
 
+status, headers, body = get('/teapot')
+check('RPGAPI_setResponse from a route: the status, no body',
+      (status, body, headers.get('content-length')) == (418, b'', '0'), (status, headers, body))
+
 status, headers, _ = get('/moved')
 check('302 with Location', status == 302 and headers.get('location') == '/hello', (status, headers))
 data = exchange(b'GET /conflict HTTP/1.1\r\nHost: x\r\n\r\n')

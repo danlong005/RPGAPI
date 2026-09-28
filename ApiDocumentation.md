@@ -907,6 +907,13 @@ RPGAPI_setHeader(response : 'Location' : '/api/v1/memberships/5');
 These statuses have constants, and are sent with their reason phrase. Any other
 status is sent with an empty one, which clients accept.
 
+For a response that is just a status, with no body or headers, as Express's
+`res.sendStatus`:
+
+```
+return RPGAPI_setResponse(request : HTTP_NO_CONTENT);
+```
+
 | Constant | Status |
 | --- | --- |
 | `HTTP_OK` | 200 OK |
@@ -1300,6 +1307,7 @@ include it.
 | `RPGAPI_getBasicAuth(request : user : password)` | The user and password of `Authorization: Basic`; see Authentication |
 | `RPGAPI_checkUserProfile(user : password : message_id?)` | Whether the password is right for an IBM i user profile; see Checking IBM i user profiles |
 | `RPGAPI_setHeader(response : name : value)` | Add a response header |
+| `RPGAPI_setResponse(request : status)` | A response with just a status; see Status |
 | `RPGAPI_getCookie(request : name)` | A cookie the client sent |
 | `RPGAPI_setCookie(response : name : value : options?)` | Set a cookie; see Cookies under Responses |
 | `RPGAPI_clearCookie(response : name : options?)` | Delete a cookie |

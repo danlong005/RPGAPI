@@ -250,11 +250,14 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
-- [x] Decided: `RPGAPI_stop` and `RPGAPI_setResponse` stay internal. A
-  route calling `RPGAPI_stop` would close its own client's connection
-  before answering and leave `RPGAPI_start` polling a closed socket, and
-  workers would not end; `RPGAPI_setResponse` only saves one line. A real
-  shutdown from code is its own item under Features
+- [x] Decided: `RPGAPI_stop` stays internal. A route calling it would close
+  its own client's connection before answering and leave `RPGAPI_start`
+  polling a closed socket, and workers would not end. A real shutdown from
+  code is its own item under Features
+- [x] `RPGAPI_setResponse(request : status)` is exported for apps, as
+  Express's `res.sendStatus`, with its `request` now `const` so a route can
+  pass its own. Verified on PUB400 (2026-09-27, hello suite): a route
+  returning `RPGAPI_setResponse(request : 418)` answers 418 with no body
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default

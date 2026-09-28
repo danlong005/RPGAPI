@@ -52,12 +52,6 @@ dcl-pr RPGAPI_setup;
    config likeds(RPGAPI_App);
 end-pr;
 
-   // an empty response with a status
-dcl-pr RPGAPI_setResponse likeds(RPGAPI_Response);
-   request likeds(RPGAPI_Request);
-   status zoned(3:0) const;
-end-pr;
-
    // text without CR and LF
 dcl-pr RPGAPI_cleanString varchar(32000);
    dirty_string varchar(32000) const;

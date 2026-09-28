@@ -26,6 +26,7 @@ RPGAPI_post(app : '/form' : %paddr(form));
 RPGAPI_get(app : '/auth' : %paddr(auth));
 RPGAPI_get(app : '/profile' : %paddr(profile));
 RPGAPI_get(app : '/echo-header' : %paddr(echoHeader));
+RPGAPI_get(app : '/teapot' : %paddr(teapot));
 testSettings(app);
 RPGAPI_start(app);
 
@@ -268,6 +269,15 @@ dcl-proc echoHeader;
    RPGAPI_setHeader(response : 'X-Echo' : RPGAPI_getQueryParam(request : 'v'));
    response.body = 'echoed';
    return response;
+end-proc;
+
+   // a response with just a status
+dcl-proc teapot;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+
+   return RPGAPI_setResponse(request : 418);
 end-proc;
 
 /include 'testcfg.rpgle'

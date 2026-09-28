@@ -204,6 +204,13 @@ dcl-pr RPGAPI_getHeader varchar(32000);
    header char(50) const;
 end-pr;
 
+   // a response with just a status and no body, as Express's res.sendStatus:
+   // return RPGAPI_setResponse(request : HTTP_NOT_FOUND);
+dcl-pr RPGAPI_setResponse likeds(RPGAPI_Response);
+   request likeds(RPGAPI_Request) const;
+   status zoned(3:0) const;
+end-pr;
+
 dcl-pr RPGAPI_setHeader;
    response likeds(RPGAPI_Response);
    header_name char(50) const;

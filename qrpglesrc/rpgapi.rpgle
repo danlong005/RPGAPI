@@ -5355,7 +5355,7 @@ end-proc;
 
 dcl-proc RPGAPI_setResponse export;
    dcl-pi *n likeds(RPGAPI_Response);
-      request likeds(RPGAPI_Request);
+      request likeds(RPGAPI_Request) const;
       status zoned(3:0) const;
    end-pi;
    dcl-ds response likeds(RPGAPI_Response) inz;
