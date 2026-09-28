@@ -511,8 +511,6 @@
 - [ ] The unit tests in `qtestsrc` have never been compiled or run: check they
   still match the code (e.g. `RPGAPI_urlDecode` now takes 32,000 characters)
   when iRPGUnit is available (see Features)
-- [ ] `.vscode/actions.json`: add actions to run the integration suites
-  (`tests/integration/run.sh`) and the load test (`tests/load/stress.py`)
 
 ## PUB400
 - [ ] `BUILD`, `QRPGLESRC` and `RPGWEB` in library `RPGAPI` survive `CLRLIB`
