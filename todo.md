@@ -250,6 +250,14 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
+  `security_headers` and `content_security_policy` app fields) adds
+  helmet's headers to every response, with helmet's default
+  Content-Security-Policy (`RPGAPI_DEFAULT_CSP`), one of the app's, or none;
+  Strict-Transport-Security only with HTTPS (not testable on PUB400); a
+  header a procedure sets wins. `examples/production.rpgle` turns them on.
+  Verified on PUB400 (2026-09-27, new secure suite in three modes, and the
+  hello suite for none by default)
 - [x] Static files: `RPGAPI_serveStatic(app : url : directory)` (up to 20, new
   `statics` app field, follows the route prefix; the directory must exist,
   else CPF9898) serves GET and HEAD after middleware and before routes,
@@ -490,9 +498,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Security headers in one call, as Express's helmet
-  (`X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security`
-  with HTTPS, ...)
 - [ ] gzip compression of text and JSON responses when the client accepts it
 - [ ] Get the unit tests running: make the iRPGUnit library a Makefile
   variable, try installing iRPGUnit into a library we own on PUB400, and run

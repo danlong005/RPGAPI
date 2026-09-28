@@ -23,7 +23,7 @@ TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers static examples sqljson yajl"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers static secure examples sqljson yajl"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
@@ -263,6 +263,11 @@ for suite_name in $SUITES; do
     static)    compile static && {
                  suite static ";;;;" static
                  CORS="missing" fails_to_start static ";;;;" "" "no-such-directory is not a directory"
+                 CORS=""; } ;;
+    secure)    compile secure && {
+                 suite secure ";;;;" secure
+                 CORS="custom" suite secure ";;;;" secure custom
+                 CORS="none" suite secure ";;;;" secure none
                  CORS=""; } ;;
     handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
     examples)  compile_example hello.rpgle EXHELLO

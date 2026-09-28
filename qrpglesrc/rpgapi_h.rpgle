@@ -138,6 +138,10 @@ dcl-ds RPGAPI_App qualified template;
    route_prefix varchar(1000);
       // IFS directories served as static files (RPGAPI_serveStatic)
    statics likeds(RPGAPI_static_ds) dim(20);
+      // browser protections on every response (RPGAPI_setSecurityHeaders),
+      // with this Content-Security-Policy; blank: none
+   security_headers ind;
+   content_security_policy varchar(2000);
 end-ds;
 
    // what went wrong, for the error handler
@@ -271,6 +275,26 @@ dcl-pr RPGAPI_serveStatic;
    config likeds(RPGAPI_App);
    url varchar(1000) const;
    directory varchar(1024) const;
+end-pr;
+
+   // the Content-Security-Policy RPGAPI_setSecurityHeaders sends unless it
+   // is given one, as Express's helmet does
+dcl-c RPGAPI_DEFAULT_CSP 'default-src ''self'';base-uri ''self'';+
+   font-src ''self'' https: data:;form-action ''self'';+
+   frame-ancestors ''self'';img-src ''self'' data:;+
+   object-src ''none'';script-src ''self'';+
+   script-src-attr ''none'';+
+   style-src ''self'' https: ''unsafe-inline'';+
+   upgrade-insecure-requests';
+
+   // browser protections on every response, as Express's helmet adds them:
+   // X-Content-Type-Options, X-Frame-Options, Referrer-Policy and the
+   // others, Strict-Transport-Security with HTTPS, and a
+   // Content-Security-Policy: policy, or RPGAPI_DEFAULT_CSP when left out
+   // ('' for none). A header a procedure sets itself is sent instead
+dcl-pr RPGAPI_setSecurityHeaders;
+   config likeds(RPGAPI_App);
+   policy varchar(2000) const options(*nopass);
 end-pr;
 
    // a group of routes: the routes and middleware registered after this get

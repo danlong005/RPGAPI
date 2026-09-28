@@ -30,6 +30,9 @@ RPGAPI_setKeepAlive(app : 10 : 500);            // 5 seconds, 100 requests
    // Certificate Manager (see HTTPS in the README). Without it: plain HTTP
 // RPGAPI_setTlsApplication(app : 'MYCO_RPGAPI_MYAPI');
 
+   // browser protections on every response, as Express's helmet
+RPGAPI_setSecurityHeaders(app);
+
    // the proxy in front of the app, whose X-Forwarded-For gives
    // request.remote_ip the client's address. Without it: the connection's
 // RPGAPI_setTrustedProxies(app : '10.0.0.5');

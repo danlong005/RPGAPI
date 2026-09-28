@@ -65,6 +65,9 @@ dcl-c RPGAPI_DEFAULT_REQUEST_SIZE 1048576;
    // CORS, from the app's settings, and for the request being answered the
    // Access-Control-Allow-Origin to send ('' for none)
 dcl-s RPGAPI_cors_origins varchar(2000);
+   // security headers on every response, and the Content-Security-Policy
+dcl-s RPGAPI_security_headers ind inz(*off);
+dcl-s RPGAPI_content_security_policy varchar(2000);
    // proxies trusted for X-Forwarded-For: ' ' + addresses + ' ', or '*'
 dcl-s RPGAPI_trusted_proxies varchar(1002);
    // the address the current connection came from, and the client's
@@ -1689,6 +1692,8 @@ dcl-proc RPGAPI_applySettings;
    endif;
 
    RPGAPI_cors_origins = %trim(config.cors_origins);
+   RPGAPI_security_headers = config.security_headers;
+   RPGAPI_content_security_policy = %trim(config.content_security_policy);
    RPGAPI_trusted_proxies = %trim(config.trusted_proxies);
    if RPGAPI_trusted_proxies <> '' and RPGAPI_trusted_proxies <> '*';
       RPGAPI_trusted_proxies = ' ' + %scanrpl(',' : ' ' : RPGAPI_trusted_proxies) +
@@ -4086,6 +4091,8 @@ dcl-proc RPGAPI_buildHead export;
                            response.headers(index).value)) + RPGAPI_CRLF;
    endfor;
 
+   head += RPGAPI_securityHeaders(response);
+
       // CORS, for an origin that is allowed, unless the procedure set its own
    if RPGAPI_cors_allow_origin <> '' and
       not RPGAPI_hasHeader(response : 'Access-Control-Allow-Origin');
@@ -5050,6 +5057,74 @@ dcl-proc RPGAPI_registerFailed;
    send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
                          %len(error_text) : '*ESCAPE' : '*' : 2 :
                          message_key : error_code );
+end-proc;
+
+
+   // turns the security headers on: see rpgapi_h.rpgle
+dcl-proc RPGAPI_setSecurityHeaders export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      policy varchar(2000) const options(*nopass);
+   end-pi;
+
+   config.security_headers = *on;
+   if %parms() >= 2;
+      config.content_security_policy = %trim(policy);
+   else;
+      config.content_security_policy = RPGAPI_DEFAULT_CSP;
+   endif;
+end-proc;
+
+
+   // the security headers a response does not have yet
+dcl-proc RPGAPI_securityHeaders;
+   dcl-pi *n varchar(4000);
+      response likeds(RPGAPI_Response) const;
+   end-pi;
+   dcl-s head varchar(4000);
+
+   if not RPGAPI_security_headers;
+      return '';
+   endif;
+   if RPGAPI_content_security_policy <> '';
+      head += RPGAPI_securityHeader(response : 'Content-Security-Policy' :
+                                    RPGAPI_content_security_policy);
+   endif;
+   head += RPGAPI_securityHeader(response : 'Cross-Origin-Opener-Policy' :
+                                 'same-origin');
+   head += RPGAPI_securityHeader(response : 'Cross-Origin-Resource-Policy' :
+                                 'same-origin');
+   head += RPGAPI_securityHeader(response : 'Origin-Agent-Cluster' : '?1');
+   head += RPGAPI_securityHeader(response : 'Referrer-Policy' : 'no-referrer');
+      // browsers only take it over HTTPS
+   if RPGAPI_tls <> RPGAPI_TLS_OFF;
+      head += RPGAPI_securityHeader(response : 'Strict-Transport-Security' :
+                                    'max-age=31536000; includeSubDomains');
+   endif;
+   head += RPGAPI_securityHeader(response : 'X-Content-Type-Options' :
+                                 'nosniff');
+   head += RPGAPI_securityHeader(response : 'X-DNS-Prefetch-Control' : 'off');
+   head += RPGAPI_securityHeader(response : 'X-Download-Options' : 'noopen');
+   head += RPGAPI_securityHeader(response : 'X-Frame-Options' : 'SAMEORIGIN');
+   head += RPGAPI_securityHeader(response :
+                                 'X-Permitted-Cross-Domain-Policies' : 'none');
+   head += RPGAPI_securityHeader(response : 'X-XSS-Protection' : '0');
+   return head;
+end-proc;
+
+
+   // one header line, unless the response has that header already
+dcl-proc RPGAPI_securityHeader;
+   dcl-pi *n varchar(2100);
+      response likeds(RPGAPI_Response) const;
+      name varchar(50) const;
+      value varchar(2000) const;
+   end-pi;
+
+   if RPGAPI_hasHeader(response : name);
+      return '';
+   endif;
+   return name + ': ' + value + RPGAPI_CRLF;
 end-proc;
 
 

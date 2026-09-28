@@ -60,6 +60,8 @@
           trusted_proxies varchar(1000);           // see Client address
           route_prefix varchar(1000);              // see Groups
           statics likeds(RPGAPI_static_ds) dim(20); // see Serving a directory
+          security_headers ind;                     // see Security headers
+          content_security_policy varchar(2000);
         end-ds;
 
         //
@@ -154,6 +156,7 @@ Set them with these procedures, which check the values, before
 | `cors_...` | `RPGAPI_setCors(app : origins)`, and the other `cors_` fields; see CORS | no CORS |
 | `keepalive_timeout`, `keepalive_requests` | `RPGAPI_setKeepAlive(app : seconds : maxRequests)`; see Keep-alive | 5 seconds, 100 requests |
 | `trusted_proxies` | `RPGAPI_setTrustedProxies(app : addresses)`; see Client address | none |
+| `security_headers`, `content_security_policy` | `RPGAPI_setSecurityHeaders(app : policy?)`; see Security headers | off |
 | `not_found_handler`, `error_handler` | `RPGAPI_setNotFound(app : %paddr(proc))`, `RPGAPI_setErrorHandler(app : %paddr(proc))`; see Not found and errors | plain 404 and 500 |
 
 A setter given a value it does not accept ends your program with escape
@@ -788,6 +791,50 @@ for them are left out. A line break in a header name or value becomes a blank,
 so request data you put in a header (a file name, a redirect) cannot add
 headers of its own.
 
+#### Security headers
+Browsers have protections they only turn on when a response asks for them:
+not guessing a file's type, not letting other sites show the page in a frame,
+not sending the page's address along with links, and more. Express apps get
+them from `helmet`; RPGAPI adds the same ones to every response (routes,
+404s, errors, static files, streamed responses) after one call:
+
+```
+RPGAPI_setSecurityHeaders(app);
+```
+
+| Header | Value |
+| --- | --- |
+| `Content-Security-Policy` | helmet's default, `RPGAPI_DEFAULT_CSP`: `default-src 'self'` and the rest |
+| `Cross-Origin-Opener-Policy` | `same-origin` |
+| `Cross-Origin-Resource-Policy` | `same-origin` |
+| `Origin-Agent-Cluster` | `?1` |
+| `Referrer-Policy` | `no-referrer` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains`, only with HTTPS |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-DNS-Prefetch-Control` | `off` |
+| `X-Download-Options` | `noopen` |
+| `X-Frame-Options` | `SAMEORIGIN` |
+| `X-Permitted-Cross-Domain-Policies` | `none` |
+| `X-XSS-Protection` | `0` |
+
+The Content-Security-Policy only lets a page load scripts, styles and images
+from its own site. That is right for an API and for most pages, but blocks a
+page with inline `<script>` or scripts from another site: pass your own
+policy, or `''` for none:
+
+```
+RPGAPI_setSecurityHeaders(app : 'default-src ''self''; script-src ''self'' https://cdn.example.com');
+RPGAPI_setSecurityHeaders(app : '');
+```
+
+A header a procedure sets itself is sent instead of RPGAPI's, so one route
+can have its own policy or `X-Frame-Options`. `Cross-Origin-Resource-Policy:
+same-origin` does not stop other sites from calling the API through CORS
+(see CORS), but it does stop them from embedding its responses as images or
+scripts; a route that serves those to other sites sets
+`Cross-Origin-Resource-Policy: cross-origin`. The settings are the app's
+`security_headers` and `content_security_policy` fields.
+
 #### Cookies
 `RPGAPI_setCookie` adds a `Set-Cookie` header; call it once per cookie. Without
 options the cookie is for the whole site (`Path=/`) and lasts until the browser
@@ -1232,6 +1279,7 @@ include it.
 | --- | --- |
 | `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
 | `RPGAPI_setCors(app : origins)` | Allow browsers on these origins to call the app; see CORS |
+| `RPGAPI_setSecurityHeaders(app : policy?)` | Browser protection headers on every response; see Security headers |
 | `RPGAPI_setTrustedProxies(app : addresses)` | Proxies whose `X-Forwarded-For` gives the client's address; see Client address |
 | `RPGAPI_setNotFound(app : %paddr(proc))` | Answer requests no route matches; see Not found and errors |
 | `RPGAPI_setErrorHandler(app : %paddr(proc))` | Answer requests that fail; see Not found and errors |

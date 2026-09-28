@@ -9,6 +9,7 @@ server, and each request is handed to your procedure as a data structure.
   answered for you), groups of routes under a prefix such as `/api/v1`, and
   middleware for all routes or a path and everything below it
 - CORS for browser front ends on other origins, preflights included
+- Security headers on every response in one call, as Express's helmet
 - Cookies read and set, with `Max-Age`, `HttpOnly`, `Secure` and `SameSite`
 - Your own answers for requests no route matches and for requests that fail,
   such as JSON errors
@@ -253,6 +254,7 @@ whole header values; that too needs a recompile. And `response.body` is now
 sent exactly as set, where it used to be trimmed: trim bodies set from
 fixed-length fields. The CORS settings added `cors_` fields to `RPGAPI_App`,
 and keep-alive the `keepalive_` fields, and the not-found and error handlers
-`not_found_handler` and `error_handler`, `trusted_proxies`, `route_prefix` and `statics`; `RPGAPI_Request`
+`not_found_handler` and `error_handler`, `trusted_proxies`, `route_prefix`, `statics`, and `security_headers` and
+`content_security_policy`; `RPGAPI_Request`
 gained `remote_ip` and `connection_ip`; connections now stay open between
 requests (`RPGAPI_setKeepAlive(app : 0)` to close them as before).
