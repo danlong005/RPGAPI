@@ -12,6 +12,10 @@ New to RPGAPI? Start with the [Quick Start](QuickStart.md), and see
 
 In the signatures, a parameter ending in `?` can be left out.
 
+The same reference is a web page with a sidebar in
+[docs/index.html](docs/index.html), for GitHub Pages or to open locally;
+`python3 docs/build.py` builds it from this file.
+
 ## Contents
 
 **[Getting started](#getting-started)**:

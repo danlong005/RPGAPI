@@ -38,7 +38,9 @@ server, and each request is handed to your procedure as a data structure.
   routing, to find out what happened when a problem is reported
 
 See the [Quick Start](QuickStart.md) to write and run a first app, and the
-[API Documentation](ApiDocumentation.md) for everything else.
+[API Documentation](ApiDocumentation.md) for everything else (also as a web
+page with a sidebar, [docs/index.html](docs/index.html), built from it by
+`python3 docs/build.py`).
 
 ## Requirements
 - IBM i 7.3 with TR10, or 7.4 with TR4, or later. RPGAPI uses `%SPLIT`,
