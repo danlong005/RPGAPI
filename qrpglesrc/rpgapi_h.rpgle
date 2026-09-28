@@ -142,6 +142,11 @@ dcl-ds RPGAPI_App qualified template;
       // with this Content-Security-Policy; blank: none
    security_headers ind;
    content_security_policy varchar(2000);
+      // gzip text and JSON responses for clients that accept it
+      // (RPGAPI_setCompression), when their body has at least this many
+      // bytes: 1024 when 0
+   compression ind;
+   compression_threshold int(10:0);
 end-ds;
 
    // what went wrong, for the error handler
@@ -309,6 +314,16 @@ dcl-c RPGAPI_DEFAULT_CSP 'default-src ''self'';base-uri ''self'';+
 dcl-pr RPGAPI_setSecurityHeaders;
    config likeds(RPGAPI_App);
    policy varchar(2000) const options(*nopass);
+end-pr;
+
+   // gzips responses whose Content-Type is text, JSON, JavaScript, XML or
+   // SVG, for clients whose Accept-Encoding allows it, as Express's
+   // compression does: ones with a body of at least minBytes (1024 when left
+   // out; a stream of unknown length always), and not ones that set their own
+   // Content-Encoding or Cache-Control: no-transform
+dcl-pr RPGAPI_setCompression;
+   config likeds(RPGAPI_App);
+   min_bytes int(10:0) const options(*nopass);
 end-pr;
 
    // a group of routes: the routes and middleware registered after this get

@@ -271,6 +271,25 @@
   the call is answered 200 with `Connection: close`, slow requests in flight
   finish with 200, and every job ends (ending code 0); the earlier jobs
   checks, including a controlled ENDJOB, still pass
+- [x] gzip compression: `RPGAPI_setCompression(app : minBytes?)` (new
+  `compression` and `compression_threshold` app fields) gzips text, JSON,
+  JavaScript, XML and SVG responses for clients whose `Accept-Encoding`
+  allows it, as Express's compression does: bodies of at least 1024 bytes
+  (any stream of unknown length), not a procedure's own `Content-Encoding`
+  or `no-transform`, not 204/304; `Vary: Accept-Encoding` on every text
+  response. Bodies in memory are gzipped in one piece with their gzipped
+  `Content-Length`; streams and files as they are sent, chunked (to the close
+  for HTTP/1.0); gzipped files have no ranges. zlib is `QSYS/QZIPZLIB`,
+  shipped with IBM i (zlib 1.3.2 on PUB400; checked first: it binds, takes
+  the ILE z_stream layout, and its output passes `gzip -t` and `gunzip`).
+  Verified on PUB400 (2026-09-28, compress suite, 38 checks): every body
+  unzips with Python's gzip to what is sent without it, including UTF-8
+  text, a 1.9MB stream and a 200KB file; `Accept-Encoding` q-values; HEAD;
+  304 with `Vary`; keep-alive. The full run passes (458 checks).
+  `examples/table-export.sqlrpgle` turns it on: its JSON of QSYS2 goes from
+  18,121 to 2,872 bytes and its CSV from 7,848 to 2,577, both unzipping (and
+  through `curl --compressed`) to the plain output. `production.rpgle` turns
+  it on too, and the README lists `QSYS/QZIPZLIB` under Requirements
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default
@@ -519,7 +538,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] gzip compression of text and JSON responses when the client accepts it
 - [ ] Get the unit tests running: make the iRPGUnit library a Makefile
   variable, try installing iRPGUnit into a library we own on PUB400, and run
   the tests added since (they have never been compiled)

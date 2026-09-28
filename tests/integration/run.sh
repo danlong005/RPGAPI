@@ -23,7 +23,7 @@ TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers static secure examples sqljson yajl"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers static secure compress examples sqljson yajl"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
@@ -204,6 +204,7 @@ open(os.path.join(files, 'huge.bin'), 'wb').write(os.urandom(20000000))
 open(os.path.join(files, 'data.json'), 'wb').write(b'{"a": [1, 2, 3], "b": "x@y"}')
 open(os.path.join(files, 'pic.png'), 'wb').write(bytes([137, 80, 78, 71]) + os.urandom(50000))
 open(os.path.join(files, 'notes.txt'), 'wb').write('hello Jürgen\n'.encode())
+open(os.path.join(files, 'big.txt'), 'wb').write(''.join(f'line {n}: Grüße, {n * 7919 % 1000}\n' for n in range(8000)).encode())
 open(os.path.join(work, 'secret.txt'), 'wb').write(b'secret')
 site = os.path.join(work, 'site')
 for sub in ['sub', 'nosub']:
@@ -273,6 +274,7 @@ for suite_name in $SUITES; do
                  CORS="none" suite secure ";;;;" secure none
                  CORS=""; } ;;
     handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
+    compress)  compile compress && suite compress ";;;$T;" compress ;;
     examples)  compile_example hello.rpgle EXHELLO
                compile_example notes-api.sqlrpgle EXNOTES
                compile_example table-export.sqlrpgle EXEXPORT

@@ -25,6 +25,8 @@ server, and each request is handed to your procedure as a data structure.
   IFS without holding them in memory
 - Streamed responses of any size, and IFS files and whole directories (web
   pages and their assets) with caching headers and range requests
+- gzip compression of text and JSON responses, with the zlib that comes with
+  IBM i
 - Several jobs serving one port, replaced when one ends, keep-alive
   connections, timeouts so one slow client cannot hold a job, and a controlled
   `ENDJOB` or `RPGAPI_shutdown()` that lets requests in progress finish
@@ -42,6 +44,8 @@ See the [Quick Start](QuickStart.md) to write and run a first app, and the
   SI76099). It is developed and tested on 7.5.
 - The ILE RPG compiler, and `make` from the IBM i open source packages
   (`yum install make`) to build it
+- For gzip compression, the service program binds to `QSYS/QZIPZLIB`, the
+  zlib that comes with IBM i (behind IBM's zip APIs); nothing to install
 
 ## Installation
 
@@ -254,7 +258,7 @@ whole header values; that too needs a recompile. And `response.body` is now
 sent exactly as set, where it used to be trimmed: trim bodies set from
 fixed-length fields. The CORS settings added `cors_` fields to `RPGAPI_App`,
 and keep-alive the `keepalive_` fields, and the not-found and error handlers
-`not_found_handler` and `error_handler`, `trusted_proxies`, `route_prefix`, `statics`, and `security_headers` and
-`content_security_policy`; `RPGAPI_Request`
+`not_found_handler` and `error_handler`, `trusted_proxies`, `route_prefix`, `statics`, `security_headers` and
+`content_security_policy`, and `compression` and `compression_threshold`; `RPGAPI_Request`
 gained `remote_ip` and `connection_ip`; connections now stay open between
 requests (`RPGAPI_setKeepAlive(app : 0)` to close them as before).

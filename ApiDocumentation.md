@@ -157,6 +157,7 @@ Set them with these procedures, which check the values, before
 | `keepalive_timeout`, `keepalive_requests` | `RPGAPI_setKeepAlive(app : seconds : maxRequests)`; see Keep-alive | 5 seconds, 100 requests |
 | `trusted_proxies` | `RPGAPI_setTrustedProxies(app : addresses)`; see Client address | none |
 | `security_headers`, `content_security_policy` | `RPGAPI_setSecurityHeaders(app : policy?)`; see Security headers | off |
+| `compression`, `compression_threshold` | `RPGAPI_setCompression(app : minBytes?)`; see Compression | off; 1024 bytes |
 | `not_found_handler`, `error_handler` | `RPGAPI_setNotFound(app : %paddr(proc))`, `RPGAPI_setErrorHandler(app : %paddr(proc))`; see Not found and errors | plain 404 and 500 |
 
 A setter given a value it does not accept ends your program with escape
@@ -1042,6 +1043,45 @@ is not listed.
   job needs authority to read them. A symbolic link in the directory is
   followed, wherever it points.
 
+#### Compression
+`RPGAPI_setCompression` gzips responses for the clients that accept it, as
+Express's `compression` middleware does. JSON and text usually shrink to a
+fifth or less, which matters for large responses on slow connections:
+```
+RPGAPI_setCompression(app);            // bodies of 1024 bytes and more
+RPGAPI_setCompression(app : 10000);    // or from another size
+```
+A response is gzipped when:
+- the request's `Accept-Encoding` allows gzip (`gzip`, `x-gzip` or `*`, and
+  not with `q=0`). Browsers, curl with `--compressed`, and most HTTP clients
+  send one
+- its `Content-Type` is text: `text/...`, JSON, JavaScript, XML, SVG, or a
+  type ending in `+json` or `+xml`. Images, PDFs and zip files are already
+  compressed and are sent as they are, as is a response with no
+  `Content-Type`
+- its body is at least that size. A streamed response of unknown length is
+  always gzipped
+- your procedure did not set a `Content-Encoding` of its own or
+  `Cache-Control: no-transform`, and it is not a 204 or 304
+
+It then has `Content-Encoding: gzip`, and every response with a text type
+has `Vary: Accept-Encoding` so that caches keep a copy for each kind of
+client (unless your procedure sets its own `Vary`). Nothing changes in your
+procedures:
+- a body in `response.body` is gzipped in one piece, with its gzipped length
+  as `Content-Length`
+- a streamed response is gzipped as it is written and sent in chunks, also
+  when `RPGAPI_beginResponse` was given its length (HTTP/1.0 clients get it
+  up to the connection's close). The pieces come out as zlib fills them, not
+  after each `RPGAPI_write`
+- `RPGAPI_sendFile` and `RPGAPI_serveStatic` gzip text files, without
+  `Accept-Ranges` and without answering a `Range`: the whole file is sent.
+  `304`s work as before
+
+RPGAPI uses the zlib that comes with IBM i, service program `QSYS/QZIPZLIB`
+(the one behind IBM's zip APIs), so there is nothing to install. The service
+program is bound to it when it is built.
+
 ### Working with JSON
 RPGAPI hands your procedure the request body as text and sends back the text
 you put in `response.body`: building and reading JSON is up to your program.
@@ -1309,6 +1349,7 @@ include it.
 | `RPGAPI_shutdown()` | Stop the server once the requests in progress are answered; see Stopping the server |
 | `RPGAPI_setCors(app : origins)` | Allow browsers on these origins to call the app; see CORS |
 | `RPGAPI_setSecurityHeaders(app : policy?)` | Browser protection headers on every response; see Security headers |
+| `RPGAPI_setCompression(app : minBytes?)` | gzip text and JSON responses for clients that accept it; see Compression |
 | `RPGAPI_setTrustedProxies(app : addresses)` | Proxies whose `X-Forwarded-For` gives the client's address; see Client address |
 | `RPGAPI_setNotFound(app : %paddr(proc))` | Answer requests no route matches; see Not found and errors |
 | `RPGAPI_setErrorHandler(app : %paddr(proc))` | Answer requests that fail; see Not found and errors |

@@ -33,6 +33,9 @@ RPGAPI_setKeepAlive(app : 10 : 500);            // 5 seconds, 100 requests
    // browser protections on every response, as Express's helmet
 RPGAPI_setSecurityHeaders(app);
 
+   // gzip JSON and text of 1024 bytes and more for clients that accept it
+RPGAPI_setCompression(app);
+
    // the proxy in front of the app, whose X-Forwarded-For gives
    // request.remote_ip the client's address. Without it: the connection's
 // RPGAPI_setTrustedProxies(app : '10.0.0.5');

@@ -1,7 +1,9 @@
 **free
    // Streaming a large result: every table and view in a library, from the
    // SQL catalog, as a JSON array or as CSV, row by row. Nothing is collected in
-   // memory first, so it works the same for 10 rows or a million.
+   // memory first, so it works the same for 10 rows or a million. With
+   // compression on, clients that accept gzip get it gzipped as it is written:
+   // a fraction of the bytes over the network.
    //
    // Build:
    //   CRTSQLRPGI OBJ(MYLIB/EXPORT) SRCSTMF('<clone>/examples/table-export.sqlrpgle')
@@ -11,6 +13,10 @@
    // Try:
    //   curl http://your-ibm-i:8080/tables/QSYS2
    //   curl -O -J http://your-ibm-i:8080/tables/QSYS2?format=csv    (saves QSYS2.csv)
+   //   curl --compressed http://your-ibm-i:8080/tables/QSYS2         (gzipped on the way)
+   //   curl -s -o /dev/null -w '%{size_download}\n' http://your-ibm-i:8080/tables/QSYS2
+   //   curl -s -o /dev/null -w '%{size_download}\n' --compressed http://your-ibm-i:8080/tables/QSYS2
+   //                                            (the bytes sent, without and with gzip)
 
 ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI') dftactgrp(*no);
 
@@ -20,6 +26,9 @@ dcl-ds app likeds(RPGAPI_App);
 
 clear app;
 RPGAPI_get(app : '/tables/{schema}' : %paddr(tables));
+   // gzip for clients that accept it: the stream is compressed as it is
+   // written, and sent in chunks
+RPGAPI_setCompression(app);
 RPGAPI_start(app : 8080);
 
 *inlr = *on;

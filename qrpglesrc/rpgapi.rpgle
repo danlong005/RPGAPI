@@ -267,6 +267,69 @@ dcl-pr retrieve_call_stack extpgm('QWVRCSTK');
    error_code char(8);
 end-pr;
 
+   // gzip through the zlib that comes with IBM i, QSYS/QZIPZLIB. z_stream
+   // as ILE C lays it out: 16-byte pointers, 4-byte uInt and uLong
+dcl-ds RPGAPI_z_stream_t qualified template;
+   next_in pointer pos(1);
+   avail_in uns(10:0) pos(17);
+   total_in uns(10:0) pos(21);
+   next_out pointer pos(33);
+   avail_out uns(10:0) pos(49);
+   total_out uns(10:0) pos(53);
+   msg pointer pos(65);
+   state pointer pos(81);
+   zalloc pointer(*proc) pos(97);
+   zfree pointer(*proc) pos(113);
+   opaque pointer pos(129);
+   data_type int(10:0) pos(145);
+   adler uns(10:0) pos(149);
+   reserved uns(10:0) pos(153);
+   end_pad char(4) pos(157);
+end-ds;
+dcl-c Z_NO_FLUSH 0;
+dcl-c Z_FINISH 4;
+dcl-c Z_STREAM_END 1;
+dcl-c Z_BUF_ERROR -5;
+dcl-c Z_DEFLATED 8;
+   // 15 bits of window, + 16: a gzip header and trailer around the data
+dcl-c Z_GZIP_WINDOW 31;
+dcl-c Z_DEFAULT_LEVEL 6;
+dcl-c Z_DEFAULT_MEMLEVEL 8;
+
+dcl-pr zlibVersion pointer extproc('zlibVersion');
+end-pr;
+dcl-pr deflateInit2_ int(10:0) extproc('deflateInit2_');
+   stream likeds(RPGAPI_z_stream_t);
+   level int(10:0) value;
+   method int(10:0) value;
+   window_bits int(10:0) value;
+   memory_level int(10:0) value;
+   strategy int(10:0) value;
+   version pointer value;
+   stream_size int(10:0) value;
+end-pr;
+dcl-pr deflate int(10:0) extproc('deflate');
+   stream likeds(RPGAPI_z_stream_t);
+   flush int(10:0) value;
+end-pr;
+dcl-pr deflateEnd int(10:0) extproc('deflateEnd');
+   stream likeds(RPGAPI_z_stream_t);
+end-pr;
+
+   // compression, from the app's settings
+dcl-s RPGAPI_compression ind inz(*off);
+dcl-s RPGAPI_compression_threshold int(10:0) inz(1024);
+dcl-c RPGAPI_DEFAULT_THRESHOLD 1024;
+   // the response being sent: gzipped (Content-Encoding: gzip), and whether
+   // it says Vary: Accept-Encoding, as every response that could be is
+dcl-s RPGAPI_gzip ind inz(*off);
+dcl-s RPGAPI_vary_encoding ind inz(*off);
+   // a streamed response being gzipped: its zlib stream, open between
+   // deflateInit2_ and deflateEnd, and where zlib writes what it makes
+dcl-ds RPGAPI_zstream likeds(RPGAPI_z_stream_t) inz;
+dcl-s RPGAPI_zstream_open ind inz(*off);
+dcl-s RPGAPI_gzip_output char(32768);
+
    // TLS through the Global Security Kit (GSKit) in QSYS/QSOSSLSR
 dcl-c GSK_OK 0;
 dcl-c GSK_ERROR_IO 406;
@@ -825,6 +888,8 @@ dcl-proc RPGAPI_startRequest;
    RPGAPI_connection_open = *off;
    RPGAPI_stream = RPGAPI_STREAM_NONE;
    RPGAPI_output_length = 0;
+   RPGAPI_gzip = *off;
+   RPGAPI_vary_encoding = *off;
 end-proc;
 
 
@@ -1821,6 +1886,12 @@ dcl-proc RPGAPI_applySettings;
       RPGAPI_keepalive_requests = config.keepalive_requests;
    endif;
 
+   RPGAPI_compression = config.compression;
+   RPGAPI_compression_threshold = RPGAPI_DEFAULT_THRESHOLD;
+   if config.compression_threshold > 0;
+      RPGAPI_compression_threshold = config.compression_threshold;
+   endif;
+
    RPGAPI_cors_origins = %trim(config.cors_origins);
    RPGAPI_security_headers = config.security_headers;
    RPGAPI_content_security_policy = %trim(config.content_security_policy);
@@ -2499,6 +2570,18 @@ dcl-proc RPGAPI_startsWith;
 
    return %len(text) >= %len(prefix) and
           %lower(%subst(text : 1 : %len(prefix))) = %lower(prefix);
+end-proc;
+
+
+dcl-proc RPGAPI_endsWith;
+   dcl-pi *n ind;
+      text varchar(8192) const;
+      suffix varchar(100) const;
+   end-pi;
+
+   return %len(text) >= %len(suffix) and
+          %lower(%subst(text : %len(text) - %len(suffix) + 1)) =
+          %lower(suffix);
 end-proc;
 
 
@@ -3200,6 +3283,8 @@ dcl-proc RPGAPI_closeClient;
    RPGAPI_request_method = '';
    RPGAPI_response_status = 0;
    RPGAPI_in_request = *off;
+      // a gzipped stream that failed part way
+   RPGAPI_gzipEnd();
 
       // kept open for the next request, as the response said
    if RPGAPI_keep_connection and not RPGAPI_connection_failed;
@@ -4158,17 +4243,38 @@ dcl-proc RPGAPI_sendResponse export;
       // the head, then the body
    dcl-s head varchar(192000);
    dcl-s utf8_body varchar(96000);
+      // the body gzipped: room for what does not compress, and zlib's framing
+   dcl-s gzipped char(97000);
+   dcl-s gzipped_length int(10:0) inz(-1);
 
       // Content-Length counts UTF-8 bytes, which is more than the length in
       // EBCDIC for any character outside ASCII, so convert the body first
       // the body is sent exactly as it was set, blanks and all
    utf8_body = RPGAPI_convert(response.body : RPGAPI_JOB_CCSID : RPGAPI_UTF8);
-   head = RPGAPI_convert(RPGAPI_buildHead(response : %len(utf8_body)) :
-                         RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+   if RPGAPI_decideGzip(response : %len(utf8_body));
+      gzipped_length = RPGAPI_gzipAll(%addr(utf8_body : *data) :
+                                      %len(utf8_body) : %addr(gzipped) :
+                                      %size(gzipped));
+      RPGAPI_gzip = gzipped_length >= 0;
+      if RPGAPI_gzip;
+         RPGAPI_log(RPGAPI_LOG_DEBUG : 'gzipped ' + %char(%len(utf8_body)) +
+                    ' bytes to ' + %char(gzipped_length));
+      endif;
+   endif;
+   if RPGAPI_gzip;
+      head = RPGAPI_convert(RPGAPI_buildHead(response : gzipped_length) :
+                            RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+   else;
+      head = RPGAPI_convert(RPGAPI_buildHead(response : %len(utf8_body)) :
+                            RPGAPI_JOB_CCSID : RPGAPI_UTF8);
+   endif;
 
       // a HEAD response has the Content-Length of the body, but not the body.
       // One write for both, so the body goes out with the head
-   if not RPGAPI_head_request;
+   if RPGAPI_head_request;
+   elseif RPGAPI_gzip;
+      head += %subst(gzipped : 1 : gzipped_length);
+   else;
       head += utf8_body;
    endif;
    RPGAPI_sendAll(%addr(head : *data) : %len(head));
@@ -4187,6 +4293,7 @@ dcl-proc RPGAPI_buildHead export;
    end-pi;
    dcl-s head varchar(32766);
    dcl-s index int(10:0);
+   dcl-s vary varchar(100);
 
    RPGAPI_response_status = response.status;
    RPGAPI_keep_connection = RPGAPI_keepOpen(body_length);
@@ -4224,15 +4331,31 @@ dcl-proc RPGAPI_buildHead export;
 
    head += RPGAPI_securityHeaders(response);
 
+      // Vary: what else than the URL the response depends on, for caches:
+      // the Origin with CORS for listed origins, the Accept-Encoding with
+      // compression. Not when the procedure set its own
+   if not RPGAPI_hasHeader(response : 'Vary');
+      vary = '';
+      if RPGAPI_cors_allow_origin <> '' and RPGAPI_cors_allow_origin <> '*' and
+         not RPGAPI_hasHeader(response : 'Access-Control-Allow-Origin');
+         vary = 'Origin';
+      endif;
+      if RPGAPI_vary_encoding;
+         vary += RPGAPI_choose(vary <> '' : ', ' : '') + 'Accept-Encoding';
+      endif;
+      if vary <> '';
+         head += 'Vary: ' + vary + RPGAPI_CRLF;
+      endif;
+   endif;
+   if RPGAPI_gzip;
+      head += 'Content-Encoding: gzip' + RPGAPI_CRLF;
+   endif;
+
       // CORS, for an origin that is allowed, unless the procedure set its own
    if RPGAPI_cors_allow_origin <> '' and
       not RPGAPI_hasHeader(response : 'Access-Control-Allow-Origin');
       head += 'Access-Control-Allow-Origin: ' + RPGAPI_cors_allow_origin +
               RPGAPI_CRLF;
-      if RPGAPI_cors_allow_origin <> '*' and
-         not RPGAPI_hasHeader(response : 'Vary');
-         head += 'Vary: Origin' + RPGAPI_CRLF;
-      endif;
       if RPGAPI_cors_credentials;
          head += 'Access-Control-Allow-Credentials: true' + RPGAPI_CRLF;
       endif;
@@ -4294,33 +4417,48 @@ dcl-proc RPGAPI_sendAll;
 end-proc;
 
 
-   // sends the streamed body bytes waiting in RPGAPI_output: as one chunk,
-   // a hex size line, the bytes and CR LF, or as they are
+   // sends the streamed body bytes waiting in RPGAPI_output, through gzip
+   // when the response is gzipped
 dcl-proc RPGAPI_flushOutput;
-   dcl-s size_line varchar(12);
-   dcl-s value int(10:0);
-   dcl-c ASCII_HEX x'30313233343536373839414243444546';
-
    if RPGAPI_output_length = 0;
       return;
    endif;
 
+   if RPGAPI_zstream_open;
+      RPGAPI_gzipWrite(%addr(RPGAPI_output) : RPGAPI_output_length : *off);
+   else;
+      RPGAPI_sendBody(%addr(RPGAPI_output) : RPGAPI_output_length);
+   endif;
+   RPGAPI_output_length = 0;
+end-proc;
+
+
+   // sends bytes of a streamed body: as one chunk, a hex size line, the
+   // bytes and CR LF, or as they are
+dcl-proc RPGAPI_sendBody;
+   dcl-pi *n;
+      data pointer value;
+      length int(10:0) value;
+   end-pi;
+   dcl-s size_line varchar(12);
+   dcl-s value int(10:0);
+   dcl-c ASCII_HEX x'30313233343536373839414243444546';
+
    if RPGAPI_stream = RPGAPI_STREAM_CHUNKED;
          // written straight in ASCII, most significant digit first
-      value = RPGAPI_output_length;
+      value = length;
       dou value = 0;
          size_line = %subst(ASCII_HEX : %rem(value : 16) + 1 : 1) + size_line;
          value = %div(value : 16);
       enddo;
       size_line += x'0d0a';
       RPGAPI_sendAll(%addr(size_line : *data) : %len(size_line));
-      RPGAPI_sendAll(%addr(RPGAPI_output) : RPGAPI_output_length);
+      RPGAPI_sendAll(data : length);
       size_line = x'0d0a';
       RPGAPI_sendAll(%addr(size_line : *data) : %len(size_line));
    else;
-      RPGAPI_sendAll(%addr(RPGAPI_output) : RPGAPI_output_length);
+      RPGAPI_sendAll(data : length);
    endif;
-   RPGAPI_output_length = 0;
 end-proc;
 
 
@@ -4366,31 +4504,52 @@ end-proc;
 
    // sends the status line and headers of a streamed response. framing is a
    // Content-Length, RPGAPI_CHUNKED, or RPGAPI_UNTIL_CLOSE when the body ends
-   // with the connection or there is none (304)
+   // with the connection or there is none (304). vary_encoding: say Vary:
+   // Accept-Encoding, for a 304 that has lost the Content-Type it depends on
 dcl-proc RPGAPI_beginStream;
    dcl-pi *n;
       response likeds(RPGAPI_Response) const;
       framing int(10:0) const;
+      vary_encoding ind const options(*nopass);
    end-pi;
    dcl-ds head_response likeds(RPGAPI_Response);
    dcl-s head varchar(96000);
+   dcl-s body_framing int(10:0);
 
    head_response = response;
    if head_response.status = 0;
       head_response.status = HTTP_OK;
    endif;
+   body_framing = framing;
+
+      // gzipped, the body's length is not known until it has been sent:
+      // chunks, or until the connection closes for HTTP/1.0
+   RPGAPI_gzipEnd();
+   if RPGAPI_decideGzip(head_response : framing);
+      if framing >= 0 and %trim(RPGAPI_request_protocol) = 'HTTP/1.0';
+         body_framing = RPGAPI_UNTIL_CLOSE;
+      elseif framing >= 0;
+         body_framing = RPGAPI_CHUNKED;
+      endif;
+      if not RPGAPI_head_request and not RPGAPI_gzipBegin();
+         RPGAPI_gzip = *off;
+      endif;
+   endif;
+   if %parms() >= 3 and vary_encoding;
+      RPGAPI_vary_encoding = *on;
+   endif;
 
    select;
-   when framing = RPGAPI_CHUNKED;
+   when body_framing = RPGAPI_CHUNKED;
       RPGAPI_stream = RPGAPI_STREAM_CHUNKED;
-   when framing = RPGAPI_UNTIL_CLOSE;
+   when body_framing = RPGAPI_UNTIL_CLOSE;
       RPGAPI_stream = RPGAPI_STREAM_UNTIL_CLOSE;
    other;
       RPGAPI_stream = RPGAPI_STREAM_LENGTH;
    endsl;
 
    RPGAPI_output_length = 0;
-   head = RPGAPI_convert(RPGAPI_buildHead(head_response : framing) :
+   head = RPGAPI_convert(RPGAPI_buildHead(head_response : body_framing) :
                          RPGAPI_JOB_CCSID : RPGAPI_UTF8);
    RPGAPI_sendAll(%addr(head : *data) : %len(head));
 end-proc;
@@ -4447,6 +4606,10 @@ dcl-proc RPGAPI_endResponse export;
    endif;
 
    RPGAPI_flushOutput();
+   if RPGAPI_zstream_open;
+      RPGAPI_gzipWrite(*null : 0 : *on);
+      RPGAPI_gzipEnd();
+   endif;
       // a chunked body ends with a chunk of size 0: 0 CR LF CR LF. A HEAD
       // response has no body at all
    if RPGAPI_stream = RPGAPI_STREAM_CHUNKED and not RPGAPI_head_request;
@@ -4478,6 +4641,8 @@ dcl-proc RPGAPI_sendFile export;
    dcl-s first int(10:0);
    dcl-s last int(10:0);
    dcl-s range_result int(10:0) inz(0);
+   dcl-s gzipped ind;
+   dcl-s vary_encoding ind;
 
       // no stepping out of the directory a procedure builds the path in
    if %scan('/../' : '/' + path + '/') > 0;
@@ -4517,7 +4682,12 @@ dcl-proc RPGAPI_sendFile export;
    if not RPGAPI_hasHeader(file_response : 'Cache-Control');
       RPGAPI_setHeader(file_response : 'Cache-Control' : 'public, max-age=0');
    endif;
-   RPGAPI_setHeader(file_response : 'Accept-Ranges' : 'bytes');
+      // a gzipped file is sent whole: a range of the gzipped bytes is no use
+      // to a client, and one of the file's cannot be told apart from them
+   gzipped = RPGAPI_decideGzip(file_response : size);
+   if not gzipped;
+      RPGAPI_setHeader(file_response : 'Accept-Ranges' : 'bytes');
+   endif;
    RPGAPI_setHeader(file_response : 'Last-Modified' : last_modified);
    RPGAPI_setHeader(file_response : 'ETag' : etag);
 
@@ -4542,7 +4712,7 @@ dcl-proc RPGAPI_sendFile export;
 
          // a part of the file, unless If-Range says the client's copy is
          // of an older version
-      if file_response.status = HTTP_OK;
+      if file_response.status = HTTP_OK and not gzipped;
          condition = RPGAPI_requestHeader('If-Range');
          if condition = '' or
             condition = etag or
@@ -4564,8 +4734,9 @@ dcl-proc RPGAPI_sendFile export;
    when file_response.status = HTTP_NOT_MODIFIED;
       close_port(descriptor);
          // no body, and no Content-Length or Content-Type for it
+      vary_encoding = RPGAPI_vary_encoding;
       RPGAPI_removeHeader(file_response : 'Content-Type');
-      RPGAPI_beginStream(file_response : RPGAPI_UNTIL_CLOSE);
+      RPGAPI_beginStream(file_response : RPGAPI_UNTIL_CLOSE : vary_encoding);
       RPGAPI_endResponse();
       return *on;
 
@@ -5203,6 +5374,268 @@ dcl-proc RPGAPI_setSecurityHeaders export;
       config.content_security_policy = %trim(policy);
    else;
       config.content_security_policy = RPGAPI_DEFAULT_CSP;
+   endif;
+end-proc;
+
+
+dcl-proc RPGAPI_setCompression export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      min_bytes int(10:0) const options(*nopass);
+   end-pi;
+
+   config.compression = *on;
+   config.compression_threshold = 0;
+   if %parms() >= 2;
+      if min_bytes < 0;
+         RPGAPI_settingFailed('RPGAPI_setCompression: ' + %char(min_bytes) +
+                              ' bytes is not a size');
+      endif;
+         // an empty body is never gzipped, so 0 is 1 (0 in the field is the
+         // default)
+      config.compression_threshold = %max(min_bytes : 1);
+   endif;
+end-proc;
+
+
+   // decides whether the response is gzipped (RPGAPI_gzip) and whether it
+   // says Vary: Accept-Encoding (RPGAPI_vary_encoding). body_length is the
+   // body's size in bytes, or RPGAPI_CHUNKED or RPGAPI_UNTIL_CLOSE when it
+   // is not known. Returns RPGAPI_gzip
+dcl-proc RPGAPI_decideGzip;
+   dcl-pi *n ind;
+      response likeds(RPGAPI_Response) const;
+      body_length int(10:0) const;
+   end-pi;
+
+   RPGAPI_gzip = *off;
+   RPGAPI_vary_encoding = *off;
+   if not RPGAPI_compression or
+      RPGAPI_hasHeader(response : 'Content-Encoding') or
+      %scan('no-transform' :
+            %lower(RPGAPI_responseHeader(response : 'Cache-Control'))) > 0 or
+      not RPGAPI_compressibleType(
+             RPGAPI_responseHeader(response : 'Content-Type'));
+      return *off;
+   endif;
+      // whether a client gets it gzipped depends on its Accept-Encoding, so a
+      // cache has to keep a copy for each
+   RPGAPI_vary_encoding = *on;
+   if response.status < 200 or response.status = HTTP_NO_CONTENT or
+      response.status = HTTP_NOT_MODIFIED or
+      (body_length >= 0 and body_length < RPGAPI_compression_threshold) or
+      body_length = 0 or not RPGAPI_acceptsGzip();
+      return *off;
+   endif;
+   RPGAPI_gzip = *on;
+   return *on;
+end-proc;
+
+
+   // whether a Content-Type is text that compresses: text/..., JSON,
+   // JavaScript, XML, and types built on them such as application/ld+json
+   // and image/svg+xml
+dcl-proc RPGAPI_compressibleType;
+   dcl-pi *n ind;
+      content_type varchar(1024) const;
+   end-pi;
+   dcl-s type varchar(1024);
+   dcl-s semicolon int(10:0);
+
+   type = %lower(%trim(content_type));
+   semicolon = %scan(';' : type);
+   if semicolon > 0;
+      type = %trim(%subst(type : 1 : semicolon - 1));
+   endif;
+   return RPGAPI_startsWith(type : 'text/') or
+          type = 'application/json' or type = 'application/javascript' or
+          type = 'application/xml' or type = 'image/svg+xml' or
+          RPGAPI_endsWith(type : '+json') or RPGAPI_endsWith(type : '+xml');
+end-proc;
+
+
+   // whether the request's Accept-Encoding allows gzip: gzip (or x-gzip) or
+   // *, without q=0. A client that sends none gets the body as it is
+dcl-proc RPGAPI_acceptsGzip;
+   dcl-pi *n ind;
+   end-pi;
+   dcl-s codings varchar(1024) dim(50);
+   dcl-s coding varchar(1024);
+   dcl-s name varchar(1024);
+   dcl-s parameters varchar(1024);
+   dcl-s quality varchar(1024);
+   dcl-s index int(10:0);
+   dcl-s at int(10:0);
+   dcl-s allowed ind;
+      // -1: not listed, 0: listed with q=0, 1: acceptable
+   dcl-s gzip int(10:0) inz(-1);
+   dcl-s any int(10:0) inz(-1);
+
+   codings = %split(%lower(RPGAPI_requestHeader('Accept-Encoding')) : ',');
+   for index = 1 to %elem(codings);
+      coding = %trim(codings(index));
+      if coding = '';
+         leave;
+      endif;
+      name = coding;
+      allowed = *on;
+      at = %scan(';' : coding);
+      if at > 0;
+         name = %trim(%subst(coding : 1 : at - 1));
+         parameters = %scanrpl(' ' : '' : %subst(coding : at) + ';');
+            // ;q=0, 0.0, 0.00 or 0.000: not acceptable
+         at = %scan(';q=' : parameters);
+         if at > 0;
+            quality = %subst(parameters : at + 3);
+            quality = %subst(quality : 1 : %scan(';' : quality) - 1);
+            allowed = %check('0.' : quality + 'x') < %len(quality) + 1;
+         endif;
+      endif;
+      select;
+      when name = 'gzip' or name = 'x-gzip';
+         gzip = 0;
+         if allowed;
+            gzip = 1;
+         endif;
+      when name = '*';
+         any = 0;
+         if allowed;
+            any = 1;
+         endif;
+      endsl;
+   endfor;
+   if gzip >= 0;
+      return gzip = 1;
+   endif;
+   return any = 1;
+end-proc;
+
+
+   // the value of a header set on a response, '' when there is none
+dcl-proc RPGAPI_responseHeader;
+   dcl-pi *n varchar(1024);
+      response likeds(RPGAPI_Response) const;
+      name varchar(50) const;
+   end-pi;
+   dcl-s index int(10:0);
+
+   for index = 1 to %elem(response.headers);
+      if response.headers(index).name = *blanks;
+         leave;
+      endif;
+      if %upper(%trim(response.headers(index).name)) = %upper(name);
+         return %trim(response.headers(index).value);
+      endif;
+   endfor;
+   return '';
+end-proc;
+
+
+   // gzips length bytes at input into output, which has room for size bytes,
+   // in one go. Returns the gzipped length, or -1 when it failed or did not
+   // fit
+dcl-proc RPGAPI_gzipAll;
+   dcl-pi *n int(10:0);
+      input pointer value;
+      length int(10:0) value;
+      output pointer value;
+      size int(10:0) value;
+   end-pi;
+   dcl-ds stream likeds(RPGAPI_z_stream_t) inz;
+   dcl-s return_code int(10:0);
+
+   return_code = deflateInit2_(stream : Z_DEFAULT_LEVEL : Z_DEFLATED :
+                               Z_GZIP_WINDOW : Z_DEFAULT_MEMLEVEL : 0 :
+                               zlibVersion() : %size(stream));
+   if return_code <> 0;
+      RPGAPI_log(RPGAPI_LOG_WARN : 'gzip could not start (zlib ' +
+                 %char(return_code) + '): the response is sent as it is');
+      return -1;
+   endif;
+   stream.next_in = input;
+   stream.avail_in = length;
+   stream.next_out = output;
+   stream.avail_out = size;
+   return_code = deflate(stream : Z_FINISH);
+   length = stream.total_out;
+   deflateEnd(stream);
+   if return_code <> Z_STREAM_END;
+      RPGAPI_log(RPGAPI_LOG_WARN : 'gzip failed (zlib ' +
+                 %char(return_code) + '): the response is sent as it is');
+      return -1;
+   endif;
+   return length;
+end-proc;
+
+
+   // starts gzipping a streamed response. *off when zlib cannot, and it is
+   // sent as it is
+dcl-proc RPGAPI_gzipBegin;
+   dcl-pi *n ind;
+   end-pi;
+   dcl-s return_code int(10:0);
+
+   RPGAPI_gzipEnd();
+   clear RPGAPI_zstream;
+   return_code = deflateInit2_(RPGAPI_zstream : Z_DEFAULT_LEVEL : Z_DEFLATED :
+                               Z_GZIP_WINDOW : Z_DEFAULT_MEMLEVEL : 0 :
+                               zlibVersion() : %size(RPGAPI_zstream));
+   if return_code <> 0;
+      RPGAPI_log(RPGAPI_LOG_WARN : 'gzip could not start (zlib ' +
+                 %char(return_code) + '): the response is sent as it is');
+      return *off;
+   endif;
+   RPGAPI_zstream_open = *on;
+   return *on;
+end-proc;
+
+
+   // gzips length bytes of a streamed response and sends what zlib makes of
+   // them. zlib holds on to data until it has enough to compress well;
+   // finish sends the rest and the gzip trailer
+dcl-proc RPGAPI_gzipWrite;
+   dcl-pi *n;
+      data pointer value;
+      length int(10:0) value;
+      finish ind const;
+   end-pi;
+   dcl-s return_code int(10:0);
+   dcl-s made int(10:0);
+   dcl-s flush int(10:0) inz(Z_NO_FLUSH);
+
+   if finish;
+      flush = Z_FINISH;
+   endif;
+   RPGAPI_zstream.next_in = data;
+   RPGAPI_zstream.avail_in = length;
+   dou (not finish and RPGAPI_zstream.avail_out > 0) or
+       (finish and return_code = Z_STREAM_END);
+      RPGAPI_zstream.next_out = %addr(RPGAPI_gzip_output);
+      RPGAPI_zstream.avail_out = %size(RPGAPI_gzip_output);
+      return_code = deflate(RPGAPI_zstream : flush);
+         // Z_BUF_ERROR: nothing to do, not a failure
+      if return_code < 0 and return_code <> Z_BUF_ERROR;
+         RPGAPI_log(RPGAPI_LOG_ERROR : 'gzip failed (zlib ' +
+                    %char(return_code) + '): the response is cut off');
+         RPGAPI_connection_failed = *on;
+         return;
+      endif;
+      made = %size(RPGAPI_gzip_output) - RPGAPI_zstream.avail_out;
+      if made > 0;
+         RPGAPI_sendBody(%addr(RPGAPI_gzip_output) : made);
+      endif;
+   enddo;
+end-proc;
+
+
+   // ends the zlib stream of a streamed response, freeing its memory
+dcl-proc RPGAPI_gzipEnd;
+   if RPGAPI_zstream_open;
+      RPGAPI_zstream_open = *off;
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'gzipped ' +
+                 %char(RPGAPI_zstream.total_in) + ' bytes to ' +
+                 %char(RPGAPI_zstream.total_out));
+      deflateEnd(RPGAPI_zstream);
    endif;
 end-proc;
 
