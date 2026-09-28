@@ -72,7 +72,8 @@ curl -i http://your-ibm-i:3017/nothing      # 404 Not Found
 ENDJOB JOB(HELLO)
 ```
 
-## Next
+## Where to go from here
+Things to try next in your app, all of them already in RPGAPI:
 - Serve several requests at once: `RPGAPI_start(app : 3017 : 4)` runs 4 jobs
 - Read a JSON body with `request.body`, or stream large ones with
   `RPGAPI_readBody`
@@ -82,6 +83,13 @@ ENDJOB JOB(HELLO)
   before `RPGAPI_start` (see HTTPS (TLS) in the [README](README.md))
 - See what the server does: `RPGAPI_setLogLevel(app : RPGAPI_LOG_INFO)` logs a
   line per request to the job log, `RPGAPI_LOG_DEBUG` everything
+- Send HTML pages from views, templates of HTML with RPG in them:
+  `return RPGAPI_render('customers.erpg' : %addr(model));` (see Views in the
+  API Documentation)
+- Make responses smaller for browsers: `RPGAPI_setCompression(app)` gzips
+  text and JSON
+- Stop the server from a route, such as an admin endpoint:
+  `RPGAPI_shutdown()` lets the requests in progress finish, as `ENDJOB` does
 
 All of it is in the [API Documentation](ApiDocumentation.md), and
 [examples](examples/README.md) has complete apps that use it.

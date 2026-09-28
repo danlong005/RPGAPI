@@ -139,10 +139,14 @@ progress finish:
 SBMJOB CMD(CALL PGM(MYLIB/MYAPP)) JOB(MYAPP)
 ENDJOB JOB(MYAPP)
 ```
+The app can also stop itself: `RPGAPI_shutdown()`, called from a route or
+middleware, does what the controlled `ENDJOB` does (see Stopping the server in
+the [API Documentation](ApiDocumentation.md)).
 [QuickStart.md](QuickStart.md) walks through this with a first app, and
 [examples](examples/README.md) has complete apps to start from: a JSON API
-over SQL, streaming exports, API keys, static files, uploads and production
-settings.
+over SQL, streaming exports, API keys, static files, uploads, production
+settings, and HTML pages from views (a table from SQL, and a guestbook with a
+form).
 
 ### Character sets
 RPGAPI sends and receives UTF-8, and converts it to and from the CCSID of the
