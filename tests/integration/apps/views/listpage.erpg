@@ -1,0 +1,18 @@
+<%! dcl-pi *n;
+       title varchar(100) const;
+       rows int(10:0) const;
+     end-pi;
+     dcl-s index int(10:0); -%>
+<%# a page: a view for the header, a list, and text with quotes, a tab and umlauts -%>
+<!DOCTYPE html>
+<html><head><title><%= title %></title></head>
+<body>
+<% heading(title); -%>
+<ul>
+<% for index = 1 to rows; -%>
+  <li id="row<%= index %>">Row <%= index %> of <%- rows %></li>
+<% endfor; -%>
+</ul>
+<p>It's "quoted", a	tab, and Grüße</p>
+<p>A literal <%% tag, and <%= '<b>&</b>' %> escaped, <%- '<b>raw</b>' %> not</p>
+</body></html>

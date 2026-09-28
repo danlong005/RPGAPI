@@ -27,6 +27,8 @@ server, and each request is handed to your procedure as a data structure.
   pages and their assets) with caching headers and range requests
 - gzip compression of text and JSON responses, with the zlib that comes with
   IBM i
+- HTML pages from EJS-style templates with RPG in the tags (`<% %>`,
+  `<%= %>` escaped), turned into RPG procedures by the `ERPG` precompiler
 - Several jobs serving one port, replaced when one ends, keep-alive
   connections, timeouts so one slow client cannot hold a job, and a controlled
   `ENDJOB` or `RPGAPI_shutdown()` that lets requests in progress finish
@@ -83,6 +85,8 @@ This will:
 - Compile the RPGAPI module (`CRTRPGMOD ... TGTCCSID(*JOB)`)
 - Create the service program
 - Add it to the binding directory
+- Compile `ERPG`, the template precompiler (see HTML templates in the
+  [API Documentation](ApiDocumentation.md))
 
 If `LIB` does not exist the build stops immediately and tells you so, rather than
 failing later with a confusing compile error.
@@ -99,7 +103,7 @@ This needs [iRPGUnit](https://github.com/tools-400/irpgunit) installed in librar
    curl: `make integration`.
 
 6. (Optional) Remove the objects the build created (the module, service program,
-binding directory and test program):
+binding directory, `ERPG` and test program):
 ```bash
 make clean
 ```

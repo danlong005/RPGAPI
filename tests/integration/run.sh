@@ -23,7 +23,7 @@ TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers static secure compress examples sqljson yajl"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers static secure compress templates examples sqljson yajl"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
@@ -49,7 +49,7 @@ compile() {
   upper=$(echo "$name" | tr a-z A-Z)
   cl "CHGATR OBJ('$TESTS/apps/*') ATR(*CCSID) VALUE(1252)" >/dev/null
   if [ -f "$TESTS/apps/$name.sqlrpgle" ]; then
-    command="CRTSQLRPGI OBJ($LIB/$upper) SRCSTMF('$TESTS/apps/$name.sqlrpgle') CVTCCSID(*JOB) DBGVIEW(*SOURCE) COMPILEOPT('INCDIR(''$REPO/qrpglesrc'' ''$TESTS/apps'') TGTCCSID(*JOB)')"
+    command="CRTSQLRPGI OBJ($LIB/$upper) SRCSTMF('$TESTS/apps/$name.sqlrpgle') CVTCCSID(*JOB) DBGVIEW(*SOURCE) RPGPPOPT(*LVL2) INCDIR('$REPO/qrpglesrc') COMPILEOPT('INCDIR(''$REPO/qrpglesrc'' ''$TESTS/apps'') TGTCCSID(*JOB)')"
   else
     command="CRTBNDRPG PGM($LIB/$upper) SRCSTMF('$TESTS/apps/$name.rpgle') INCDIR('$REPO/qrpglesrc' '$TESTS/apps') DBGVIEW(*SOURCE) TGTCCSID(*JOB)"
   fi
@@ -59,6 +59,21 @@ compile() {
   fi
   fail "compile $name (see $WORK/compile-$name.log)"
   return 1
+}
+
+# runs ERPG on the templates in a directory of views (apps/views, for the
+# templates app, by default)
+views() {
+  directory=${1:-$TESTS/apps/views}
+  cl "CHGATR OBJ('$directory/*') ATR(*CCSID) VALUE(1208)" >/dev/null
+  for template in "$directory"/*.erpg; do
+    out=$(cl "CALL PGM($LIB/ERPG) PARM('$template')")
+    case $out in
+      *"ERPG wrote"*) ;;
+      *) fail "ERPG $(basename "$template"): $out"; return 1 ;;
+    esac
+  done
+  pass "ERPG turns the templates in $(basename "$(dirname "$directory")")/views into procedures"
 }
 
 # compiles an example from examples/ as $2, only to check that it builds
@@ -79,15 +94,16 @@ compile_example() {
 }
 
 # compiles an example as $2 with its port changed to PORT, starts it, runs
-# client $3 against it, and ends it; libraries it needs as well in $4
+# client $3 against it, and ends it; libraries it needs as well in $4, and
+# more CRTSQLRPGI parameters in $5
 example_suite() {
-  file=$1 object=$2 extra=$4
+  file=$1 object=$2 extra=$4 options=$5
   sed -e "s/RPGAPI_start(app : 8080)/RPGAPI_start(app : $PORT)/" \
       -e "s/app.port = [0-9]*;/app.port = $PORT;/" "$REPO/examples/$file" > "$WORK/$file"
   cl "CHGATR OBJ('$WORK/$file') ATR(*CCSID) VALUE(1252)" >/dev/null
   cl "DLTOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null
   case $file in
-    *.sqlrpgle) command="CRTSQLRPGI OBJ($LIB/$object) SRCSTMF('$WORK/$file') CVTCCSID(*JOB) COMPILEOPT('INCDIR(''$REPO/qrpglesrc'') TGTCCSID(*JOB)')" ;;
+    *.sqlrpgle) command="CRTSQLRPGI OBJ($LIB/$object) SRCSTMF('$WORK/$file') CVTCCSID(*JOB) $options COMPILEOPT('INCDIR(''$REPO/qrpglesrc'') TGTCCSID(*JOB)')" ;;
     *)          command="CRTBNDRPG PGM($LIB/$object) SRCSTMF('$WORK/$file') INCDIR('$REPO/qrpglesrc') TGTCCSID(*JOB)" ;;
   esac
   $QSH -c "liblist -a $LIB $extra >/dev/null 2>&1; system \"$command\"" </dev/null > "$WORK/compile-$object.log" 2>&1
@@ -275,6 +291,11 @@ for suite_name in $SUITES; do
                  CORS=""; } ;;
     handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
     compress)  compile compress && suite compress ";;;$T;" compress ;;
+    templates) views && compile templates && suite templates ";;;$T;" templates
+               # the example is compiled from a copy in WORK: its views too
+               views "$REPO/examples/views" && mkdir -p "$WORK/views" &&
+                 cp "$REPO"/examples/views/*.erpg.rpgle "$WORK/views/" &&
+                 example_suite html-page.sqlrpgle EXHTML htmlpage "" "RPGPPOPT(*LVL2) INCDIR('$REPO/qrpglesrc')" ;;
     examples)  compile_example hello.rpgle EXHELLO
                compile_example notes-api.sqlrpgle EXNOTES
                compile_example table-export.sqlrpgle EXEXPORT

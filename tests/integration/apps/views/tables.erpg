@@ -1,0 +1,18 @@
+<%! dcl-pi *n;
+       schema varchar(128) const;
+     end-pi;
+     dcl-s name varchar(128);
+     dcl-s kind char(1); -%>
+<table>
+<% exec sql declare tables_cursor cursor for
+     select table_name, table_type from qsys2.systables
+      where table_schema = :schema order by table_name
+      fetch first 5 rows only;
+   exec sql open tables_cursor;
+   exec sql fetch next from tables_cursor into :name, :kind;
+   dow sqlcode = 0; -%>
+  <tr><td><%= name %></td><td><%= kind %></td></tr>
+<%   exec sql fetch next from tables_cursor into :name, :kind;
+   enddo;
+   exec sql close tables_cursor; -%>
+</table>

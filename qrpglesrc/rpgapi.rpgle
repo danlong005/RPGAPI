@@ -4571,6 +4571,48 @@ dcl-proc RPGAPI_write export;
 end-proc;
 
 
+dcl-proc RPGAPI_writeHtml export;
+   dcl-pi *n;
+      text varchar(32000) const;
+   end-pi;
+   dcl-s escaped varchar(192000);
+   dcl-s start int(10:0) inz(1);
+
+   RPGAPI_checkStream('RPGAPI_writeHtml');
+   if RPGAPI_connection_failed;
+      return;
+   endif;
+      // RPGAPI_write takes 32000 at a time
+   escaped = RPGAPI_escapeHtml(text);
+   dow start <= %len(escaped);
+      RPGAPI_write(%subst(escaped : start :
+                          %min(32000 : %len(escaped) - start + 1)));
+      start += 32000;
+   enddo;
+end-proc;
+
+
+dcl-proc RPGAPI_escapeHtml export;
+   dcl-pi *n varchar(192000);
+      text varchar(32000) const;
+   end-pi;
+   dcl-s escaped varchar(192000);
+
+      // most values have nothing to escape
+   if %scan('&' : text) + %scan('<' : text) + %scan('>' : text) +
+      %scan('"' : text) + %scan('''' : text) = 0;
+      return text;
+   endif;
+      // & first, or the & of the others would be escaped again
+   escaped = %scanrpl('&' : '&amp;' : text);
+   escaped = %scanrpl('<' : '&lt;' : escaped);
+   escaped = %scanrpl('>' : '&gt;' : escaped);
+   escaped = %scanrpl('"' : '&quot;' : escaped);
+   escaped = %scanrpl('''' : '&#39;' : escaped);
+   return escaped;
+end-proc;
+
+
 dcl-proc RPGAPI_writeBytes export;
    dcl-pi *n;
       buffer pointer value;

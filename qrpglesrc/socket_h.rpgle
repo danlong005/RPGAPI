@@ -181,6 +181,8 @@ dcl-c O_RDONLY 1;
 dcl-c O_WRONLY 2;
 dcl-c O_CREAT 8;
 dcl-c O_TRUNC 64;
+   // with O_CREAT: the file is tagged with the CCSID in conversion_id
+dcl-c O_CCSID 32;
 dcl-c SHUT_WR 1;
 dcl-c MSG_PEEK 8;
 
@@ -206,6 +208,7 @@ dcl-pr open int(10:0) extproc('open');
    path pointer value options(*string);
    flags int(10:0) value;
    mode uns(10:0) value options(*nopass);
+   conversion_id uns(10:0) value options(*nopass);
 end-pr;
 
    // the parts of struct stat (32-bit sizes and times) that are used

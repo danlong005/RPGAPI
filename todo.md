@@ -290,6 +290,30 @@
   18,121 to 2,872 bytes and its CSV from 7,848 to 2,577, both unzipping (and
   through `curl --compressed`) to the plain output. `production.rpgle` turns
   it on too, and the README lists `QSYS/QZIPZLIB` under Requirements
+- [x] EJS-style HTML templates, compiled in at build time: `ERPG`
+  (`qrpglesrc/erpg.rpgle`, built by `make all`) turns a UTF-8 `.erpg` file
+  into `<name>.erpg.rpgle` holding `dcl-proc <name>`, which the app
+  `/include`s and calls between `RPGAPI_beginResponse` and
+  `RPGAPI_endResponse`, passing its data as parameters (the template's
+  `<%! dcl-pi %>`). Tags `<% %>`, `<%= %>` (`RPGAPI_writeHtml`, new with
+  `RPGAPI_escapeHtml`: `& < > " '`), `<%- %>`, `<%# %>`, `<%! %>`
+  (declarations first), `<%%` and `-%>`. Every generated line names its
+  template line; `ERPG` ends with `CPF9898` naming `file:line` for an
+  unclosed tag, an empty `<%= %>`, a name that is not an RPG name, a file
+  that is not UTF-8 or does not exist. Differences from the plan: the
+  generated file is UTF-8 (tagged 1208), not the job's CCSID; views with SQL
+  need `CRTSQLRPGI ... RPGPPOPT(*LVL2)`, which copies lines into a file of
+  100 characters, so `ERPG` keeps its lines within 100; `PAGE` is a reserved
+  word, so no view can be called `page`; a CALL literal over 32 characters
+  comes with unknown bytes after it, so the path ends at the first `.erpg`.
+  Found and fixed on the way: a file that is not UTF-8 made iconv signal
+  MCH1210 (now `CPF9898`). Example `examples/html-page.sqlrpgle` with
+  `examples/views/` (a view over an SQL cursor calling another, gzipped);
+  an HTML templates section in ApiDocumentation.md. Verified on PUB400
+  (2026-09-28, templates suite, 23 checks and 4 for the example): a page byte
+  for byte with a view in it, escaping, a page over 32K, an SQL cursor view,
+  the generated code, every refusal, Windows line breaks. The full run
+  passes (481 checks)
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default
@@ -542,40 +566,12 @@
   variable, try installing iRPGUnit into a library we own on PUB400, and run
   the tests added since (they have never been compiled)
 
-- [ ] EJS-style HTML templates, with RPG inside the tags, compiled in at build
-  time (RPG cannot run code it reads at runtime, so a template becomes an RPG
-  procedure, the way EJS turns one into a JS function). Templates are `.erpg`
-  files, UTF-8 on the IFS:
-  - `<% code %>` RPG statements (`for`, `if`, `exec sql fetch`, calls)
-  - `<%= expr %>` a value, HTML-escaped; `<%- expr %>` a value as is
-  - `<%# text %>` a comment; `<%%` a literal `<%`; `-%>` drops the line break
-    after the tag
-  - `<%! decls %>` declarations (`dcl-pi`, `dcl-s`), moved to the top of the
-    procedure, since RPG wants them before statements
-  
-  A precompiler written in RPG, program `ERPG` (`qrpglesrc/erpg.rpgle`, built
-  by `make all`, using the IFS prototypes in `socket_h.rpgle`):
-  `CALL ERPG PARM('/app/views/orders.erpg')` writes `orders.erpg.rpgle`, a
-  `**FREE` `dcl-proc orders` in the job's CCSID. Text becomes `RPGAPI_write`
-  calls (quotes doubled, long lines in pieces), `<%=` becomes
-  `RPGAPI_writeHtml(%trimr(%char(expr)))`, and every generated line carries a
-  `// orders.erpg:N` comment so compile errors point at the template. A tag
-  never closed ends `ERPG` with `CPF9898` naming `file:line`.
-  
-  The app `/include`s the generated file, and a handler sets `Content-Type`,
-  calls `RPGAPI_beginResponse` and then the view (`orders(page)`), so pages
-  stream with no 32K limit. A view includes another by calling it. RPGAPI
-  gets `RPGAPI_writeHtml` and `RPGAPI_escapeHtml` (`& < > " '`). Also: a
-  Templates section in ApiDocumentation.md, an HTML-over-SQL example, and a
-  `templates` integration suite (escaping, loops over an array and a cursor,
-  `-%>`, `<%%`, a view calling a view, a page over 32K, `ERPG` rejecting an
-  unclosed tag).
-  
-  Changing a template means running `ERPG` and recompiling the app. A runtime,
-  logic-less Mustache-style engine (edit and refresh, values registered by
-  name) was considered and left for later. Not in the first version:
-  `include()`, `<%_ _%>`, layouts, and a Jbuilder-style streaming JSON builder
-  (`RPGAPI_jsonBeginObject` and so on), which would be its own feature
+- [ ] Templates, later: `include()` of a view by file name, layouts,
+  EJS's `<%_ _%>`, and a Jbuilder-style streaming JSON builder
+  (`RPGAPI_jsonBeginObject` and so on, its own feature). A runtime engine
+  (edit and refresh without a build) was discussed on 2026-09-28: build time
+  was kept, since RPG in a template has to be compiled and typed parameters
+  need the view in the app's program
 
 ## Cleanup
 - [ ] The unit tests in `qtestsrc` have never been compiled or run: check they

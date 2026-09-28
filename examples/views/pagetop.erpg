@@ -1,0 +1,17 @@
+<%# the top of every page: the head, and the title as a heading -%>
+<%! dcl-pi *n;
+       title varchar(200) const;
+     end-pi; -%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title><%= title %></title>
+<style>
+  body { font-family: sans-serif; margin: 2em; }
+  th, td { padding: 4px 12px; text-align: left; }
+  tr:nth-child(even) { background: #f4f4f4; }
+</style>
+</head>
+<body>
+<h1><%= title %></h1>

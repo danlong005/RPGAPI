@@ -28,6 +28,7 @@ all:
 	-cat $(IFS_PATH)/RPGAPI.evfevent
 	system "CRTSRVPGM SRVPGM($(LIB)/RPGAPI) MODULE($(LIB)/RPGAPI) SRCSTMF('$(IFS_PATH)/qbndsrc/RPGAPI_B.bnd') BNDSRVPGM((QSYS/QZIPZLIB))"
 	-system "ADDBNDDIRE BNDDIR($(LIB)/$(BNDDIR)) OBJ(($(LIB)/RPGAPI))"
+	system "CRTBNDRPG PGM($(LIB)/ERPG) SRCSTMF('$(IFS_PATH)/qrpglesrc/erpg.rpgle') REPLACE(*YES) DBGVIEW(*SOURCE) TGTCCSID(*JOB) INCDIR('$(IFS_PATH)/qrpglesrc')"
 
 # RUCRTTST is run from qtestsrc so that the /include '../qrpglesrc/...' in the
 # test source resolves: RPGAPI is precompiled into a QTEMP member, so relative
@@ -48,6 +49,7 @@ integration:
 # Makefile does not create it, so it does not own it.
 clean:
 	-system "DLTOBJ OBJ($(LIB)/RPGAPITEST) OBJTYPE(*PGM)"
+	-system "DLTOBJ OBJ($(LIB)/ERPG) OBJTYPE(*PGM)"
 	-system "RMVBNDDIRE BNDDIR($(LIB)/$(BNDDIR)) OBJ(($(LIB)/RPGAPI))"
 	-system "DLTOBJ OBJ($(LIB)/RPGAPI) OBJTYPE(*SRVPGM)"
 	-system "DLTOBJ OBJ($(LIB)/RPGAPI) OBJTYPE(*MODULE)"

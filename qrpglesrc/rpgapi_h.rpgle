@@ -489,6 +489,18 @@ dcl-pr RPGAPI_write;
    text varchar(32000) const;
 end-pr;
 
+   // text written as HTML shows it: & < > " and ' as entities, so a value
+   // from a user or a table cannot add tags or scripts to a page. What ERPG
+   // templates use for <%= %>
+dcl-pr RPGAPI_writeHtml;
+   text varchar(32000) const;
+end-pr;
+
+   // text with & < > " and ' as HTML entities (&amp; &lt; &gt; &quot; &#39;)
+dcl-pr RPGAPI_escapeHtml varchar(192000);
+   text varchar(32000) const;
+end-pr;
+
    // bytes sent as they are, for binary content
 dcl-pr RPGAPI_writeBytes;
    buffer pointer value;

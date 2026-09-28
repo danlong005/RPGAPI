@@ -1183,6 +1183,97 @@ the file (`DATA-INTO` with `doc=file`, or YAJL's `yajl_stmf_load_tree`). For
 large responses,
 see Large responses and streaming.
 
+### HTML templates (ERPG)
+Pages are written as templates with RPG inside tags, the way Express apps use
+EJS, and the `ERPG` program that `make all` builds turns each one into an RPG
+procedure. RPG cannot run code it reads at runtime, so this happens when you
+build: a template becomes code in your program, like any other.
+
+A template is a `.erpg` file on the IFS, in UTF-8:
+```
+<%! dcl-pi *n;
+       title varchar(100) const;
+       people likeds(customer_t) dim(50) const;
+       count int(10:0) const;
+     end-pi;
+     dcl-s index int(10:0); -%>
+<h1><%= title %></h1>
+<ul>
+<% for index = 1 to count; -%>
+  <li><%= people(index).name %>, <%= people(index).city %></li>
+<% endfor; -%>
+</ul>
+```
+
+| Tag | |
+| --- | --- |
+| `<% code %>` | RPG statements: `for`, `if`, `dow`, `exec sql fetch`, calls. Each ends with `;` as usual |
+| `<%= expr %>` | A value, HTML-escaped: `&`, `<`, `>`, `"` and `'` become entities, so a value from a user or a table cannot add tags or scripts to the page. Numbers and dates are formatted with `%char` |
+| `<%- expr %>` | A value as it is, for HTML you built and trust |
+| `<%# text %>` | A comment, left out of the page |
+| `<%! decls %>` | Declarations: the procedure's `dcl-pi` for its parameters, and `dcl-s`, `dcl-ds`. They go first in the procedure wherever they are in the template |
+| `<%%` | A literal `<%` |
+| `-%>` | Ends any tag and leaves out the line break after it, so a line holding only a tag leaves no blank line in the page |
+
+Everything else is text, written as it is.
+
+**Building.** Run `ERPG` on each template, which writes the procedure next to
+it, named after the file: `customerlist.erpg` becomes
+`customerlist.erpg.rpgle` holding `dcl-proc customerlist`.
+```
+CALL PGM(MYLIB/ERPG) PARM('/home/me/myapp/views/customerlist.erpg')
+```
+`/include` the generated files after your program's main code, and call a
+view between `RPGAPI_beginResponse` and `RPGAPI_endResponse`. The page
+streams, so it can be any length:
+```
+dcl-proc listCustomers;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   ...fill customers and count...
+   RPGAPI_setHeader(response : 'Content-Type' : 'text/html; charset=utf-8');
+   RPGAPI_beginResponse(response);
+   customerlist('Our customers' : customers : count);
+   RPGAPI_endResponse();
+   return response;
+end-proc;
+
+/include 'views/customerlist.erpg.rpgle'
+```
+A view uses another by calling it (`<% pagetop(title); -%>`), which gives
+shared headers and footers. With embedded SQL in a view, compile the program
+with `CRTSQLRPGI ... RPGPPOPT(*LVL2) INCDIR('<RPGAPI clone>/qrpglesrc')`, so
+that the SQL precompiler sees the SQL in the included views;
+[examples/html-page.sqlrpgle](examples/html-page.sqlrpgle) is a page over the
+SQL catalog built that way. When a template changes, run `ERPG` on it again
+and recompile the program.
+
+**Good to know**
+- The file's name is the procedure's name, so it has to be an RPG name
+  (letters, digits and `_`) and not a reserved word: `page.erpg` fails to
+  compile because `PAGE` is one.
+- Every generated line ends with a comment naming the template's line, such
+  as `// customerlist.erpg:7`, so a compile error leads back to the
+  template.
+- `ERPG` ends with `CPF9898` for a template it cannot use, naming the file
+  and line: a tag that is never closed, an empty `<%= %>`, a file name that
+  is not an RPG name, or a file that is not UTF-8.
+- Templates are UTF-8, with or without a byte order mark, and Windows line
+  breaks are fine. Their text goes through the job's CCSID on its way to the
+  page, as everything written with `RPGAPI_write` does, so it can use the
+  characters the job's CCSID has.
+- Keep lines of code in tags under about 90 characters: the SQL precompiler
+  copies lines into a file of 100 characters. `ERPG` keeps the lines it writes
+  itself within that.
+- The generated files are build output: `*.erpg.rpgle` in `.gitignore` keeps
+  them out of the repository.
+- `RPGAPI_writeHtml(text)` and `RPGAPI_escapeHtml(text)`, which `<%= %>` uses,
+  work without templates too, in any streamed response.
+- Not in this version: `include()` by file name (call the view instead),
+  layouts, and EJS's `<%_ _%>` whitespace trimming.
+
 ### Health checks
 Load balancers and monitoring tools poll a URL to see whether an API is up,
 and take a server out of rotation when it does not answer `200`. A health
@@ -1386,6 +1477,8 @@ include it.
 | `RPGAPI_savePart(request : path)` | Write the rest of the current part to an IFS file |
 | `RPGAPI_beginResponse(response : length?)` | Send the status and headers of a streamed response |
 | `RPGAPI_write(text)` | Add text to a streamed response |
+| `RPGAPI_writeHtml(text)` | Add text to a streamed response, HTML-escaped; see HTML templates |
+| `RPGAPI_escapeHtml(text)` | Text with `& < > " '` as HTML entities |
 | `RPGAPI_writeBytes(buffer : length)` | Add bytes to a streamed response |
 | `RPGAPI_endResponse()` | Finish a streamed response |
 | `RPGAPI_sendFile(response : path)` | Send an IFS file |

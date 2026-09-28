@@ -1,0 +1,31 @@
+<%# the tables and views of a library, from the SQL catalog -%>
+<%! dcl-pi *n;
+       library varchar(128) const;
+     end-pi;
+     dcl-s name varchar(128);
+     dcl-s kind varchar(20);
+     dcl-s text varchar(50);
+     dcl-s count int(10:0) inz(0); -%>
+<% pagetop('Tables in ' + library); -%>
+<table>
+  <tr><th>Name</th><th>Type</th><th>Description</th></tr>
+<% exec sql declare table_list cursor for
+     select table_name,
+            case table_type when 'V' then 'View' when 'L' then 'Logical file'
+                            else 'Table' end,
+            coalesce(table_text, '')
+       from qsys2.systables
+      where table_schema = :library
+      order by table_name;
+   exec sql open table_list;
+   exec sql fetch table_list into :name, :kind, :text;
+   dow sqlcode = 0;
+      count += 1; -%>
+  <tr><td><%= name %></td><td><%= kind %></td><td><%= text %></td></tr>
+<%    exec sql fetch table_list into :name, :kind, :text;
+   enddo;
+   exec sql close table_list; -%>
+</table>
+<p><%= count %> tables and views</p>
+</body>
+</html>
