@@ -25,6 +25,7 @@ RPGAPI_get(app : '/ip' : %paddr(ip));
 RPGAPI_post(app : '/form' : %paddr(form));
 RPGAPI_get(app : '/auth' : %paddr(auth));
 RPGAPI_get(app : '/profile' : %paddr(profile));
+RPGAPI_get(app : '/echo-header' : %paddr(echoHeader));
 testSettings(app);
 RPGAPI_start(app);
 
@@ -253,6 +254,19 @@ dcl-proc profile;
    else;
       response.body = 'no:' + %trim(message_id);
    endif;
+   return response;
+end-proc;
+
+   // ?v= in a response header, X-Echo: request data in a header, as apps do
+dcl-proc echoHeader;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+
+   response.status = HTTP_OK;
+   RPGAPI_setHeader(response : 'X-Echo' : RPGAPI_getQueryParam(request : 'v'));
+   response.body = 'echoed';
    return response;
 end-proc;
 

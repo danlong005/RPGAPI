@@ -150,6 +150,14 @@ if os.environ.get('RPGAPI_TEST_USER') and os.environ.get('RPGAPI_TEST_PASSWORD')
 else:
     print('SKIP the right password: set RPGAPI_TEST_USER and RPGAPI_TEST_PASSWORD for a test profile')
 
+    # request data in a response header cannot add headers or end the head
+data = exchange(b'GET /echo-header?v=a%0D%0AX-Injected:%20yes%0d%0a%0d%0a<html> HTTP/1.1\r\nHost: x\r\n\r\n')
+head = data.split(CRLF + CRLF)[0].decode(errors='replace').split('\r\n')
+check('CR LF in a header value cannot inject a header',
+      not any(line.lower().startswith('x-injected') for line in head) and
+      any(line.startswith('X-Echo: a') and 'X-Injected' in line for line in head) and
+      data.endswith(b'echoed'), head)
+
 status, headers, _ = get('/moved')
 check('302 with Location', status == 302 and headers.get('location') == '/hello', (status, headers))
 data = exchange(b'GET /conflict HTTP/1.1\r\nHost: x\r\n\r\n')

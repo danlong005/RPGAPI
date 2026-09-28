@@ -59,6 +59,7 @@
           error_handler pointer(*proc);
           trusted_proxies varchar(1000);           // see Client address
           route_prefix varchar(1000);              // see Groups
+          statics likeds(RPGAPI_static_ds) dim(20); // see Serving a directory
         end-ds;
 
         //
@@ -783,7 +784,9 @@ RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
 ```
 Up to 100 headers can be set. `Connection`, `Content-Length` and
 `Transfer-Encoding` are set by RPGAPI from how the body is sent; values you set
-for them are left out.
+for them are left out. A line break in a header name or value becomes a blank,
+so request data you put in a header (a file name, a redirect) cannot add
+headers of its own.
 
 #### Cookies
 `RPGAPI_setCookie` adds a `Set-Cookie` header; call it once per cookie. Without
@@ -933,6 +936,36 @@ for a GET it answers:
   bytes, or **416 Range Not Satisfiable** when the range is outside the file.
   Several ranges get the whole file, and so does a range whose `If-Range`
   names an older version of the file
+
+#### Serving a directory
+`RPGAPI_serveStatic` serves the files of an IFS directory below a path, such as
+a web page with its styles, scripts and images, the way `express.static` does:
+
+```
+RPGAPI_serveStatic(app : '/web' : '/www/myapp');
+```
+
+`GET /web/css/app.css` then sends `/www/myapp/css/app.css`, through
+`RPGAPI_sendFile`, so with the same content types, caching headers, `304`s
+and ranges. `/web/` sends `/www/myapp/index.html`, and a directory asked for
+without its `/` at the end (`/web`, `/web/docs`) is redirected to it, so the
+relative links in its `index.html` work. A directory without an `index.html`
+is not listed.
+
+- Only `GET` and `HEAD` are served, after the middleware (so a login check
+  covers the files too) and before the routes. A path with no file behind it
+  goes on to the routes, and then to the 404.
+- The path is decoded one segment at a time (`%20`, UTF-8 names), and a path
+  that could leave the directory is not served: a `.` or `..` segment, or one
+  that decodes to one with `/`, `\` or a NUL (`%2e%2e`, `..%2f`). Files and
+  directories whose name starts with `.` (such as `.env`) are not served
+  either.
+- The directory has to exist: `RPGAPI_serveStatic` ends your program with
+  `CPF9898` when it does not. It follows `RPGAPI_setPrefix`, and an app can
+  serve up to 20 directories (`app.statics`).
+- The files are sent as stored, so keep text files in UTF-8 or ASCII, and the
+  job needs authority to read them. A symbolic link in the directory is
+  followed, wherever it points.
 
 ### Working with JSON
 RPGAPI hands your procedure the request body as text and sends back the text
@@ -1201,3 +1234,4 @@ include it.
 | `RPGAPI_writeBytes(buffer : length)` | Add bytes to a streamed response |
 | `RPGAPI_endResponse()` | Finish a streamed response |
 | `RPGAPI_sendFile(response : path)` | Send an IFS file |
+| `RPGAPI_serveStatic(app : url : directory)` | Serve the files of an IFS directory below a path; see Serving a directory |

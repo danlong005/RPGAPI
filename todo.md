@@ -250,6 +250,21 @@
   u-umlaut and `;` kept); only the third part; JSON gives 0 parts; missing
   closing boundary and no boundary give 400; a 30MB file through curl -F,
   streamed, matches. All earlier tests pass and raw responses are unchanged
+- [x] Static files: `RPGAPI_serveStatic(app : url : directory)` (up to 20, new
+  `statics` app field, follows the route prefix; the directory must exist,
+  else CPF9898) serves GET and HEAD after middleware and before routes,
+  through `RPGAPI_sendFile`; index.html for a directory, a 301 to add the /
+  of a directory; segments decoded one by one, and `.`/`..`, dotfiles and
+  segments decoding to `/`, `\` or NUL refused; no file falls through to the
+  routes. `examples/static-files.rpgle` uses it, and sendFile for a download.
+  Verified on PUB400 (2026-09-27, new static suite, 27 checks)
+- [x] Header injection: a line break in a response header name or value (for
+  example request data an app put in a header) ended the header line, so a
+  client could add headers or end the head. `RPGAPI_buildHead` now turns
+  CR, LF and NL into blanks. Found writing the static-files example (a file
+  name in Content-Disposition). Verified on PUB400 (2026-09-27, hello suite):
+  `?v=a%0D%0AX-Injected:%20yes` gave an `X-Injected: yes` header before, and
+  one `X-Echo` line after
 - [x] Route groups: `RPGAPI_setPrefix(app : prefix)` puts a prefix (new
   `route_prefix` app field) in front of the routes and middleware added
   after it; `'*'` middleware in a group covers only the group; `{params}` in
@@ -475,8 +490,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Serve a directory of static files: `RPGAPI_serveStatic(app : '/web' :
-  '/www/myapp')` on top of `RPGAPI_sendFile`
 - [ ] A health check / statistics endpoint: uptime, requests served, worker
   jobs
 - [ ] Security headers in one call, as Express's helmet

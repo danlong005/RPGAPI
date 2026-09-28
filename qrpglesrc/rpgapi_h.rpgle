@@ -27,6 +27,12 @@ dcl-ds RPGAPI_route_ds qualified template;
    procedure pointer(*proc);
 end-ds;
 
+   // a directory served as static files (RPGAPI_serveStatic)
+dcl-ds RPGAPI_static_ds qualified template;
+   url varchar(1000);
+   directory varchar(1024);
+end-ds;
+
 dcl-ds RPGAPI_Request qualified template;
    body varchar(32000);
    headers likeds(RPGAPI_header_ds) dim(100);
@@ -130,6 +136,8 @@ dcl-ds RPGAPI_App qualified template;
       // put before the path of each route and middleware registered from
       // now on (RPGAPI_setPrefix). Blank: none
    route_prefix varchar(1000);
+      // IFS directories served as static files (RPGAPI_serveStatic)
+   statics likeds(RPGAPI_static_ds) dim(20);
 end-ds;
 
    // what went wrong, for the error handler
@@ -251,6 +259,18 @@ dcl-pr RPGAPI_setRoute;
    method char(10) const;
    url varchar(32000) const;
    procedure pointer(*proc) const;
+end-pr;
+
+   // serves the files of an IFS directory below a path: url '/web' and
+   // directory '/www/site' send /www/site/css/app.css for GET /web/css/app.css,
+   // with its Content-Type, caching headers and ranges, and index.html for a
+   // directory. Only GET and HEAD, after middleware and before routes; a path
+   // with no file falls through to the routes. Files starting with a . are
+   // not served, and no path leaves the directory
+dcl-pr RPGAPI_serveStatic;
+   config likeds(RPGAPI_App);
+   url varchar(1000) const;
+   directory varchar(1024) const;
 end-pr;
 
    // a group of routes: the routes and middleware registered after this get

@@ -17,6 +17,8 @@ dcl-s RPGAPI_READ_TIMEOUT int(10:0) inz(30);
 dcl-s RPGAPI_WRITE_TIMEOUT int(10:0) inz(30);
    // RPGAPI_connectionRead / Write: nothing can be read or written right now
 dcl-c RPGAPI_WOULD_BLOCK -2;
+   // CR, LF and NL in EBCDIC: no header name or value may have them
+dcl-c RPGAPI_LINE_BREAKS x'0D2515';
 
    // every field has to start as zeros: declare it with inz(*likeds)
 dcl-ds RPGAPI_QtqCode_T qualified template inz;
@@ -499,7 +501,15 @@ dcl-proc RPGAPI_start export;
             endif;
          endfor;
 
-         if middleware_completed = *on;
+            // static files first, for GET and HEAD
+         if middleware_completed = *on and
+            (%trim(request.method) = HTTP_GET or
+             %trim(request.method) = HTTP_HEAD) and
+            RPGAPI_staticFile(config : request : response);
+            route_found = *on;
+         endif;
+
+         if middleware_completed = *on and not route_found;
             for index = 1 to %elem(config.routes) by 1;
                if config.routes(index).url = *blanks;
                   leave;
@@ -4067,8 +4077,13 @@ dcl-proc RPGAPI_buildHead export;
          iter;
       endif;
 
-      head += %trim(response.headers(index).name) + ': ' +
-              %trim(response.headers(index).value) + RPGAPI_CRLF;
+         // a line break in a name or value, such as request data an app
+         // put there, would end the header line and let the text after it
+         // be headers (or a body) of its own: CR, LF and NL become blanks
+      head += %trim(%xlate(RPGAPI_LINE_BREAKS : '   ' :
+                           response.headers(index).name)) + ': ' +
+              %trim(%xlate(RPGAPI_LINE_BREAKS : '   ' :
+                           response.headers(index).value)) + RPGAPI_CRLF;
    endfor;
 
       // CORS, for an origin that is allowed, unless the procedure set its own
@@ -5035,6 +5050,153 @@ dcl-proc RPGAPI_registerFailed;
    send_program_message( 'CPF9898' : 'QCPFMSG   *LIBL' : error_text :
                          %len(error_text) : '*ESCAPE' : '*' : 2 :
                          message_key : error_code );
+end-proc;
+
+
+   // serves a directory as static files: see rpgapi_h.rpgle. The directory
+   // has to exist
+dcl-proc RPGAPI_serveStatic export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      url varchar(1000) const;
+      directory varchar(1024) const;
+   end-pi;
+   dcl-ds info likeds(FileStat);
+   dcl-s path varchar(1000);
+   dcl-s folder varchar(1024);
+   dcl-s index int(10:0);
+
+   path = RPGAPI_prefixed(config : url);
+   dow %len(path) > 1 and %subst(path : %len(path) : 1) = '/';
+      %len(path) -= 1;
+   enddo;
+   if path = '';
+      path = '/';
+   endif;
+   folder = %trim(directory);
+   dow %len(folder) > 1 and %subst(folder : %len(folder) : 1) = '/';
+      %len(folder) -= 1;
+   enddo;
+   if folder = '' or stat(folder : info) < 0 or
+      %bitand(info.mode : S_IFMT) <> S_IFDIR;
+      RPGAPI_settingFailed('RPGAPI_serveStatic: ' + folder +
+                           ' is not a directory');
+   endif;
+
+   for index = 1 to %elem(config.statics);
+      if config.statics(index).url = '';
+         config.statics(index).url = path;
+         config.statics(index).directory = folder;
+         return;
+      endif;
+   endfor;
+   RPGAPI_settingFailed('RPGAPI_serveStatic: an app serves no more than ' +
+                        %char(%elem(config.statics)) + ' directories');
+end-proc;
+
+
+   // sends the static file a GET or HEAD request is for, if one of the app's
+   // directories has it: *on when it answered (with the file, or a redirect
+   // to a directory's path with its /), *off to go on to the routes
+dcl-proc RPGAPI_staticFile;
+   dcl-pi *n ind;
+      config likeds(RPGAPI_App) const;
+      request likeds(RPGAPI_Request) const;
+      response likeds(RPGAPI_Response);
+   end-pi;
+   dcl-ds info likeds(FileStat);
+   dcl-s route varchar(250);
+   dcl-s rest varchar(250);
+   dcl-s file varchar(1024);
+   dcl-s index int(10:0);
+   dcl-s mount varchar(1000);
+
+   route = %trim(request.route);
+   for index = 1 to %elem(config.statics);
+      mount = config.statics(index).url;
+      if mount = '';
+         leave;
+      endif;
+      select;
+      when mount = '/';
+         rest = route;
+      when route = mount;
+         rest = '';
+      when RPGAPI_startsWith(route : mount + '/');
+         rest = %subst(route : %len(mount) + 1);
+      other;
+         iter;
+      endsl;
+
+      file = RPGAPI_staticPath(config.statics(index).directory : rest);
+      if file = '' or stat(file : info) < 0;
+         iter;
+      endif;
+
+      if %bitand(info.mode : S_IFMT) = S_IFDIR;
+            // relative links in its index.html need the path to end in /
+         if rest = '' or %subst(rest : %len(rest) : 1) <> '/';
+            clear response;
+            response.status = HTTP_MOVED_PERMANENTLY;
+            RPGAPI_setHeader(response : 'Location' : route + '/' +
+                             RPGAPI_choose(%trim(request.query_string) <> '' :
+                                   '?' + %trim(request.query_string) : ''));
+            RPGAPI_log(RPGAPI_LOG_DEBUG : 'static directory ' + file +
+                       ': redirected to its path with a /');
+            return *on;
+         endif;
+         file += '/index.html';
+         if stat(file : info) < 0;
+            iter;
+         endif;
+      endif;
+      if %bitand(info.mode : S_IFMT) <> S_IFREG;
+         iter;
+      endif;
+
+      clear response;
+      if RPGAPI_sendFile(response : file);
+         RPGAPI_log(RPGAPI_LOG_DEBUG : 'static file ' + file);
+         return *on;
+      endif;
+   endfor;
+   return *off;
+end-proc;
+
+
+   // the file below directory for the rest of a request's path, its segments
+   // decoded; blank for a path that must not be served: a segment that is
+   // . or .., starts with a . (hidden files), or decodes to one with a /, a
+   // \ or a NUL in it
+dcl-proc RPGAPI_staticPath;
+   dcl-pi *n varchar(1024);
+      directory varchar(1024) const;
+      rest varchar(250) const;
+   end-pi;
+   dcl-s file varchar(1024);
+   dcl-s segments varchar(250) dim(50);
+   dcl-s segment varchar(250);
+   dcl-s index int(10:0);
+
+   file = directory;
+   segments = %split(rest : '/');
+   for index = 1 to %elem(segments);
+      if segments(index) = '';
+         leave;
+      endif;
+      segment = RPGAPI_urlDecode(segments(index) : *off);
+      if segment = '' or %subst(segment : 1 : 1) = '.' or
+         %scan('/' : segment) > 0 or %scan('\' : segment) > 0 or
+         %scan(x'00' : segment) > 0;
+         RPGAPI_log(RPGAPI_LOG_DEBUG : 'static path refused: ' + rest);
+         return '';
+      endif;
+      if %len(file) + %len(segment) + 1 > %len(file : *max);
+         return '';
+      endif;
+      file += '/' + segment;
+   endfor;
+   return file;
 end-proc;
 
 

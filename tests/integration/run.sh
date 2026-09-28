@@ -23,7 +23,7 @@ TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers examples sqljson yajl"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers static examples sqljson yajl"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
@@ -205,6 +205,13 @@ open(os.path.join(files, 'data.json'), 'wb').write(b'{"a": [1, 2, 3], "b": "x@y"
 open(os.path.join(files, 'pic.png'), 'wb').write(bytes([137, 80, 78, 71]) + os.urandom(50000))
 open(os.path.join(files, 'notes.txt'), 'wb').write('hello Jürgen\n'.encode())
 open(os.path.join(work, 'secret.txt'), 'wb').write(b'secret')
+site = os.path.join(work, 'site')
+for sub in ['sub', 'nosub']:
+    os.makedirs(os.path.join(site, sub), exist_ok=True)
+for name, data in [('index.html', b'<h1>home</h1>'), ('sub/index.html', b'<h1>sub</h1>'), ('sub/page.txt', b'page'),
+                   ('nosub/file.txt', b'file'), ('.env', b'secret'), ('a b.txt', b'space'),
+                   ('Grüße.txt', b'umlauts')]:
+    open(os.path.join(site, name), 'wb').write(data)
 PY
 
 echo "== build"
@@ -253,6 +260,10 @@ for suite_name in $SUITES; do
                  PROXIES="127.0.0.1 10.0.0.1"; suite hello ";;;;" proxy trusted
                  PROXIES="*"; suite hello ";;;;" proxy any
                  PROXIES=""; } ;;
+    static)    compile static && {
+                 suite static ";;;;" static
+                 CORS="missing" fails_to_start static ";;;;" "" "no-such-directory is not a directory"
+                 CORS=""; } ;;
     handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
     examples)  compile_example hello.rpgle EXHELLO
                compile_example notes-api.sqlrpgle EXNOTES

@@ -210,10 +210,23 @@ end-pr;
 
    // the parts of struct stat (32-bit sizes and times) that are used
 dcl-ds FileStat qualified template;
+      // the type of the file (S_IFMT bits) and its permissions
+   mode uns(10:0) pos(1);
    size int(10:0) pos(21);
    modified int(10:0) pos(29);
    rest char(228) pos(33);
 end-ds;
+
+   // file types in FileStat.mode: mask with S_IFMT, which also covers the
+   // IBM i object types beyond POSIX's
+dcl-c S_IFMT 126976;
+dcl-c S_IFDIR 16384;
+dcl-c S_IFREG 32768;
+
+dcl-pr stat int(10:0) extproc('stat');
+   path pointer value options(*string);
+   info likeds(FileStat);
+end-pr;
 
 dcl-pr fstat int(10:0) extproc('fstat');
    descriptor int(10:0) value;

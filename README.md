@@ -22,8 +22,8 @@ server, and each request is handed to your procedure as a data structure.
   and passwords checked against IBM i user profiles
 - Forms with files (`multipart/form-data`), read part by part and saved to the
   IFS without holding them in memory
-- Streamed responses of any size, and IFS files with caching headers and
-  range requests
+- Streamed responses of any size, and IFS files and whole directories (web
+  pages and their assets) with caching headers and range requests
 - Several jobs serving one port, replaced when one ends, keep-alive
   connections, timeouts so one slow client cannot hold a job, and a controlled
   `ENDJOB` that lets requests in progress finish
@@ -253,6 +253,6 @@ whole header values; that too needs a recompile. And `response.body` is now
 sent exactly as set, where it used to be trimmed: trim bodies set from
 fixed-length fields. The CORS settings added `cors_` fields to `RPGAPI_App`,
 and keep-alive the `keepalive_` fields, and the not-found and error handlers
-`not_found_handler` and `error_handler`, `trusted_proxies` and `route_prefix`; `RPGAPI_Request`
+`not_found_handler` and `error_handler`, `trusted_proxies`, `route_prefix` and `statics`; `RPGAPI_Request`
 gained `remote_ip` and `connection_ip`; connections now stay open between
 requests (`RPGAPI_setKeepAlive(app : 0)` to close them as before).
