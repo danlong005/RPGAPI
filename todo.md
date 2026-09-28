@@ -369,6 +369,15 @@
   row given pointers, numbers and dates in place, a view with no data, a
   copybook change recompiling the view, both examples. The full run passes
   (487 checks)
+- [x] A view's older programs are deleted when it is compiled again: the
+  program's text is `RPGAPI view <hash of the template's path> <name>`, and
+  after a compile (also through ERPG) the `RV*` programs of the library are
+  listed with QUSLOBJ and those with the same text but another name are
+  deleted. One another job has locked is left for the next time. Programs
+  compiled before this have the old text and stay. Verified on PUB400
+  (2026-09-28, templates suite): after a template, and after only its
+  copybook, changes, one program is left for it. The full run passes (489
+  checks)
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default
@@ -621,8 +630,7 @@
   variable, try installing iRPGUnit into a library we own on PUB400, and run
   the tests added since (they have never been compiled)
 
-- [ ] Views, later: layouts, and deleting a view's older `RV...` programs
-  when it is compiled again
+- [ ] Views, later: layouts
 
 ## Cleanup
 - [ ] The unit tests in `qtestsrc` have never been compiled or run: check they

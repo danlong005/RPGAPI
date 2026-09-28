@@ -89,6 +89,16 @@ write_view('changed.erpg', TITLE + "two <%= title %>\n")
 two = body_of(get('/view/changed'))[2]
 check('a template that changes is compiled again', (one, two) == (b'one T\n', b'two T\n'), (one, two))
 
+def versions(template):
+    """The programs in the library compiled from a template, by their text."""
+    out = subprocess.run(['/QOpenSys/usr/bin/qsh', '-c',
+                          f"db2 \"select objname from table(qsys2.object_statistics('{LIB}', '*PGM', 'RV*')) x "
+                          f"where objtext like '% {template}'\""], capture_output=True, text=True).stdout
+    return [line.strip() for line in out.split('\n') if line.strip().startswith('RV')]
+
+check('the older version of a changed view is deleted: one program left', len(versions('changed.erpg')) == 1,
+      versions('changed.erpg'))
+
 write_view('greeting.rpgleinc', "**free\ndcl-c GREETING 'hello';\n")
 write_view('greet.erpg', "<%! /include 'greeting.rpgleinc' -%>\n<%= GREETING %>\n")
 one = body_of(get('/nodata/greet'))[2]
@@ -96,6 +106,7 @@ time.sleep(1.1)
 write_view('greeting.rpgleinc', "**free\ndcl-c GREETING 'bye';\n")
 two = body_of(get('/nodata/greet'))[2]
 check('a view is compiled again when only its copybook changes', (one, two) == (b'hello\n', b'bye\n'), (one, two))
+check('and its older version is deleted too', len(versions('greet.erpg')) == 1, versions('greet.erpg'))
 
 write_view('broken.erpg', "<p>\n<%! dcl-s shown int(10:0); -%>\n<%= nosuchname %>\n</p>\n")
 status, headers, body = body_of(get('/view/broken'))

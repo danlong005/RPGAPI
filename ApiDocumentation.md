@@ -1250,8 +1250,11 @@ job's current directory without it), and so are the copybooks a view
 includes. The programs go into the library named, or the library of the app's
 program, and are named `RV` and 8 hex digits, after the template's file name
 and content and its copybooks' content. The job needs the ILE RPG compiler
-(5770WDS) and authority to create programs there. Old versions are not
-deleted; any `RV...` program can be, and is compiled again when needed.
+(5770WDS) and authority to create programs there. When a view is compiled
+again, its older versions in the library are deleted (a program's text names
+its template); one another job is running at that moment stays until the next
+time. Any `RV...` program can be deleted: it is compiled again when it is
+needed.
 
 ### ERPG
 ```

@@ -77,6 +77,30 @@ dcl-pr memcpy pointer extproc('memcpy');
    length uns(10:0) value;
 end-pr;
 
+   // a user space, the objects of a library listed into it, and where it is
+dcl-pr create_user_space extpgm('QUSCRTUS');
+   name char(20) const;
+   attribute char(10) const;
+   size int(10:0) const;
+   initial char(1) const;
+   authority char(10) const;
+   text char(50) const;
+   replace char(10) const;
+   error_code char(8);
+end-pr;
+dcl-pr list_objects extpgm('QUSLOBJ');
+   space char(20) const;
+   format char(8) const;
+   objects char(20) const;
+   type char(10) const;
+   error_code char(8);
+end-pr;
+dcl-pr user_space_pointer extpgm('QUSPTRUS');
+   space char(20) const;
+   pointer pointer;
+   error_code char(8);
+end-pr;
+
 dcl-pr getcwd pointer extproc('getcwd');
    buffer pointer value;
    size int(10:0) value;
@@ -403,6 +427,8 @@ dcl-proc compileView;
    dcl-ds output likeds(buffer_t) inz(*likeds);
    dcl-s crc uns(10:0);
    dcl-s included int(10:0);
+   dcl-s text char(50);
+   dcl-s path_copy varchar(1024);
 
    template_name = %subst(path : %scanr('/' : '/' + path));
    monitor;
@@ -447,15 +473,21 @@ dcl-proc compileView;
       return '';
    endmon;
 
+      // the program's text names the template: a hash of its path, which
+      // tells two templates of the same name apart, and its name
+   path_copy = path;
+   text = 'RPGAPI view ' + hex8(crc32(0 : %addr(path_copy : *data) :
+                                      %len(path_copy))) + ' ' + template_name;
    RPGAPI_log(RPGAPI_LOG_INFO : 'compiling view ' + path + ' into ' + program);
    if not compile(name : library : source_path : has_sql : output :
-                  %subst(path : 1 : %scanr('/' : path) - 1));
+                  %subst(path : 1 : %scanr('/' : path) - 1) : text);
       freeGenerated(output);
       RPGAPI_log(RPGAPI_LOG_ERROR : 'view ' + path + ' does not compile: ' +
                  view_error);
       return '';
    endif;
    freeGenerated(output);
+   deleteOlderVersions(library : name : %subst(text : 1 : 20));
    return program;
 end-proc;
 
@@ -471,6 +503,7 @@ dcl-proc compile;
       has_sql ind const;
       output likeds(buffer_t) const;
       directory varchar(1024) const;
+      text char(50) const;
    end-pi;
    dcl-s command varchar(3000);
    dcl-s compiled ind inz(*on);
@@ -500,9 +533,7 @@ dcl-proc compile;
    if compiled and not runCommand('CRTPGM PGM(' + %trim(library) + '/' +
                    %trim(name) + ') MODULE(QTEMP/' + %trim(name) + ') ' +
                    'BNDSRVPGM((' + %trim(serviceLibrary()) + '/RPGAPI)) ' +
-                   'ACTGRP(*CALLER) REPLACE(*YES) TEXT(''RPGAPI view ' +
-                   %subst(template_name : 1 : %min(%len(template_name) : 35)) +
-                   ''')' : *on);
+                   'ACTGRP(*CALLER) REPLACE(*YES) TEXT(''' + %trimr(%scanrpl('''' : '''''' : text)) + ''')' : *on);
       view_error = 'CRTPGM of ' + %trim(library) + '/' + %trim(name) +
                    ' failed: ' + view_error;
       compiled = *off;
@@ -683,6 +714,57 @@ dcl-proc serviceLibrary;
       service_library = RPGAPI_ownLibrary();
    endif;
    return service_library;
+end-proc;
+
+
+   // deletes the other programs in library whose text starts with prefix
+   // ('RPGAPI view' and the hash of the template's path): older versions of
+   // the view just compiled into keep. A program another job is running
+   // cannot be deleted; it goes the next time the view is compiled
+dcl-proc deleteOlderVersions;
+   dcl-pi *n;
+      library char(10) const;
+      keep char(10) const;
+      prefix char(20) const;
+   end-pi;
+   dcl-c SPACE 'RPGAPIVWS QTEMP     ';
+   dcl-s space_ptr pointer;
+   dcl-ds header qualified based(space_ptr);
+      list_offset int(10:0) pos(125);
+      entries int(10:0) pos(133);
+      entry_size int(10:0) pos(137);
+   end-ds;
+      // OBJL0200: name, library, type, status, attribute, text
+   dcl-ds entry qualified based(entry_ptr);
+      name char(10) pos(1);
+      library char(10) pos(11);
+      text char(50) pos(42);
+   end-ds;
+   dcl-s index int(10:0);
+   dcl-s error_code char(8) inz(*allx'00');
+
+   monitor;
+      create_user_space(SPACE : 'RPGAPI' : 65536 : x'00' : '*EXCLUDE' :
+                        'RPGAPI views' : '*YES' : error_code);
+      list_objects(SPACE : 'OBJL0200' : 'RV*       ' + library : '*PGM' :
+                   error_code);
+      user_space_pointer(SPACE : space_ptr : error_code);
+   on-error;
+      RPGAPI_log(RPGAPI_LOG_WARN : 'older versions of a view in ' +
+                 %trim(library) + ' could not be listed: ' + lastMessage());
+      return;
+   endmon;
+
+   for index = 1 to header.entries;
+      entry_ptr = space_ptr + header.list_offset + (index - 1) * header.entry_size;
+      if entry.name <> keep and %subst(entry.text : 1 : 20) = prefix;
+         if runCommand('DLTPGM PGM(' + %trim(library) + '/' + %trim(entry.name) +
+                       ')' : *off);
+            RPGAPI_log(RPGAPI_LOG_DEBUG : 'deleted ' + %trim(entry.name) +
+                       ', an older version of ' + %trim(%subst(entry.text : 22)));
+         endif;
+      endif;
+   endfor;
 end-proc;
 
 
