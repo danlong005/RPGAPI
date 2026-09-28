@@ -3,9 +3,9 @@
    // To show them, the route fills the page's data structure (newest first)
    // and renders views/guestbook.erpg with its address; the view bases the
    // same data structure (views/guestbook_t.rpgleinc, included by both) on it,
-   // loops over the notes, shows whatever visitors typed escaped (so no one
-   // can add HTML or scripts to the page), and includes views/pagetop.erpg
-   // for the top of the page. A form with a field missing is answered 400,
+   // loops over the notes, and shows whatever visitors typed escaped (so no
+   // one can add HTML or scripts to the page). views/layout.erpg, the app's
+   // layout, writes the page around it. A form with a field missing is answered 400,
    // with the page and what is wrong.
    //
    // Build:
@@ -23,7 +23,8 @@
 ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI') dftactgrp(*no);
 
 /include 'rpgapi_h.rpgle'
-   // note_t, and guestbook_t, the view's data
+   // layout_t, what the layout shows; note_t, and guestbook_t, the view's data
+/include 'layout_t.rpgleinc'
 /include 'guestbook_t.rpgleinc'
 
 dcl-c VIEWS '/home/myuser/RPGAPI/examples/views';
@@ -36,6 +37,7 @@ dcl-ds app likeds(RPGAPI_App);
 
 clear app;
 RPGAPI_setViews(app : VIEWS);
+RPGAPI_setLayout(app : 'layout.erpg');
 RPGAPI_get(app : '/guestbook' : %paddr(showGuestbook));
 RPGAPI_post(app : '/guestbook' : %paddr(signGuestbook));
 RPGAPI_start(app : 8080);
@@ -95,7 +97,7 @@ dcl-proc guestbookPage;
    dcl-ds response likeds(RPGAPI_Response) inz;
    dcl-s index int(10:0);
 
-   model.title = 'Guestbook';
+   model.head.title = 'Guestbook';
    model.problem = problem;
    for index = note_count downto 1;
       model.count += 1;

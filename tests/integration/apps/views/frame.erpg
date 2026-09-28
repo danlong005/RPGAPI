@@ -1,0 +1,5 @@
+<%! /include 'layout_t.rpgleinc'
+     dcl-ds head likeds(layout_t) based(RPGAPI_data); -%>
+<div class="frame" title="<%= head.title %>">
+<% RPGAPI_body(); -%>
+</div>

@@ -3,7 +3,9 @@ passing them the route's data structure. A page byte for byte, with a view
 for its heading and one for each row (given pointers to parts of the data);
 escaping; a page over 32K; numbers and dates read in place; a view with no
 data and its own SQL; the route's status and headers; a view compiled again
-when it or its copybook changes; the error pages; ERPG ahead of time."""
+when it or its copybook changes; the error pages; ERPG ahead of time. Mode "layout": run with
+RPGAPI_setLayout(app : 'frame.erpg'): views in the layout, one opting out,
+one picking another, an included view without it, and layouts that fail."""
 from common import *
 import os, subprocess, time
 
@@ -36,6 +38,32 @@ def erpg(name):
     result = subprocess.run(['system', f"CALL PGM({LIB}/ERPG) PARM('{os.path.join(VIEWS, name)}' '{LIB}')"],
                             capture_output=True, text=True)
     return result.stdout + result.stderr
+
+if args.mode == 'layout':
+    status, headers, body = body_of(get('/view/plain'))
+    check('a view is written into the app\'s layout, which reads the start of its data',
+          status == 200 and body == b'<div class="frame" title="T">\n<p>T plain</p>\n<h1>T</h1>\n</div>\n', body)
+    check('the view it includes is not given the layout', body.count(b'frame') == 1, body)
+    status, headers, body = body_of(get('/view/alone'))
+    check("<%@ layout('') %>: no layout", body == b'<p>T alone</p>\n', body)
+    status, headers, body = body_of(get('/view/inbox'))
+    check("<%@ layout('boxed.erpg') %>: that layout instead", body == b'<main title="T">\n<p>T boxed</p>\n</main>\n', body)
+    status, headers, body = body_of(get('/custom'))
+    check("the route's status and headers, in the layout", status == 201 and headers.get('x-view') == 'custom' and
+          body == b'<div class="frame" title="Custom">\n<h1>Custom</h1>\n</div>\n', (status, body))
+    write_view('badlayout.erpg', "<% RPGAPI_body(); -%>\n<%= nosuchname %>\n")
+    write_view('usesbad.erpg', "<%@ layout('badlayout.erpg') -%>\n<p>x</p>\n")
+    status, headers, body = body_of(get('/view/usesbad'))
+    check('a layout that does not compile: 500 at its line, before anything is sent',
+          status == 500 and b'badlayout.erpg cannot be shown' in body and b'badlayout.erpg:2' in body, (status, body[:300]))
+    write_view('usesnone.erpg', "<%@ layout('nolayout.erpg') -%>\n<p>x</p>\n")
+    status, headers, body = body_of(get('/view/usesnone'))
+    check('a layout that does not exist: 500', status == 500 and b'cannot be read' in body, (status, body[:300]))
+    write_view('badtag.erpg', "<p>\n<%@ layout(frame.erpg) %>\n")
+    status, headers, body = body_of(get('/view/badtag'))
+    check('a <%@ %> tag that is not layout(\'name\'): 500 naming its line', status == 500 and
+          b'badtag.erpg:2' in body and b'quotes' in body, (status, body[:300]))
+    done()
 
 # the first request compiles listpage.erpg, heading.erpg and item.erpg
 start = time.time()
@@ -73,6 +101,12 @@ check("a view with no data and its own SQL (compiled with CRTSQLRPGI)",
 status, headers, body = body_of(get('/custom'))
 check("the route's status and headers", status == 201 and headers.get('x-view') == 'custom' and
       headers.get('content-type') == 'text/plain; charset=utf-8' and body == b'<h1>Custom</h1>\n', (status, headers, body))
+
+status, headers, body = body_of(get('/view/inbox'))
+check("a view that picks a layout gets it with no layout set for the app",
+      body == b'<main title="T">\n<p>T boxed</p>\n</main>\n', body)
+status, headers, body = body_of(get('/view/plain'))
+check('a view that picks none, with none set: as it is', body == b'<p>T plain</p>\n<h1>T</h1>\n', body)
 
 # text of only blanks between tags stays where it is (a varchar of blanks
 # compares equal to '' in RPG)

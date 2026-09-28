@@ -1,9 +1,9 @@
 <%# the guestbook: a form, what is wrong with the last one sent if there is
-    something, and the notes, newest first -%>
-<%! /include 'guestbook_t.rpgleinc'
+    something, and the notes, newest first, in views/layout.erpg -%>
+<%! /include 'layout_t.rpgleinc'
+     /include 'guestbook_t.rpgleinc'
      dcl-ds model likeds(guestbook_t) based(RPGAPI_data);
      dcl-s i int(10:0); -%>
-<% RPGAPI_include('pagetop.erpg' : %addr(model.title)); -%>
 <% if model.problem <> ''; -%>
 <p style="color: #b00"><%= model.problem %></p>
 <% endif; -%>
@@ -23,5 +23,3 @@
 </blockquote>
 <% endfor; -%>
 <% endif; -%>
-</body>
-</html>

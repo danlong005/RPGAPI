@@ -1,5 +1,5 @@
 """The HTML page example (examples/html-page.sqlrpgle): a list from the SQL
-catalog rendered by views/tablelist.erpg, which includes views/pagetop.erpg,
+catalog rendered by views/tablelist.erpg in the app's layout, views/layout.erpg,
 compiled at runtime and gzipped for a browser."""
 from common import *
 import gzip
@@ -10,7 +10,7 @@ status, headers, body = get('/tables/qsys2', 'Accept-Encoding: gzip')
 page = gzip.decompress(dechunk(body)[0]).decode()
 check('the page is HTML, gzipped', status == 200 and headers.get('content-type') == 'text/html; charset=utf-8' and
       headers.get('content-encoding') == 'gzip', headers)
-check('pagetop: the head and the heading', page.startswith('<!DOCTYPE html>\n<html lang="en">') and
+check('the layout: the head and the heading', page.startswith('<!DOCTYPE html>\n<html lang="en">') and
       '<title>Tables in QSYS2</title>' in page and '<h1>Tables in QSYS2</h1>' in page, page[:300])
 rows = page.count('<tr><td>')
 check('tablelist: a row for each table and view, and their count', rows > 100 and

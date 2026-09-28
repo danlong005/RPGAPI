@@ -4,7 +4,8 @@
    // program would fill one, and renders views/tablelist.erpg with its address: the
    // view, a template of HTML with RPG in it, bases the same data structure
    // (views/tablelist_t.rpgleinc, included by both) on it and loops over the
-   // rows, including views/pagetop.erpg for the top of the page. RPGAPI
+   // rows; views/layout.erpg, the app's layout, writes the page around it.
+   // RPGAPI
    // compiles each view the first time it is asked for, and again whenever
    // it or the copybook changes: edit a template and refresh the page.
    //
@@ -23,7 +24,8 @@
 ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI') dftactgrp(*no);
 
 /include 'rpgapi_h.rpgle'
-   // table_t, and tablelist_t, the view's data
+   // layout_t, what the layout shows; table_t, and tablelist_t, the view's data
+/include 'layout_t.rpgleinc'
 /include 'tablelist_t.rpgleinc'
 
 dcl-c VIEWS '/home/myuser/RPGAPI/examples/views';
@@ -32,6 +34,7 @@ dcl-ds app likeds(RPGAPI_App);
 
 clear app;
 RPGAPI_setViews(app : VIEWS);
+RPGAPI_setLayout(app : 'layout.erpg');
 RPGAPI_get(app : '/tables/{library}' : %paddr(tables));
 RPGAPI_setCompression(app);
 RPGAPI_start(app : 8080);
@@ -54,7 +57,7 @@ dcl-proc tables;
    exec sql set option commit = *none, datfmt = *iso, closqlcsr = *endmod;
 
    library = %upper(RPGAPI_getParam(request : 'library'));
-   model.title = 'Tables in ' + library;
+   model.head.title = 'Tables in ' + library;
    exec sql declare table_list cursor for
             select table_name,
                    case table_type when 'V' then 'View'

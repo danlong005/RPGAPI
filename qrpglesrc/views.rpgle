@@ -150,6 +150,8 @@ dcl-ds cached_t qualified template;
    includes varchar(1024) dim(10);
    include_modified int(10:0) dim(10);
    include_size int(10:0) dim(10);
+   layout_declared ind;
+   layout varchar(1024);
 end-ds;
 dcl-ds cache likeds(cached_t) dim(100);
 dcl-s cache_count int(10:0) inz(0);
@@ -189,6 +191,16 @@ end-ds;
    // the app's settings, from RPGAPI_setViews
 dcl-s RPGAPI_views_directory varchar(1024) import;
 dcl-s RPGAPI_views_library char(10) import;
+dcl-s RPGAPI_views_layout varchar(1024) import;
+
+   // the layout a template asks for with <%@ layout('...') %>, when it has
+   // the tag: found when the template is read, kept with its program
+dcl-s layout_declared ind;
+dcl-s layout_named varchar(1024);
+   // the view a layout is being written around, and its data: RPGAPI_body
+   // writes it (once)
+dcl-s body_program char(21) inz(*blanks);
+dcl-s body_data pointer inz(*null);
 
 
    // ======================================================================
@@ -204,6 +216,8 @@ dcl-proc RPGAPI_render export;
    dcl-ds answer likeds(RPGAPI_Response) inz;
    dcl-s passed pointer inz(*null);
    dcl-s program char(21);
+   dcl-s layout varchar(1024);
+   dcl-s layout_program char(21) inz(*blanks);
 
    if %parms() >= 3;
       answer = response;
@@ -217,10 +231,24 @@ dcl-proc RPGAPI_render export;
       return errorPage(template);
    endif;
 
-      // inside a page that is being written: the view goes into it
+      // inside a page that is being written: the view goes into it, without
+      // a layout
    if RPGAPI_streaming();
       callProgram(program : passed);
       return answer;
+   endif;
+
+      // the layout the view asks for, or the app's; compiled before anything
+      // is sent, so that one that does not compile gets the error page
+   layout = RPGAPI_views_layout;
+   if layout_declared;
+      layout = layout_named;
+   endif;
+   if layout <> '';
+      layout_program = viewProgram(layout);
+      if layout_program = '';
+         return errorPage(layout);
+      endif;
    endif;
 
    if answer.status = 0;
@@ -230,9 +258,31 @@ dcl-proc RPGAPI_render export;
       RPGAPI_setHeader(answer : 'Content-Type' : 'text/html; charset=utf-8');
    endif;
    RPGAPI_beginResponse(answer);
-   callProgram(program : passed);
+   if layout_program = '';
+      callProgram(program : passed);
+   else;
+         // the layout, with the same data; RPGAPI_body() in it writes the view
+      body_program = program;
+      body_data = passed;
+      callProgram(layout_program : passed);
+      body_program = '';
+   endif;
    RPGAPI_endResponse();
    return answer;
+end-proc;
+
+
+   // for compiled views: in a layout, the view it is written around. Once:
+   // the view cannot write itself again
+dcl-proc RPGAPI_bodyView export;
+   dcl-s program char(21);
+
+   if body_program = '';
+      return;
+   endif;
+   program = body_program;
+   body_program = '';
+   callProgram(program : body_data);
 end-proc;
 
 
@@ -310,6 +360,8 @@ dcl-proc viewProgram;
       if cache(index).path = path;
          if cache(index).modified = info.modified and
             cache(index).size = info.size and unchangedIncludes(index);
+            layout_declared = cache(index).layout_declared;
+            layout_named = cache(index).layout;
             return cache(index).program;
          endif;
          leave;
@@ -335,6 +387,8 @@ dcl-proc viewProgram;
    cache(index).modified = info.modified;
    cache(index).size = info.size;
    cache(index).program = program;
+   cache(index).layout_declared = layout_declared;
+   cache(index).layout = layout_named;
    cache(index).include_count = include_count;
    for included = 1 to include_count;
       cache(index).includes(included) = includes(included);
@@ -433,6 +487,7 @@ dcl-proc compileView;
    template_name = %subst(path : %scanr('/' : '/' + path));
    monitor;
       readTemplate(path);
+      findLayout();
    on-error;
       return '';
    endmon;
@@ -861,6 +916,84 @@ dcl-proc findIncludes;
 end-proc;
 
 
+   // the layout the template in source asks for with <%@ layout('...') %>:
+   // into layout_declared and layout_named. It has to be known before the
+   // view runs, since the layout is written first
+dcl-proc findLayout;
+   dcl-s at int(10:0);
+   dcl-s close_at int(10:0);
+   dcl-s content varchar(32000);
+
+   layout_declared = *off;
+   layout_named = '';
+   if source_length < 3;
+      return;
+   endif;
+   at = %scan('<%@' : source : 1 : source_length);
+   if at = 0;
+      return;
+   endif;
+   close_at = 0;
+   if at + 3 <= source_length;
+      close_at = %scan('%>' : source : at + 3 : source_length - at - 2);
+   endif;
+   if close_at = 0 or close_at - at - 3 > 32000;
+      return;
+   endif;
+   content = %subst(source : at + 3 : close_at - at - 3);
+   layout_named = layoutDirective(content : lineOf(at));
+   layout_declared = *on;
+end-proc;
+
+
+   // the template named in a <%@ %> tag's content, layout('name') or
+   // layout(''). Anything else stops generating, naming the line
+dcl-proc layoutDirective;
+   dcl-pi *n varchar(1024);
+      content varchar(32000) const;
+      line int(10:0) const;
+   end-pi;
+   dcl-s text varchar(32000);
+   dcl-s name varchar(1024);
+
+   text = %trim(%xlate(CR + LF : '  ' : content));
+   if %len(text) > 0 and %subst(text : %len(text) : 1) = '-';
+      text = %trimr(%subst(text : 1 : %len(text) - 1));
+   endif;
+   if %len(text) < 10 or %upper(%subst(text : 1 : 7)) <> 'LAYOUT(' or
+      %subst(text : %len(text) : 1) <> ')';
+      generateFailed(template_name + ':' + %char(line) + ': <' + '%@ %' +
+                     '> takes layout(''name.erpg''), or layout('''') for none');
+   endif;
+   text = %trim(%subst(text : 8 : %len(text) - 8));
+   if %len(text) < 2 or %subst(text : 1 : 1) <> '''' or
+      %subst(text : %len(text) : 1) <> '''';
+      generateFailed(template_name + ':' + %char(line) + ': the layout''s ' +
+                     'name goes in quotes: layout(''name.erpg'')');
+   endif;
+   name = %subst(text : 2 : %len(text) - 2);
+   return %trim(%scanrpl('''''' : '''' : name));
+end-proc;
+
+
+   // the template line a position in source is on
+dcl-proc lineOf;
+   dcl-pi *n int(10:0);
+      position int(10:0) const;
+   end-pi;
+   dcl-s line int(10:0) inz(1);
+   dcl-s at int(10:0) inz(0);
+
+   dow *on;
+      at = %scan(LF : source : at + 1 : position - at);
+      if at = 0 or at >= position;
+         return line;
+      endif;
+      line += 1;
+   enddo;
+end-proc;
+
+
    // the CRC32 of a file's bytes, on top of crc. Unchanged when it cannot be
    // read: the compile names it
 dcl-proc crcOfFile;
@@ -1003,6 +1136,8 @@ dcl-proc generate;
    append(output : 'dcl-pr RPGAPI_escapeHtml varchar(192000);' + LF);
    append(output : '   text varchar(32000) const;' + LF);
    append(output : 'end-pr;' + LF);
+   append(output : 'dcl-pr RPGAPI_bodyView;' + LF);
+   append(output : 'end-pr;' + LF);
    append(output : 'dcl-pr RPGAPI_includeView;' + LF);
    append(output : '   template varchar(1024) const;' + LF);
    append(output : '   data pointer value;' + LF);
@@ -1019,6 +1154,11 @@ dcl-proc generate;
    appendBuffer(output : declarations);
    append(output : '   RPGAPI_data = RPGAPI_passed;' + LF);
    appendBuffer(output : statements);
+   append(output : 'end-proc;' + LF);
+   append(output : LF);
+   append(output : '   // in a layout: the view it is written around' + LF);
+   append(output : 'dcl-proc RPGAPI_body;' + LF);
+   append(output : '   RPGAPI_bodyView();' + LF);
    append(output : 'end-proc;' + LF);
    append(output : LF);
    append(output : '   // another view, written here, with this one''s data or ' +
@@ -1079,7 +1219,7 @@ dcl-proc parse;
       endif;
 
       content_start = open_at + 2;
-      if kind = '=' or kind = '-' or kind = '#' or kind = '!';
+      if kind = '=' or kind = '-' or kind = '#' or kind = '!' or kind = '@';
          content_start += 1;
       else;
          kind = ' ';
@@ -1119,6 +1259,9 @@ dcl-proc parse;
 
       select;
       when kind = '#';
+      when kind = '@';
+            // read by findLayout; here only checked
+         layoutDirective(content : tag_line);
       when kind = '!';
          addCode(declarations : content : tag_line);
       when kind = '=' or kind = '-';

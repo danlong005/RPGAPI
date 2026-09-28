@@ -6,8 +6,9 @@ dcl-ds note_t qualified template;
    message varchar(500);
    posted timestamp;
 end-ds;
+   // first, what the layout shows (layout_t.rpgleinc, included before this)
 dcl-ds guestbook_t qualified template;
-   title varchar(100);
+   head likeds(layout_t);
       // what is wrong with the form just sent, or ''
    problem varchar(100);
    count int(10:0);

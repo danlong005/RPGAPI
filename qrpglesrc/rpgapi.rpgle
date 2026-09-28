@@ -322,6 +322,7 @@ dcl-s RPGAPI_compression_threshold int(10:0) inz(1024);
    // views, from the app's settings, for the views module
 dcl-s RPGAPI_views_directory varchar(1024) export;
 dcl-s RPGAPI_views_library char(10) export;
+dcl-s RPGAPI_views_layout varchar(1024) export;
 dcl-c RPGAPI_DEFAULT_THRESHOLD 1024;
    // the response being sent: gzipped (Content-Encoding: gzip), and whether
    // it says Vary: Accept-Encoding, as every response that could be is
@@ -1943,6 +1944,7 @@ dcl-proc RPGAPI_applySettings;
 
    RPGAPI_views_directory = %trim(config.views_directory);
    RPGAPI_views_library = %upper(config.views_library);
+   RPGAPI_views_layout = %trim(config.views_layout);
    RPGAPI_compression = config.compression;
    RPGAPI_compression_threshold = RPGAPI_DEFAULT_THRESHOLD;
    if config.compression_threshold > 0;
@@ -5489,6 +5491,16 @@ dcl-proc RPGAPI_setViews export;
    if %parms() >= 3;
       config.views_library = %upper(library);
    endif;
+end-proc;
+
+
+dcl-proc RPGAPI_setLayout export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      template varchar(1024) const;
+   end-pi;
+
+   config.views_layout = %trim(template);
 end-proc;
 
 

@@ -284,6 +284,8 @@ for suite_name in $SUITES; do
     handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
     compress)  compile compress && suite compress ";;;$T;" compress ;;
     templates) views && compile templates && suite templates ";;;$T;" templates
+               CORS="layout" suite templates ";;;$T;" templates layout
+               CORS=""
                EXAMPLE_VIEWS="$REPO/examples/views" example_suite html-page.sqlrpgle EXHTML htmlpage
                EXAMPLE_VIEWS="$REPO/examples/views" example_suite guestbook.rpgle EXGUEST guestbook ;;
     examples)  compile_example hello.rpgle EXHELLO

@@ -143,6 +143,7 @@ li { margin: 0.2rem 0; }
 <li><a href="#rpgapi_settlsapplication">RPGAPI_setTlsApplication</a></li>
 <li><a href="#rpgapi_settlskeystore">RPGAPI_setTlsKeystore</a></li>
 <li><a href="#rpgapi_setviews">RPGAPI_setViews</a></li>
+<li><a href="#rpgapi_setlayout">RPGAPI_setLayout</a></li>
 </ul></div>
 <div class="group"><a class="group-title" href="#request">Request</a><ul>
 <li><a href="#rpgapi_request">RPGAPI_Request</a></li>
@@ -185,6 +186,8 @@ li { margin: 0.2rem 0; }
 <li><a href="#tags">Tags</a></li>
 <li><a href="#rpgapi_data">RPGAPI_data</a></li>
 <li><a href="#rpgapi_include">RPGAPI_include</a></li>
+<li><a href="#layouts">Layouts</a></li>
+<li><a href="#rpgapi_body">RPGAPI_body</a></li>
 <li><a href="#where-views-are-compiled">Where views are compiled</a></li>
 <li><a href="#erpg">ERPG</a></li>
 <li><a href="#when-a-view-is-wrong">When a view is wrong</a></li>
@@ -270,7 +273,7 @@ return;</code></pre>
 <h2 id="application">Application</h2>
 <h3 id="rpgapi_app">RPGAPI_App</h3>
 <p>The app: its routes, middleware and settings. Declare one, <code>clear</code> it, and pass it to the procedures below. A setting left at 0 or blank gets its default when <code>RPGAPI_start</code> runs. Set them with the procedures, which check the values, before <code>RPGAPI_start</code>.</p>
-<div class="table"><table><thead><tr><th>Field</th><th>Set with</th><th>Default</th></tr></thead><tbody><tr><td><code>port</code></td><td><code>app.port = 8080</code>, or <a href="#rpgapi_start">RPGAPI_start</a><code>(app : 8080)</code></td><td>3000</td></tr><tr><td><code>jobs</code></td><td><code>app.jobs = 4</code>, or <code>RPGAPI_start(app : 8080 : 4)</code></td><td>1</td></tr><tr><td><code>log_level</code></td><td><a href="#rpgapi_setloglevel">RPGAPI_setLogLevel</a></td><td>off</td></tr><tr><td><code>max_request_size</code></td><td><a href="#rpgapi_setmaxrequestsize">RPGAPI_setMaxRequestSize</a></td><td>1MB</td></tr><tr><td><code>max_upload_size</code></td><td><a href="#rpgapi_setmaxuploadsize">RPGAPI_setMaxUploadSize</a></td><td>0, off</td></tr><tr><td><code>read_timeout</code>, <code>write_timeout</code></td><td><a href="#rpgapi_settimeouts">RPGAPI_setTimeouts</a></td><td>30, 30 seconds</td></tr><tr><td><code>tls_application_id</code>, <code>tls_keystore</code>, <code>tls_password</code>, <code>tls_label</code></td><td><a href="#rpgapi_settlsapplication">RPGAPI_setTlsApplication</a>, <a href="#rpgapi_settlskeystore">RPGAPI_setTlsKeystore</a></td><td>plain HTTP</td></tr><tr><td><code>cors_origins</code>, <code>cors_credentials</code>, <code>cors_max_age</code>, <code>cors_allow_headers</code>, <code>cors_expose_headers</code></td><td><a href="#rpgapi_setcors">RPGAPI_setCors</a> and the fields</td><td>no CORS</td></tr><tr><td><code>keepalive_timeout</code>, <code>keepalive_requests</code></td><td><a href="#rpgapi_setkeepalive">RPGAPI_setKeepAlive</a></td><td>5 seconds, 100 requests</td></tr><tr><td><code>not_found_handler</code>, <code>error_handler</code></td><td><a href="#rpgapi_setnotfound">RPGAPI_setNotFound</a>, <a href="#rpgapi_seterrorhandler">RPGAPI_setErrorHandler</a></td><td>plain 404 and 500</td></tr><tr><td><code>trusted_proxies</code></td><td><a href="#rpgapi_settrustedproxies">RPGAPI_setTrustedProxies</a></td><td>none</td></tr><tr><td><code>route_prefix</code></td><td><a href="#rpgapi_setprefix">RPGAPI_setPrefix</a></td><td>none</td></tr><tr><td><code>statics</code></td><td><a href="#rpgapi_servestatic">RPGAPI_serveStatic</a> (up to 20)</td><td>none</td></tr><tr><td><code>security_headers</code>, <code>content_security_policy</code></td><td><a href="#rpgapi_setsecurityheaders">RPGAPI_setSecurityHeaders</a></td><td>off</td></tr><tr><td><code>compression</code>, <code>compression_threshold</code></td><td><a href="#rpgapi_setcompression">RPGAPI_setCompression</a></td><td>off; 1024 bytes</td></tr><tr><td><code>views_directory</code>, <code>views_library</code></td><td><a href="#rpgapi_setviews">RPGAPI_setViews</a></td><td>the job's current directory; the app's library</td></tr><tr><td><code>routes</code>, <code>middlewares</code></td><td>the route procedures and <a href="#rpgapi_setmiddleware">RPGAPI_setMiddleware</a></td><td>up to 250 routes, 100 middleware</td></tr><tr><td><code>socket_descriptor</code>, <code>return_socket_descriptor</code></td><td>RPGAPI</td><td></td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Field</th><th>Set with</th><th>Default</th></tr></thead><tbody><tr><td><code>port</code></td><td><code>app.port = 8080</code>, or <a href="#rpgapi_start">RPGAPI_start</a><code>(app : 8080)</code></td><td>3000</td></tr><tr><td><code>jobs</code></td><td><code>app.jobs = 4</code>, or <code>RPGAPI_start(app : 8080 : 4)</code></td><td>1</td></tr><tr><td><code>log_level</code></td><td><a href="#rpgapi_setloglevel">RPGAPI_setLogLevel</a></td><td>off</td></tr><tr><td><code>max_request_size</code></td><td><a href="#rpgapi_setmaxrequestsize">RPGAPI_setMaxRequestSize</a></td><td>1MB</td></tr><tr><td><code>max_upload_size</code></td><td><a href="#rpgapi_setmaxuploadsize">RPGAPI_setMaxUploadSize</a></td><td>0, off</td></tr><tr><td><code>read_timeout</code>, <code>write_timeout</code></td><td><a href="#rpgapi_settimeouts">RPGAPI_setTimeouts</a></td><td>30, 30 seconds</td></tr><tr><td><code>tls_application_id</code>, <code>tls_keystore</code>, <code>tls_password</code>, <code>tls_label</code></td><td><a href="#rpgapi_settlsapplication">RPGAPI_setTlsApplication</a>, <a href="#rpgapi_settlskeystore">RPGAPI_setTlsKeystore</a></td><td>plain HTTP</td></tr><tr><td><code>cors_origins</code>, <code>cors_credentials</code>, <code>cors_max_age</code>, <code>cors_allow_headers</code>, <code>cors_expose_headers</code></td><td><a href="#rpgapi_setcors">RPGAPI_setCors</a> and the fields</td><td>no CORS</td></tr><tr><td><code>keepalive_timeout</code>, <code>keepalive_requests</code></td><td><a href="#rpgapi_setkeepalive">RPGAPI_setKeepAlive</a></td><td>5 seconds, 100 requests</td></tr><tr><td><code>not_found_handler</code>, <code>error_handler</code></td><td><a href="#rpgapi_setnotfound">RPGAPI_setNotFound</a>, <a href="#rpgapi_seterrorhandler">RPGAPI_setErrorHandler</a></td><td>plain 404 and 500</td></tr><tr><td><code>trusted_proxies</code></td><td><a href="#rpgapi_settrustedproxies">RPGAPI_setTrustedProxies</a></td><td>none</td></tr><tr><td><code>route_prefix</code></td><td><a href="#rpgapi_setprefix">RPGAPI_setPrefix</a></td><td>none</td></tr><tr><td><code>statics</code></td><td><a href="#rpgapi_servestatic">RPGAPI_serveStatic</a> (up to 20)</td><td>none</td></tr><tr><td><code>security_headers</code>, <code>content_security_policy</code></td><td><a href="#rpgapi_setsecurityheaders">RPGAPI_setSecurityHeaders</a></td><td>off</td></tr><tr><td><code>compression</code>, <code>compression_threshold</code></td><td><a href="#rpgapi_setcompression">RPGAPI_setCompression</a></td><td>off; 1024 bytes</td></tr><tr><td><code>views_directory</code>, <code>views_library</code></td><td><a href="#rpgapi_setviews">RPGAPI_setViews</a></td><td>the job's current directory; the app's library</td></tr><tr><td><code>views_layout</code></td><td><a href="#rpgapi_setlayout">RPGAPI_setLayout</a></td><td>none</td></tr><tr><td><code>routes</code>, <code>middlewares</code></td><td>the route procedures and <a href="#rpgapi_setmiddleware">RPGAPI_setMiddleware</a></td><td>up to 250 routes, 100 middleware</td></tr><tr><td><code>socket_descriptor</code>, <code>return_socket_descriptor</code></td><td>RPGAPI</td><td></td></tr></tbody></table></div>
 <p>A setter given a value it does not accept ends your program with escape message <code>CPF9898</code> saying why. Every job serving the app (see <a href="#several-jobs">several jobs</a>) runs your program, and so gets the same settings.</p>
 <details><summary>The declaration</summary>
 <pre data-language="rpgle"><code>dcl-ds RPGAPI_App qualified template;
@@ -307,6 +310,7 @@ return;</code></pre>
    compression_threshold int(10:0);
    views_directory varchar(1024);
    views_library char(10);
+   views_layout varchar(1024);
 end-ds;</code></pre>
 </details>
 <h3 id="rpgapi_start">RPGAPI_start</h3>
@@ -451,6 +455,10 @@ RPGAPI_start(app : 8443);</code></pre>
 <p>Where <a href="#views">views</a> are: the directory (<code>varchar(1024)</code>) template paths and copybooks are relative to (the job's current directory when not set), and the library (<code>char(10)</code>) their compiled programs go into (the library of the app's program when left out).</p>
 <pre data-language="rpgle"><code>RPGAPI_setViews(app : '/home/me/myapp/views');
 RPGAPI_setViews(app : '/home/me/myapp/views' : 'MYVIEWS');</code></pre>
+<h3 id="rpgapi_setlayout">RPGAPI_setLayout</h3>
+<pre data-language="rpgle"><code>RPGAPI_setLayout(app : template)</code></pre>
+<p>The <a href="#layouts">layout</a> every view rendered with <a href="#rpgapi_render">RPGAPI_render</a> is written into: a template (<code>varchar(1024)</code>) that writes the page around the view, such as its head, navigation and footer. <code>''</code> for none, the default. A view picks another, or none, with <code>&lt;%@ layout('...') %&gt;</code>.</p>
+<pre data-language="rpgle"><code>RPGAPI_setLayout(app : 'layout.erpg');</code></pre>
 <hr>
 <h2 id="request">Request</h2>
 <h3 id="rpgapi_request">RPGAPI_Request</h3>
@@ -718,11 +726,11 @@ end-proc;</code></pre>
 <p>RPG cannot run code it reads while it runs, so RPGAPI compiles each view into a program the first time it is asked for, and again whenever the template or a copybook it includes changes: edit a view and refresh the page. That first request takes a few seconds; the rest just call the program. With <a href="#compression">compression</a> on, views are gzipped like any text.</p>
 <p>Two complete apps show views at work:</p>
 <ul>
-<li><a href="https://github.com/danlong005/RPGAPI/blob/main/examples/html-page.sqlrpgle">examples/html-page.sqlrpgle</a>: a library's tables, fetched from the SQL catalog into the route's data structure, in a view that includes another for the top of the page.</li>
+<li><a href="https://github.com/danlong005/RPGAPI/blob/main/examples/html-page.sqlrpgle">examples/html-page.sqlrpgle</a>: a library's tables, fetched from the SQL catalog into the route's data structure, in the app's layout.</li>
 <li><a href="https://github.com/danlong005/RPGAPI/blob/main/examples/guestbook.rpgle">examples/guestbook.rpgle</a>: no SQL. The notes are an RPG array; the view has <code>if</code>/<code>else</code>, a form it posts back to, what visitors typed escaped, and a 400 with the page when a field is missing (<code>RPGAPI_render</code>'s <code>response</code>).</li>
 </ul>
 <h3 id="tags">Tags</h3>
-<div class="table"><table><thead><tr><th>Tag</th><th></th></tr></thead><tbody><tr><td><code>&lt;% code %&gt;</code></td><td>RPG statements: <code>for</code>, <code>if</code>, <code>dow</code>, <code>exec sql</code>, calls. Each ends with <code>;</code> as usual</td></tr><tr><td><code>&lt;%= expr %&gt;</code></td><td>A value, HTML-escaped: <code>&amp;</code>, <code>&lt;</code>, <code>&gt;</code>, <code>"</code> and <code>'</code> become entities, so a value from a user or a table cannot add tags or scripts to the page. Numbers and dates are formatted with <code>%char</code></td></tr><tr><td><code>&lt;%- expr %&gt;</code></td><td>A value as it is, for HTML you built and trust</td></tr><tr><td><code>&lt;%# text %&gt;</code></td><td>A comment, left out of the page</td></tr><tr><td><code>&lt;%! decls %&gt;</code></td><td>Declarations: <code>/include</code> of a copybook, <code>dcl-ds ... based(RPGAPI_data)</code>, <code>dcl-s</code>, <code>dcl-c</code>. They go first in the view's program wherever they are in the template</td></tr><tr><td><code>&lt;%%</code></td><td>A literal <code>&lt;%</code></td></tr><tr><td><code>-%&gt;</code></td><td>Ends any tag and leaves out the line break after it, so a line holding only a tag leaves no blank line in the page</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Tag</th><th></th></tr></thead><tbody><tr><td><code>&lt;% code %&gt;</code></td><td>RPG statements: <code>for</code>, <code>if</code>, <code>dow</code>, <code>exec sql</code>, calls. Each ends with <code>;</code> as usual</td></tr><tr><td><code>&lt;%= expr %&gt;</code></td><td>A value, HTML-escaped: <code>&amp;</code>, <code>&lt;</code>, <code>&gt;</code>, <code>"</code> and <code>'</code> become entities, so a value from a user or a table cannot add tags or scripts to the page. Numbers and dates are formatted with <code>%char</code></td></tr><tr><td><code>&lt;%- expr %&gt;</code></td><td>A value as it is, for HTML you built and trust</td></tr><tr><td><code>&lt;%# text %&gt;</code></td><td>A comment, left out of the page</td></tr><tr><td><code>&lt;%! decls %&gt;</code></td><td>Declarations: <code>/include</code> of a copybook, <code>dcl-ds ... based(RPGAPI_data)</code>, <code>dcl-s</code>, <code>dcl-c</code>. They go first in the view's program wherever they are in the template</td></tr><tr><td><code>&lt;%@ layout('name') %&gt;</code></td><td>The <a href="#layouts">layout</a> this view is written into, instead of the app's; <code>layout('')</code> for none</td></tr><tr><td><code>&lt;%%</code></td><td>A literal <code>&lt;%</code></td></tr><tr><td><code>-%&gt;</code></td><td>Ends any tag and leaves out the line break after it, so a line holding only a tag leaves no blank line in the page</td></tr></tbody></table></div>
 <p>Everything else is text, written as it is. A view can run its own SQL too, <code>exec sql</code> and all; it is then compiled with <code>CRTSQLRPGI</code>. Close the cursors it opens.</p>
 <h3 id="rpgapi_data">RPGAPI_data</h3>
 <p>In a view, the pointer the route passed to <code>RPGAPI_render</code> (or <code>*null</code>). Base the view's data structure on it:</p>
@@ -732,10 +740,35 @@ end-proc;</code></pre>
 <h3 id="rpgapi_include">RPGAPI_include</h3>
 <pre data-language="rpgle"><code>RPGAPI_include(template : %addr(data)?)</code></pre>
 <p>In a view, writes another view in place: with this view's data, or other data, such as part of this view's (the title, one row). Shared headers and footers are views of their own.</p>
-<pre><code>&lt;% RPGAPI_include('pagetop.erpg' : %addr(model.title)); -%&gt;
+<pre><code>&lt;% RPGAPI_include('nav.erpg' : %addr(model.head)); -%&gt;
 &lt;% for i = 1 to model.count; -%&gt;
 &lt;%    RPGAPI_include('row.erpg' : %addr(model.customers(i))); -%&gt;
 &lt;% endfor; -%&gt;</code></pre>
+<h3 id="layouts">Layouts</h3>
+<p>A layout is the page around your views: the head, navigation and footer every page shares, written once. It is a template like any view, with <code>&lt;% RPGAPI_body(); %&gt;</code> where the view goes, and <a href="#rpgapi_setlayout">RPGAPI_setLayout</a> makes it the app's:</p>
+<pre><code>&lt;%! /include 'layout_t.rpgleinc'
+     dcl-ds head likeds(layout_t) based(RPGAPI_data); -%&gt;
+&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+&lt;meta charset="utf-8"&gt;
+&lt;title&gt;&lt;%= head.title %&gt;&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;h1&gt;&lt;%= head.title %&gt;&lt;/h1&gt;
+&lt;% RPGAPI_body(); -%&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<ul>
+<li>The layout gets the same data as the view, so it reads the start of the view's data structure. Put what it shows in a data structure of its own (<code>layout_t</code> above: the title) and start every page's data structure with it, <code>head likeds(layout_t)</code>; the route sets <code>model.head.title</code>.</li>
+<li>The layout's top is written, then the view, then the rest: the page still streams. A view that does not compile, or a layout that does not, gets the error page, before anything is sent.</li>
+<li>A view picks another layout, or none, with a tag in it, anywhere: <code>&lt;%@ layout('admin.erpg') %&gt;</code>, <code>&lt;%@ layout('') %&gt;</code>. It is read when the template is, since the layout runs first.</li>
+<li>Only views rendered with <code>RPGAPI_render</code> get a layout: views included with <code>RPGAPI_include</code> go into their page as they are, and a layout is not put in another layout.</li>
+</ul>
+<p>Both examples use one: <a href="https://github.com/danlong005/RPGAPI/blob/main/examples/views/layout.erpg">views/layout.erpg</a>.</p>
+<h3 id="rpgapi_body">RPGAPI_body</h3>
+<pre data-language="rpgle"><code>RPGAPI_body()</code></pre>
+<p>In a <a href="#layouts">layout</a>, writes the view it is written around, once. In a view that is not in a layout, it does nothing.</p>
 <h3 id="where-views-are-compiled">Where views are compiled</h3>
 <p><a href="#rpgapi_setviews">RPGAPI_setViews</a> names the directory and the library. A template path that does not start with <code>/</code> is relative to that directory (the job's current directory without it), and so are the copybooks a view includes. The programs go into the library named, or the library of the app's program, and are named <code>RV</code> and 8 hex digits, after the template's file name and content and its copybooks' content. The job needs the ILE RPG compiler (5770WDS) and authority to create programs there. When a view is compiled again, its older versions in the library are deleted (a program's text names its template); one another job is running at that moment stays until the next time. Any <code>RV...</code> program can be deleted: it is compiled again when it is needed.</p>
 <h3 id="erpg">ERPG</h3>
@@ -746,7 +779,7 @@ end-proc;</code></pre>
 <p>Good to know:</p>
 <ul>
 <li>Templates are UTF-8, with or without a byte order mark; Windows line breaks are fine. Their text goes through the job's CCSID, as everything written with <a href="#rpgapi_write">RPGAPI_write</a> does.</li>
-<li>Not in this version: layouts, EJS's <code>&lt;%_ _%&gt;</code>, and passing a view the request itself (pass what it needs in the data).</li>
+<li>Not in this version: EJS's <code>&lt;%_ _%&gt;</code>, and passing a view the request itself (pass what it needs in the data).</li>
 </ul>
 <hr>
 <h2 id="constants-and-other-data-structures">Constants and other data structures</h2>

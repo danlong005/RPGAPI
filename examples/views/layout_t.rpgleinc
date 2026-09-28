@@ -1,0 +1,7 @@
+**free
+   // what views/layout.erpg shows around every page: each page's data
+   // structure starts with one of these, so the layout finds it at the same
+   // address (RPGAPI_data)
+dcl-ds layout_t qualified template;
+   title varchar(100);
+end-ds;

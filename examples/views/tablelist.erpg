@@ -1,8 +1,9 @@
-<%# the tables and views of a library, from the route's data structure -%>
-<%! /include 'tablelist_t.rpgleinc'
+<%# the tables and views of a library, from the route's data structure,
+    in views/layout.erpg -%>
+<%! /include 'layout_t.rpgleinc'
+     /include 'tablelist_t.rpgleinc'
      dcl-ds model likeds(tablelist_t) based(RPGAPI_data);
      dcl-s i int(10:0); -%>
-<% RPGAPI_include('pagetop.erpg' : %addr(model.title)); -%>
 <table>
   <tr><th>Name</th><th>Type</th><th>Description</th><th>Changed</th></tr>
 <% for i = 1 to model.count; -%>
@@ -10,5 +11,3 @@
 <% endfor; -%>
 </table>
 <p><%= model.count %> tables and views</p>
-</body>
-</html>

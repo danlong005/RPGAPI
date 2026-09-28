@@ -20,6 +20,11 @@ RPGAPI_get(app : '/nodata/{name}' : %paddr(NODATA));
 RPGAPI_get(app : '/custom' : %paddr(CUSTOM));
 testSettings(app);
 RPGAPI_setViews(app : testWorkDir + '/views');
+   // the second run of the suite: every view in views/frame.erpg, unless it
+   // picks another layout
+if testCorsOrigins = 'layout';
+   RPGAPI_setLayout(app : 'frame.erpg');
+endif;
 RPGAPI_start(app);
 
 *inlr = *on;

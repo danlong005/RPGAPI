@@ -1,0 +1,6 @@
+**free
+   // what the test layouts read: the start of every page's data, here just
+   // the title, which the views of the templates app all begin with
+dcl-ds layout_t qualified template;
+   title varchar(100);
+end-ds;

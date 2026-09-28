@@ -7,8 +7,9 @@ dcl-ds table_t qualified template;
    text varchar(50);
    changed timestamp;
 end-ds;
+   // first, what the layout shows (layout_t.rpgleinc, included before this)
 dcl-ds tablelist_t qualified template;
-   title varchar(100);
+   head likeds(layout_t);
    count int(10:0);
    tables likeds(table_t) dim(5000);
 end-ds;

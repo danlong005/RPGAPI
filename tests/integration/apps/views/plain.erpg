@@ -1,0 +1,3 @@
+<%! dcl-s title varchar(100) based(RPGAPI_data); -%>
+<p><%= title %> plain</p>
+<% RPGAPI_include('heading.erpg' : %addr(title)); -%>

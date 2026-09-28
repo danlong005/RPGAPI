@@ -44,7 +44,8 @@ The same reference is a web page with a sidebar in
   [RPGAPI_setTrustedProxies](#rpgapi_settrustedproxies) ·
   [RPGAPI_setTlsApplication](#rpgapi_settlsapplication) ·
   [RPGAPI_setTlsKeystore](#rpgapi_settlskeystore) ·
-  [RPGAPI_setViews](#rpgapi_setviews)
+  [RPGAPI_setViews](#rpgapi_setviews) ·
+  [RPGAPI_setLayout](#rpgapi_setlayout)
 
 **[Request](#request)**: [RPGAPI_Request](#rpgapi_request)
 - Values: [RPGAPI_getParam](#rpgapi_getparam) ·
@@ -83,6 +84,7 @@ The same reference is a web page with a sidebar in
 **[Views](#views)**: [how views work](#how-views-work) ·
 [tags](#tags) · [RPGAPI_data](#rpgapi_data) ·
 [RPGAPI_include](#rpgapi_include) ·
+[layouts](#layouts) · [RPGAPI_body](#rpgapi_body) ·
 [where views are compiled](#where-views-are-compiled) ·
 [ERPG](#erpg) · [when a view is wrong](#when-a-view-is-wrong)
 
@@ -205,6 +207,7 @@ the values, before `RPGAPI_start`.
 | `security_headers`, `content_security_policy` | [RPGAPI_setSecurityHeaders](#rpgapi_setsecurityheaders) | off |
 | `compression`, `compression_threshold` | [RPGAPI_setCompression](#rpgapi_setcompression) | off; 1024 bytes |
 | `views_directory`, `views_library` | [RPGAPI_setViews](#rpgapi_setviews) | the job's current directory; the app's library |
+| `views_layout` | [RPGAPI_setLayout](#rpgapi_setlayout) | none |
 | `routes`, `middlewares` | the route procedures and [RPGAPI_setMiddleware](#rpgapi_setmiddleware) | up to 250 routes, 100 middleware |
 | `socket_descriptor`, `return_socket_descriptor` | RPGAPI | |
 
@@ -250,6 +253,7 @@ dcl-ds RPGAPI_App qualified template;
    compression_threshold int(10:0);
    views_directory varchar(1024);
    views_library char(10);
+   views_layout varchar(1024);
 end-ds;
 ```
 </details>
@@ -598,6 +602,20 @@ app's program when left out).
 ```rpgle
 RPGAPI_setViews(app : '/home/me/myapp/views');
 RPGAPI_setViews(app : '/home/me/myapp/views' : 'MYVIEWS');
+```
+
+### RPGAPI_setLayout
+```rpgle
+RPGAPI_setLayout(app : template)
+```
+The [layout](#layouts) every view rendered with
+[RPGAPI_render](#rpgapi_render) is written into: a template (`varchar(1024)`)
+that writes the page around the view, such as its head, navigation and
+footer. `''` for none, the default. A view picks another, or none, with
+`<%@ layout('...') %>`.
+
+```rpgle
+RPGAPI_setLayout(app : 'layout.erpg');
 ```
 
 ---
@@ -1190,8 +1208,8 @@ request takes a few seconds; the rest just call the program. With
 
 Two complete apps show views at work:
 - [examples/html-page.sqlrpgle](examples/html-page.sqlrpgle): a library's
-  tables, fetched from the SQL catalog into the route's data structure, in a
-  view that includes another for the top of the page.
+  tables, fetched from the SQL catalog into the route's data structure, in
+  the app's layout.
 - [examples/guestbook.rpgle](examples/guestbook.rpgle): no SQL. The notes are
   an RPG array; the view has `if`/`else`, a form it posts back to, what
   visitors typed escaped, and a 400 with the page when a field is missing
@@ -1205,6 +1223,7 @@ Two complete apps show views at work:
 | `<%- expr %>` | A value as it is, for HTML you built and trust |
 | `<%# text %>` | A comment, left out of the page |
 | `<%! decls %>` | Declarations: `/include` of a copybook, `dcl-ds ... based(RPGAPI_data)`, `dcl-s`, `dcl-c`. They go first in the view's program wherever they are in the template |
+| `<%@ layout('name') %>` | The [layout](#layouts) this view is written into, instead of the app's; `layout('')` for none |
 | `<%%` | A literal `<%` |
 | `-%>` | Ends any tag and leaves out the line break after it, so a line holding only a tag leaves no blank line in the page |
 
@@ -1237,11 +1256,55 @@ such as part of this view's (the title, one row). Shared headers and footers
 are views of their own.
 
 ```
-<% RPGAPI_include('pagetop.erpg' : %addr(model.title)); -%>
+<% RPGAPI_include('nav.erpg' : %addr(model.head)); -%>
 <% for i = 1 to model.count; -%>
 <%    RPGAPI_include('row.erpg' : %addr(model.customers(i))); -%>
 <% endfor; -%>
 ```
+
+### Layouts
+A layout is the page around your views: the head, navigation and footer
+every page shares, written once. It is a template like any view, with
+`<% RPGAPI_body(); %>` where the view goes, and
+[RPGAPI_setLayout](#rpgapi_setlayout) makes it the app's:
+
+```
+<%! /include 'layout_t.rpgleinc'
+     dcl-ds head likeds(layout_t) based(RPGAPI_data); -%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title><%= head.title %></title>
+</head>
+<body>
+<h1><%= head.title %></h1>
+<% RPGAPI_body(); -%>
+</body>
+</html>
+```
+- The layout gets the same data as the view, so it reads the start of the
+  view's data structure. Put what it shows in a data structure of its own
+  (`layout_t` above: the title) and start every page's data structure with
+  it, `head likeds(layout_t)`; the route sets `model.head.title`.
+- The layout's top is written, then the view, then the rest: the page still
+  streams. A view that does not compile, or a layout that does not, gets the
+  error page, before anything is sent.
+- A view picks another layout, or none, with a tag in it, anywhere:
+  `<%@ layout('admin.erpg') %>`, `<%@ layout('') %>`. It is read when the
+  template is, since the layout runs first.
+- Only views rendered with `RPGAPI_render` get a layout: views included with
+  `RPGAPI_include` go into their page as they are, and a layout is not put in
+  another layout.
+
+Both examples use one: [views/layout.erpg](examples/views/layout.erpg).
+
+### RPGAPI_body
+```rpgle
+RPGAPI_body()
+```
+In a [layout](#layouts), writes the view it is written around, once. In a
+view that is not in a layout, it does nothing.
 
 ### Where views are compiled
 [RPGAPI_setViews](#rpgapi_setviews) names the directory and the library. A
@@ -1279,8 +1342,8 @@ Good to know:
 - Templates are UTF-8, with or without a byte order mark; Windows line breaks
   are fine. Their text goes through the job's CCSID, as everything written
   with [RPGAPI_write](#rpgapi_write) does.
-- Not in this version: layouts, EJS's `<%_ _%>`, and passing a view the
-  request itself (pass what it needs in the data).
+- Not in this version: EJS's `<%_ _%>`, and passing a view the request
+  itself (pass what it needs in the data).
 
 ---
 

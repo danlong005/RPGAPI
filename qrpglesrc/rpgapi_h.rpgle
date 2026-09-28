@@ -152,6 +152,8 @@ dcl-ds RPGAPI_App qualified template;
       // compiled programs go into (blank: the app program's library)
    views_directory varchar(1024);
    views_library char(10);
+      // the layout views are written into (RPGAPI_setLayout). Blank: none
+   views_layout varchar(1024);
 end-ds;
 
 
@@ -528,6 +530,15 @@ dcl-pr RPGAPI_setViews;
    config likeds(RPGAPI_App);
    directory varchar(1024) const;
    library char(10) const options(*nopass);
+end-pr;
+
+   // the layout every view rendered with RPGAPI_render is written into: a
+   // template that writes the page around it, with <% RPGAPI_body(); %>
+   // where the view goes. A view picks another, or none, with
+   // <%@ layout('admin.erpg') %> or <%@ layout('') %>. '' for none
+dcl-pr RPGAPI_setLayout;
+   config likeds(RPGAPI_App);
+   template varchar(1024) const;
 end-pr;
 
    // bytes sent as they are, for binary content

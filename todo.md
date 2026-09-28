@@ -378,6 +378,18 @@
   (2026-09-28, templates suite): after a template, and after only its
   copybook, changes, one program is left for it. The full run passes (489
   checks)
+- [x] Layouts: `RPGAPI_setLayout(app : 'layout.erpg')` writes every view
+  rendered with `RPGAPI_render` into a layout, a template with
+  `<% RPGAPI_body(); %>` where the view goes; it gets the view's data and
+  reads its start (a `layout_t` each page's data structure begins with). A
+  view picks another or none with `<%@ layout('...') %>`, read when the
+  template is (the layout runs first) and kept with its compiled program.
+  Included views get no layout, and layouts do not nest. Both examples share
+  `views/layout.erpg` instead of including `pagetop.erpg`. Verified on PUB400
+  (2026-09-28): the templates suite run a second time with a layout set
+  (a view in it, one opting out, one picking another, an included view
+  without it, layouts that do not compile or exist, a bad `<%@ %>` tag),
+  both examples, 50 checks. The full run passes (499 checks)
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default
@@ -630,7 +642,6 @@
   variable, try installing iRPGUnit into a library we own on PUB400, and run
   the tests added since (they have never been compiled)
 
-- [ ] Views, later: layouts
 
 ## Cleanup
 - [ ] The unit tests in `qtestsrc` have never been compiled or run: check they

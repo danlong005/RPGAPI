@@ -1,0 +1,21 @@
+<%# the page around every view (RPGAPI_setLayout): the head, the title as a
+    heading, the view, and the end of the page. Its data is the start of the
+    view's: layout_t -%>
+<%! /include 'layout_t.rpgleinc'
+     dcl-ds head likeds(layout_t) based(RPGAPI_data); -%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title><%= head.title %></title>
+<style>
+  body { font-family: sans-serif; margin: 2em; }
+  th, td { padding: 4px 12px; text-align: left; }
+  tr:nth-child(even) { background: #f4f4f4; }
+</style>
+</head>
+<body>
+<h1><%= head.title %></h1>
+<% RPGAPI_body(); -%>
+</body>
+</html>

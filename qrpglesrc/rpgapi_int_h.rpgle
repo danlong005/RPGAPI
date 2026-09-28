@@ -89,6 +89,9 @@ dcl-pr RPGAPI_includeView;
    template varchar(1024) const;
    data pointer value;
 end-pr;
+   // in a layout: the view it is written around
+dcl-pr RPGAPI_bodyView;
+end-pr;
    // for ERPG: compiles a template into a library ahead of time
 dcl-pr RPGAPI_compileView char(21);
    path varchar(1024) const;
