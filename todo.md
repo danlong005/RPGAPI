@@ -350,6 +350,25 @@
   because a varchar of blanks compares equal to '' in RPG (now `%len`).
   Verified on PUB400 (2026-09-28): the guestbook suite (5 checks) and a new
   templates check for blanks between tags. The full run passes (488 checks)
+- [x] Views take the route's data structure instead of values and lists by
+  name: `RPGAPI_render(template : %addr(ds) : response?)` passes the pointer
+  to the compiled view, which bases the same data structure on `RPGAPI_data`
+  (a copybook both include, found in the views directory), reading the
+  route's data in place with its types; `RPGAPI_include(template :
+  %addr(part)?)` passes this view's data or a part of it. Gone:
+  `RPGAPI_Vars`, `setVar`, `setList` (SQL), `addRow`, `setField`,
+  `listCount`, `getVar`, `getList`, `rows`, the value store, its XML-INTO
+  and dynamic SQL; the views module no longer needs SQL (`views.rpgle`). A
+  view is compiled again when a copybook it includes changes (their content
+  is part of the program's name, and their times are checked). Found on the
+  way: `page` is an RPG reserved word (the examples use `model`); the SQL
+  precompiler does not take a qualified array subfield as a multi-row fetch
+  target. Examples: `html-page.sqlrpgle` fetches into its data structure,
+  `guestbook.rpgle` passes its notes in one. Verified on PUB400 (2026-09-28,
+  templates and examples suites, 38 checks): views for the heading and each
+  row given pointers, numbers and dates in place, a view with no data, a
+  copybook change recompiling the view, both examples. The full run passes
+  (487 checks)
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default

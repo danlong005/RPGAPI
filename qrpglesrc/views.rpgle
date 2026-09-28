@@ -2,20 +2,21 @@
 ctl-opt nomain option(*nodebugio:*srcstmt);
 
    // Views: EJS-style templates with RPG inside the tags, compiled and run
-   // while the app runs. RPGAPI_render('views/customers.erpg' : vars) turns
+   // while the app runs. RPGAPI_render('customers.erpg' : %addr(page)) turns
    // the template into an RPG program the first time it is asked for (and
-   // again whenever it changes), compiles it into the app's views library,
-   // and calls it; the program writes the page, which is streamed to the
-   // client. The route passes values and lists by name in an RPGAPI_Vars:
-   //   RPGAPI_setVar, RPGAPI_setList (from SQL), RPGAPI_addRow, RPGAPI_setField
-   // and the template reads them with RPGAPI_getVar and RPGAPI_getList.
+   // again whenever it, or a file it includes, changes), compiles it into
+   // the app's views library, and calls it with the pointer; the program
+   // writes the page, which is streamed to the client. The template bases the
+   // same data structure as the route on that pointer, RPGAPI_data: the
+   // route's data, read in place, with its types.
    //
    // In a template:
-   //   <% code %>     RPG statements, such as for-each, if, exec sql, calls
+   //   <% code %>     RPG statements, such as for, if, exec sql, calls
    //   <%= expr %>    a value, HTML-escaped (RPGAPI_writeHtml)
    //   <%- expr %>    a value as it is (RPGAPI_write)
    //   <%# text %>    a comment, left out
-   //   <%! decls %>   declarations (dcl-s, dcl-ds), put first in the program
+   //   <%! decls %>   declarations (dcl-s, dcl-ds, /include of a copybook),
+   //                  put first in the program
    //   <%%            a literal <%
    //   -%>            ends a tag and drops the line break after it
 
@@ -96,7 +97,7 @@ end-pr;
    // the compiled view: extpgm with a name, resolved when it is called
 dcl-s view_program char(21);
 dcl-pr callView extpgm(view_program);
-   vars likeds(RPGAPI_Vars) const;
+   data pointer const;
 end-pr;
 
 dcl-c UTF8 1208;
@@ -112,35 +113,26 @@ dcl-c HEX '0123456789ABCDEF';
    // work files of a compile
 dcl-c WORK_DIRECTORY '/tmp/';
 
-   // ----- values and lists passed to views -----------------------------
-
-   // one value (list ''), one field of a row of a list (row > 0), or a
-   // list's row count (row 0, name '', count in length). Names in upper case
-dcl-ds var_t qualified template;
-   handle int(10:0);
-   list varchar(64);
-   row int(10:0);
-   name varchar(64);
-   value pointer;
-   length int(10:0);
-end-ds;
-dcl-s vars_ptr pointer inz(*null);
-dcl-ds entries likeds(var_t) dim(80000) based(vars_ptr);
-dcl-s entry_count int(10:0) inz(0);
-dcl-s entry_room int(10:0) inz(0);
-dcl-s last_handle int(10:0) inz(0);
-
    // ----- compiled views, as this job last found them -------------------
 
+   // a template and the files it includes (copybooks), with when each last
+   // changed: the view is compiled again when any of them has
 dcl-ds cached_t qualified template;
    path varchar(1024);
    modified int(10:0);
    size int(10:0);
    program char(21);
+   include_count int(10:0);
+   includes varchar(1024) dim(10);
+   include_modified int(10:0) dim(10);
+   include_size int(10:0) dim(10);
 end-ds;
-dcl-ds cache likeds(cached_t) dim(200);
+dcl-ds cache likeds(cached_t) dim(100);
 dcl-s cache_count int(10:0) inz(0);
 dcl-s service_library char(10) inz(*blanks);
+   // the files the template being compiled includes
+dcl-s include_count int(10:0);
+dcl-s includes varchar(1024) dim(10);
 
    // ----- the template being turned into RPG ----------------------------
 
@@ -151,8 +143,6 @@ dcl-ds buffer_t qualified template;
 end-ds;
 dcl-ds declarations likeds(buffer_t) inz(*likeds);
 dcl-ds statements likeds(buffer_t) inz(*likeds);
-   // the XML of the list a view last asked for (RPGAPI_listXml)
-dcl-ds list_xml likeds(buffer_t) inz(*likeds);
 dcl-s template_name varchar(256);
 dcl-s source char(16000000) based(source_ptr);
 dcl-s source_length int(10:0);
@@ -178,501 +168,24 @@ dcl-s RPGAPI_views_library char(10) import;
 
 
    // ======================================================================
-   // values and lists
-   // ======================================================================
-
-dcl-proc RPGAPI_setVar export;
-   dcl-pi *n;
-      vars likeds(RPGAPI_Vars);
-      name varchar(64) const;
-      value varchar(32000) const;
-   end-pi;
-
-   setEntry(handleOf(vars) : '' : 0 : name : value);
-end-proc;
-
-
-dcl-proc RPGAPI_addRow export;
-   dcl-pi *n int(10:0);
-      vars likeds(RPGAPI_Vars);
-      list varchar(64) const;
-   end-pi;
-   dcl-s index int(10:0);
-
-   index = countEntry(handleOf(vars) : list : *on);
-   entries(index).length += 1;
-   return entries(index).length;
-end-proc;
-
-
-dcl-proc RPGAPI_setField export;
-   dcl-pi *n;
-      vars likeds(RPGAPI_Vars);
-      list varchar(64) const;
-      name varchar(64) const;
-      value varchar(32000) const;
-   end-pi;
-   dcl-s row int(10:0);
-
-   row = RPGAPI_listCount(vars : list);
-   if row = 0;
-      row = RPGAPI_addRow(vars : list);
-   endif;
-   setEntry(handleOf(vars) : list : row : name : value);
-end-proc;
-
-
-   // the rows of an SQL query as a list: each column a field by its name,
-   // every value as text; up to 5 values for ? markers. A statement that
-   // fails ends the calling procedure with CPF9898 and the SQL state
-dcl-proc RPGAPI_setList export;
-   dcl-pi *n;
-      vars likeds(RPGAPI_Vars);
-      list varchar(64) const;
-      statement varchar(32000) const;
-      value1 varchar(1000) const options(*nopass);
-      value2 varchar(1000) const options(*nopass);
-      value3 varchar(1000) const options(*nopass);
-      value4 varchar(1000) const options(*nopass);
-      value5 varchar(1000) const options(*nopass);
-   end-pi;
-   dcl-s sql_text varchar(32000);
-   dcl-s p1 varchar(1000);
-   dcl-s p2 varchar(1000);
-   dcl-s p3 varchar(1000);
-   dcl-s p4 varchar(1000);
-   dcl-s p5 varchar(1000);
-   dcl-s column_count int(10:0);
-   dcl-s column_name varchar(128);
-   dcl-s names varchar(64) dim(200);
-   dcl-s value varchar(32000);
-   dcl-s indicator int(5:0);
-   dcl-s index int(10:0);
-   dcl-s handle int(10:0);
-   dcl-s row int(10:0);
-   dcl-s rows int(10:0) inz(0);
-   dcl-s markers int(10:0);
-
-   exec sql set option commit = *none, closqlcsr = *endmod, datfmt = *iso,
-                       timfmt = *iso, decmpt = *period;
-
-   handle = handleOf(vars);
-      // the list exists, empty, even when the query finds nothing
-   countEntry(handle : list : *on);
-   markers = %parms() - 3;
-   if markers >= 1;
-      p1 = value1;
-   endif;
-   if markers >= 2;
-      p2 = value2;
-   endif;
-   if markers >= 3;
-      p3 = value3;
-   endif;
-   if markers >= 4;
-      p4 = value4;
-   endif;
-   if markers >= 5;
-      p5 = value5;
-   endif;
-
-   sql_text = statement;
-   exec sql deallocate descriptor local 'RPGAPI_LIST';
-   exec sql prepare RPGAPI_list_statement from :sql_text;
-   if sqlcode < 0;
-      listFailed(list : 'prepare');
-   endif;
-   exec sql allocate descriptor local 'RPGAPI_LIST' with max 200;
-   exec sql describe RPGAPI_list_statement
-            using sql descriptor local 'RPGAPI_LIST';
-   exec sql get descriptor 'RPGAPI_LIST' :column_count = count;
-   if sqlcode < 0 or column_count > %elem(names);
-      listFailed(list : 'describe');
-   endif;
-   for index = 1 to column_count;
-      exec sql get descriptor 'RPGAPI_LIST' value :index :column_name = name;
-      names(index) = %trim(column_name);
-         // every column fetched as text, in the job's CCSID
-      exec sql set descriptor 'RPGAPI_LIST' value :index type = 12,
-                              length = 32000;
-   endfor;
-
-   exec sql declare RPGAPI_list_cursor cursor for RPGAPI_list_statement;
-   select;
-   when markers <= 0;
-      exec sql open RPGAPI_list_cursor;
-   when markers = 1;
-      exec sql open RPGAPI_list_cursor using :p1;
-   when markers = 2;
-      exec sql open RPGAPI_list_cursor using :p1, :p2;
-   when markers = 3;
-      exec sql open RPGAPI_list_cursor using :p1, :p2, :p3;
-   when markers = 4;
-      exec sql open RPGAPI_list_cursor using :p1, :p2, :p3, :p4;
-   other;
-      exec sql open RPGAPI_list_cursor using :p1, :p2, :p3, :p4, :p5;
-   endsl;
-   if sqlcode < 0;
-      listFailed(list : 'open');
-   endif;
-
-   dow *on;
-      exec sql fetch next from RPGAPI_list_cursor
-               into sql descriptor 'RPGAPI_LIST';
-      if sqlcode = 100;
-         leave;
-      endif;
-      if sqlcode < 0;
-         exec sql close RPGAPI_list_cursor;
-         listFailed(list : 'fetch');
-      endif;
-      row = RPGAPI_addRow(vars : list);
-      rows += 1;
-      for index = 1 to column_count;
-         exec sql get descriptor 'RPGAPI_LIST' value :index
-                  :value = data, :indicator = indicator;
-            // a null is a field left out: the view's subfield stays empty
-         if indicator >= 0;
-            setEntry(handle : list : row : names(index) : value);
-         endif;
-      endfor;
-   enddo;
-   exec sql close RPGAPI_list_cursor;
-   exec sql deallocate descriptor local 'RPGAPI_LIST';
-   RPGAPI_log(RPGAPI_LOG_DEBUG : 'list ' + list + ': ' + %char(rows) +
-              ' rows of ' + %char(column_count) + ' columns');
-end-proc;
-
-
-   // ends RPGAPI_setList's caller with CPF9898 and the SQL state
-dcl-proc listFailed;
-   dcl-pi *n;
-      list varchar(64) const;
-      step varchar(20) const;
-   end-pi;
-   dcl-s text varchar(512);
-   dcl-s key char(4);
-   dcl-s error_code char(8) inz(*allx'00');
-
-   text = 'RPGAPI_setList ' + list + ': the SQL statement failed in ' + step +
-          ', SQLSTATE ' + sqlstate + ', SQLCODE ' + %char(sqlcode);
-   RPGAPI_log(RPGAPI_LOG_ERROR : text);
-   exec sql deallocate descriptor local 'RPGAPI_LIST';
-      // counter 3: past this and RPGAPI_setList, to the route
-   send_program_message('CPF9898' : 'QCPFMSG   *LIBL' : text : %len(text) :
-                        '*ESCAPE' : '*' : 3 : key : error_code);
-end-proc;
-
-
-   // for compiled views: a value by name, '' when there is none
-dcl-proc RPGAPI_varValue export;
-   dcl-pi *n varchar(32000);
-      vars likeds(RPGAPI_Vars) const;
-      name varchar(64) const;
-   end-pi;
-   dcl-s index int(10:0);
-   dcl-s key varchar(64);
-
-   key = %upper(%trim(name));
-   for index = entry_count downto 1;
-      if entries(index).handle = vars.handle and entries(index).list = '' and
-         entries(index).name = key;
-         return storedValue(index);
-      endif;
-   endfor;
-   return '';
-end-proc;
-
-
-   // for compiled views and routes: the number of rows of a list
-dcl-proc RPGAPI_listCount export;
-   dcl-pi *n int(10:0);
-      vars likeds(RPGAPI_Vars) const;
-      list varchar(64) const;
-   end-pi;
-   dcl-s index int(10:0);
-
-   index = countEntry(vars.handle : list : *off);
-   if index = 0;
-      return 0;
-   endif;
-   return entries(index).length;
-end-proc;
-
-
-   // for compiled views: up to max rows of a list as XML, for XML-INTO:
-   // <rows><row><NAME>value</NAME>...</row>...</rows>. Returns a pointer to
-   // it as a varchar(:4), a length and the text, which the view reads
-   // through a based variable: returned as a value, a list of any size
-   // would take that much of the view's stack. It stays until the next call
-dcl-proc RPGAPI_listXml export;
-   dcl-pi *n pointer;
-      vars likeds(RPGAPI_Vars) const;
-      list varchar(64) const;
-      max int(10:0) const;
-   end-pi;
-   dcl-s key varchar(64);
-   dcl-s index int(10:0);
-   dcl-s row int(10:0) inz(0);
-   dcl-s value varchar(32000);
-   dcl-s length int(10:0) based(length_ptr);
-
-   key = %upper(%trim(list));
-   list_xml.length = 0;
-      // the length, filled in at the end
-   append(list_xml : x'00000000');
-   append(list_xml : '<rows>');
-   for index = 1 to entry_count;
-      if entries(index).handle <> vars.handle or entries(index).list <> key or
-         entries(index).row = 0 or entries(index).row > max;
-         iter;
-      endif;
-      if entries(index).row <> row;
-         if row > 0;
-            append(list_xml : '</row>');
-         endif;
-         append(list_xml : '<row>');
-         row = entries(index).row;
-      endif;
-      value = storedValue(index);
-      append(list_xml : '<' + entries(index).name + '>');
-      appendLong(list_xml : escapeXml(value));
-      append(list_xml : '</' + entries(index).name + '>');
-   endfor;
-   if row > 0;
-      append(list_xml : '</row>');
-   endif;
-   append(list_xml : '</rows>');
-   length_ptr = list_xml.data;
-   length = list_xml.length - 4;
-   return list_xml.data;
-end-proc;
-
-
-   // appends text of up to 96000 characters, in pieces append takes
-dcl-proc appendLong;
-   dcl-pi *n;
-      buffer likeds(buffer_t);
-      text varchar(96000) const;
-   end-pi;
-   dcl-s start int(10:0) inz(1);
-
-   dow start <= %len(text);
-      append(buffer : %subst(text : start : %min(32766 : %len(text) - start + 1)));
-      start += 32766;
-   enddo;
-end-proc;
-
-
-dcl-proc escapeXml;
-   dcl-pi *n varchar(96000);
-      text varchar(32000) const;
-   end-pi;
-   dcl-s escaped varchar(96000);
-
-   if %scan('&' : text) + %scan('<' : text) + %scan('>' : text) = 0;
-      return text;
-   endif;
-   escaped = %scanrpl('&' : '&amp;' : text);
-   escaped = %scanrpl('<' : '&lt;' : escaped);
-   escaped = %scanrpl('>' : '&gt;' : escaped);
-   return escaped;
-end-proc;
-
-
-   // at the start of each request: the values of the one before are gone
-dcl-proc RPGAPI_clearVars export;
-   dcl-s index int(10:0);
-   dcl-s value pointer;
-
-   for index = 1 to entry_count;
-      if entries(index).value <> *null;
-         value = entries(index).value;
-         dealloc value;
-      endif;
-   endfor;
-   entry_count = 0;
-end-proc;
-
-
-   // the handle of a set of values, given one when it is first used
-dcl-proc handleOf;
-   dcl-pi *n int(10:0);
-      vars likeds(RPGAPI_Vars);
-   end-pi;
-
-   if vars.handle = 0;
-      last_handle += 1;
-      vars.handle = last_handle;
-   endif;
-   return vars.handle;
-end-proc;
-
-
-   // the entry holding a list's row count, added when create is on. 0 when
-   // there is none
-dcl-proc countEntry;
-   dcl-pi *n int(10:0);
-      handle int(10:0) const;
-      list varchar(64) const;
-      create ind const;
-   end-pi;
-   dcl-s index int(10:0);
-   dcl-s key varchar(64);
-
-   key = %upper(%trim(list));
-   for index = entry_count downto 1;
-      if entries(index).handle = handle and entries(index).list = key and
-         entries(index).row = 0;
-         return index;
-      endif;
-   endfor;
-   if not create;
-      return 0;
-   endif;
-   index = newEntry();
-   entries(index).handle = handle;
-   entries(index).list = key;
-   entries(index).row = 0;
-   entries(index).name = '';
-   entries(index).value = *null;
-   entries(index).length = 0;
-   return index;
-end-proc;
-
-
-   // sets a value, or a field of a row: replaced when the same one was set
-   // before in that row, added otherwise
-dcl-proc setEntry;
-   dcl-pi *n;
-      handle int(10:0) const;
-      list varchar(64) const;
-      row int(10:0) const;
-      name varchar(64) const;
-      value varchar(32000) value;
-   end-pi;
-   dcl-s index int(10:0);
-   dcl-s key varchar(64);
-   dcl-s list_key varchar(64);
-   dcl-s old_value pointer;
-
-   key = xmlName(name);
-   list_key = %upper(%trim(list));
-   for index = entry_count downto 1;
-      if entries(index).handle = handle and entries(index).list = list_key and
-         entries(index).row = row and entries(index).name = key;
-         leave;
-      endif;
-         // the fields of a row are together: stop at the row before it
-      if list_key <> '' and entries(index).handle = handle and
-         entries(index).list = list_key and entries(index).row < row;
-         index = 0;
-         leave;
-      endif;
-   endfor;
-   if index < 1;
-      index = newEntry();
-      entries(index).handle = handle;
-      entries(index).list = list_key;
-      entries(index).row = row;
-      entries(index).name = key;
-      entries(index).value = *null;
-   endif;
-   if entries(index).value <> *null;
-      old_value = entries(index).value;
-      dealloc old_value;
-      entries(index).value = *null;
-   endif;
-   entries(index).length = %len(value);
-   if %len(value) > 0;
-      entries(index).value = %alloc(%len(value));
-      memcpy(entries(index).value : %addr(value : *data) : %len(value));
-   endif;
-end-proc;
-
-
-   // the value of an entry
-dcl-proc storedValue;
-   dcl-pi *n varchar(32000);
-      index int(10:0) const;
-   end-pi;
-   dcl-s value varchar(32000);
-
-   if entries(index).length = 0 or entries(index).value = *null;
-      return '';
-   endif;
-   %len(value) = entries(index).length;
-   memcpy(%addr(value : *data) : entries(index).value : entries(index).length);
-   return value;
-end-proc;
-
-
-   // a name as an XML element: upper case, and characters XML does not
-   // allow in names (# @ $ and blanks, such as in some column names) as _
-dcl-proc xmlName;
-   dcl-pi *n varchar(64);
-      name varchar(64) const;
-   end-pi;
-   dcl-s key varchar(64);
-
-   key = %upper(%trim(name));
-   key = %xlate('#@$ -' : '_____' : key);
-   if key = '' or %check('ABCDEFGHIJKLMNOPQRSTUVWXYZ_' : %subst(key : 1 : 1)) > 0;
-      key = '_' + key;
-   endif;
-   return key;
-end-proc;
-
-
-dcl-proc newEntry;
-   dcl-pi *n int(10:0);
-   end-pi;
-      // an element of the array is longer than %size says: each is padded
-      // so that its pointer is aligned. Measured between two elements
-   dcl-ds pair likeds(var_t) dim(2);
-   dcl-s stride int(10:0);
-
-   if entry_count = entry_room;
-      if entry_room >= %elem(entries);
-         RPGAPI_log(RPGAPI_LOG_ERROR : 'more than ' + %char(%elem(entries)) +
-                    ' values and fields in one request');
-         send_program_message('CPF9898' : 'QCPFMSG   *LIBL' :
-                              'RPGAPI: too many view values in one request' :
-                              43 : '*ESCAPE' : '*' : 3 : message_key :
-                              message_error);
-      endif;
-      entry_room = %min(%elem(entries) : %max(entry_room * 2 : 1000));
-      stride = %addr(pair(2)) - %addr(pair(1));
-      if vars_ptr = *null;
-         vars_ptr = %alloc(entry_room * stride);
-      else;
-         vars_ptr = %realloc(vars_ptr : entry_room * stride);
-      endif;
-   endif;
-   entry_count += 1;
-   return entry_count;
-end-proc;
-
-
-   // ======================================================================
    // rendering
    // ======================================================================
 
 dcl-proc RPGAPI_render export;
    dcl-pi *n likeds(RPGAPI_Response);
       template varchar(1024) const;
-      vars likeds(RPGAPI_Vars) const options(*nopass : *omit);
+      data pointer value options(*nopass);
       response likeds(RPGAPI_Response) const options(*nopass);
    end-pi;
    dcl-ds answer likeds(RPGAPI_Response) inz;
-   dcl-ds values likeds(RPGAPI_Vars) inz;
+   dcl-s passed pointer inz(*null);
    dcl-s program char(21);
 
    if %parms() >= 3;
       answer = response;
    endif;
-   if %parms() >= 2 and %addr(vars) <> *null;
-      values = vars;
+   if %parms() >= 2;
+      passed = data;
    endif;
 
    program = viewProgram(template);
@@ -682,7 +195,7 @@ dcl-proc RPGAPI_render export;
 
       // inside a page that is being written: the view goes into it
    if RPGAPI_streaming();
-      callProgram(program : values);
+      callProgram(program : passed);
       return answer;
    endif;
 
@@ -693,7 +206,7 @@ dcl-proc RPGAPI_render export;
       RPGAPI_setHeader(answer : 'Content-Type' : 'text/html; charset=utf-8');
    endif;
    RPGAPI_beginResponse(answer);
-   callProgram(program : values);
+   callProgram(program : passed);
    RPGAPI_endResponse();
    return answer;
 end-proc;
@@ -703,7 +216,7 @@ end-proc;
 dcl-proc RPGAPI_includeView export;
    dcl-pi *n;
       template varchar(1024) const;
-      vars likeds(RPGAPI_Vars) const;
+      data pointer value;
    end-pi;
    dcl-s program char(21);
 
@@ -713,18 +226,18 @@ dcl-proc RPGAPI_includeView export;
                        view_error + ']');
       return;
    endif;
-   callProgram(program : vars);
+   callProgram(program : data);
 end-proc;
 
 
 dcl-proc callProgram;
    dcl-pi *n;
       program char(21) const;
-      vars likeds(RPGAPI_Vars) const;
+      data pointer value;
    end-pi;
 
    view_program = program;
-   callView(vars);
+   callView(data);
 end-proc;
 
 
@@ -757,6 +270,7 @@ dcl-proc viewProgram;
    dcl-s path varchar(1024);
    dcl-ds info likeds(FileStat);
    dcl-s index int(10:0);
+   dcl-s included int(10:0);
    dcl-s program char(21);
    dcl-s library char(10);
 
@@ -771,7 +285,7 @@ dcl-proc viewProgram;
    for index = 1 to cache_count;
       if cache(index).path = path;
          if cache(index).modified = info.modified and
-            cache(index).size = info.size;
+            cache(index).size = info.size and unchangedIncludes(index);
             return cache(index).program;
          endif;
          leave;
@@ -797,7 +311,39 @@ dcl-proc viewProgram;
    cache(index).modified = info.modified;
    cache(index).size = info.size;
    cache(index).program = program;
+   cache(index).include_count = include_count;
+   for included = 1 to include_count;
+      cache(index).includes(included) = includes(included);
+      cache(index).include_modified(included) = -1;
+      cache(index).include_size(included) = -1;
+      if stat(includes(included) : info) = 0;
+         cache(index).include_modified(included) = info.modified;
+         cache(index).include_size(included) = info.size;
+      endif;
+   endfor;
    return program;
+end-proc;
+
+
+   // whether none of the files a cached view includes has changed since
+dcl-proc unchangedIncludes;
+   dcl-pi *n ind;
+      index int(10:0) const;
+   end-pi;
+   dcl-ds info likeds(FileStat);
+   dcl-s included int(10:0);
+
+   for included = 1 to cache(index).include_count;
+      if stat(cache(index).includes(included) : info) < 0;
+         if cache(index).include_modified(included) <> -1;
+            return *off;
+         endif;
+      elseif info.modified <> cache(index).include_modified(included) or
+             info.size <> cache(index).include_size(included);
+         return *off;
+      endif;
+   endfor;
+   return *on;
 end-proc;
 
 
@@ -856,6 +402,7 @@ dcl-proc compileView;
    dcl-s has_sql ind;
    dcl-ds output likeds(buffer_t) inz(*likeds);
    dcl-s crc uns(10:0);
+   dcl-s included int(10:0);
 
    template_name = %subst(path : %scanr('/' : '/' + path));
    monitor;
@@ -864,9 +411,14 @@ dcl-proc compileView;
       return '';
    endmon;
 
-      // named after the template's file name and content
+      // named after the template's file name and content, and the content of
+      // the files it includes: a changed copybook is a different view
    crc = crc32(0 : %addr(template_name : *data) : %len(template_name));
    crc = crc32(crc : source_ptr : source_length);
+   findIncludes(%subst(path : 1 : %scanr('/' : path)));
+   for included = 1 to include_count;
+      crc = crcOfFile(crc : includes(included));
+   endfor;
    name = 'RV' + hex8(crc);
    program = %trim(library) + '/' + name;
    if not recompile and exists(program);
@@ -896,7 +448,8 @@ dcl-proc compileView;
    endmon;
 
    RPGAPI_log(RPGAPI_LOG_INFO : 'compiling view ' + path + ' into ' + program);
-   if not compile(name : library : source_path : has_sql : output);
+   if not compile(name : library : source_path : has_sql : output :
+                  %subst(path : 1 : %scanr('/' : path) - 1));
       freeGenerated(output);
       RPGAPI_log(RPGAPI_LOG_ERROR : 'view ' + path + ' does not compile: ' +
                  view_error);
@@ -917,21 +470,27 @@ dcl-proc compile;
       source_path varchar(100) const;
       has_sql ind const;
       output likeds(buffer_t) const;
+      directory varchar(1024) const;
    end-pi;
    dcl-s command varchar(3000);
    dcl-s compiled ind inz(*on);
 
    runCommand('DLTMOD MODULE(QTEMP/' + %trim(name) + ')' : *off);
+      // copybooks the view includes are found in the template's directory
    if has_sql;
+         // *LVL2: the SQL precompiler reads the copybooks too, for host
+         // variables declared in them
       command = 'CRTSQLRPGI OBJ(QTEMP/' + %trim(name) + ') SRCSTMF(''' +
                 source_path + ''') OBJTYPE(*MODULE) CVTCCSID(*JOB) ' +
                 'OPTION(*EVENTF) COMMIT(*NONE) CLOSQLCSR(*ENDMOD) ' +
                 'DATFMT(*ISO) TIMFMT(*ISO) DBGVIEW(*SOURCE) OUTPUT(*NONE) ' +
-                'COMPILEOPT(''TGTCCSID(*JOB)'')';
+                'RPGPPOPT(*LVL2) INCDIR(''' + directory + ''') ' +
+                'COMPILEOPT(''TGTCCSID(*JOB) INCDIR(''''' + directory +
+                ''''')'')';
    else;
       command = 'CRTRPGMOD MODULE(QTEMP/' + %trim(name) + ') SRCSTMF(''' +
                 source_path + ''') TGTCCSID(*JOB) OPTION(*EVENTF) ' +
-                'DBGVIEW(*SOURCE) OUTPUT(*NONE)';
+                'DBGVIEW(*SOURCE) OUTPUT(*NONE) INCDIR(''' + directory + ''')';
    endif;
    if not runCommand(command : *on);
       view_error = compileErrors(name : output);
@@ -1142,6 +701,111 @@ dcl-proc hex8;
 end-proc;
 
 
+   // the files the template in source includes with /include or /copy, in
+   // includes: a path in quotes or up to a blank, relative to directory
+   // unless it starts with /. Members (QRPGLESRC,NAME) are left out
+dcl-proc findIncludes;
+   dcl-pi *n;
+      directory varchar(1024) const;
+   end-pi;
+   dcl-s upper varchar(32000);
+   dcl-s at int(10:0) inz(0);
+   dcl-s start int(10:0);
+   dcl-s stop int(10:0);
+   dcl-s name varchar(1024);
+   dcl-s word varchar(10);
+   dcl-s position int(10:0) inz(1);
+   dcl-s piece int(10:0);
+
+   include_count = 0;
+      // in pieces of 32000: %upper works on a varchar
+   dow position <= source_length and include_count < %elem(includes);
+      piece = %min(32000 : source_length - position + 1);
+      upper = %upper(%subst(source : position : piece));
+      at = 0;
+      dow include_count < %elem(includes);
+         at = %scan('/' : upper : at + 1);
+         if at = 0;
+            leave;
+         endif;
+            // a / near the end, as in </html>, is not one
+         word = '';
+         if %subst(upper + '        ' : at : 8) = '/INCLUDE';
+            word = '/INCLUDE';
+         elseif %subst(upper + '     ' : at : 5) = '/COPY';
+            word = '/COPY';
+         endif;
+         if word = '';
+            iter;
+         endif;
+         start = at + %len(word);
+            // /COPYRIGHT is not a /COPY
+         if %subst(upper + ' ' : start : 1) <> ' ' and
+            %subst(upper + ' ' : start : 1) <> '''';
+            iter;
+         endif;
+         dow start <= %len(upper) and %subst(upper : start : 1) = ' ';
+            start += 1;
+         enddo;
+         if start > %len(upper);
+            leave;
+         endif;
+         if %subst(upper : start : 1) = '''';
+            stop = %scan('''' : upper : start + 1);
+            start += 1;
+         else;
+            stop = %scan(' ' : upper + ' ' : start);
+            if %scan(LF : upper : start) > 0 and %scan(LF : upper : start) < stop;
+               stop = %scan(LF : upper : start);
+            endif;
+         endif;
+         if stop <= start;
+            iter;
+         endif;
+            // the name as written, not upper-cased
+         name = %trim(%xlate(CR : ' ' : %subst(source : position + start - 1 :
+                                               stop - start)));
+         if name = '' or %scan(',' : name) > 0;
+            iter;
+         endif;
+         if %subst(name : 1 : 1) <> '/';
+            name = directory + name;
+         endif;
+         include_count += 1;
+         includes(include_count) = name;
+      enddo;
+      position += piece;
+   enddo;
+end-proc;
+
+
+   // the CRC32 of a file's bytes, on top of crc. Unchanged when it cannot be
+   // read: the compile names it
+dcl-proc crcOfFile;
+   dcl-pi *n uns(10:0);
+      crc uns(10:0) value;
+      path varchar(1024) const;
+   end-pi;
+   dcl-s descriptor int(10:0);
+   dcl-s buffer char(32768);
+   dcl-s count int(10:0);
+
+   descriptor = open(path : O_RDONLY);
+   if descriptor < 0;
+      return crc;
+   endif;
+   dow *on;
+      count = read(descriptor : %addr(buffer) : %size(buffer));
+      if count <= 0;
+         leave;
+      endif;
+      crc = crc32(crc : %addr(buffer) : count);
+   enddo;
+   close_port(descriptor);
+   return crc;
+end-proc;
+
+
    // for ERPG: compiles a template into library ahead of time. Returns the
    // program, or '' with why in errors
 dcl-proc RPGAPI_compileView export;
@@ -1232,7 +896,7 @@ end-proc;
 
 
    // the program's source: the template's declarations and statements in a
-   // main procedure that takes the values, and the procedures templates use
+   // main procedure that takes the pointer to the route's data
 dcl-proc generate;
    dcl-pi *n;
       output likeds(buffer_t);
@@ -1246,10 +910,8 @@ dcl-proc generate;
    append(output : 'ctl-opt main(RPGAPI_view) datfmt(*iso) timfmt(*iso)' + LF);
    append(output : '        option(*srcstmt : *nodebugio);' + LF);
    append(output : '   // compiled by RPGAPI from ' + template_name + ', and ' +
-                   'again when it changes' + LF);
-   append(output : 'dcl-ds RPGAPI_Vars qualified template;' + LF);
-   append(output : '   handle int(10:0);' + LF);
-   append(output : 'end-ds;' + LF);
+                   'again when it or a file' + LF);
+   append(output : '   // it includes changes' + LF);
    append(output : 'dcl-pr RPGAPI_write;' + LF);
    append(output : '   text varchar(32000) const;' + LF);
    append(output : 'end-pr;' + LF);
@@ -1259,61 +921,36 @@ dcl-proc generate;
    append(output : 'dcl-pr RPGAPI_escapeHtml varchar(192000);' + LF);
    append(output : '   text varchar(32000) const;' + LF);
    append(output : 'end-pr;' + LF);
-   append(output : 'dcl-pr RPGAPI_varValue varchar(32000);' + LF);
-   append(output : '   vars likeds(RPGAPI_Vars) const;' + LF);
-   append(output : '   name varchar(64) const;' + LF);
-   append(output : 'end-pr;' + LF);
-   append(output : 'dcl-pr RPGAPI_listCount int(10:0);' + LF);
-   append(output : '   vars likeds(RPGAPI_Vars) const;' + LF);
-   append(output : '   list varchar(64) const;' + LF);
-   append(output : 'end-pr;' + LF);
-   append(output : 'dcl-pr RPGAPI_listXml pointer;' + LF);
-   append(output : '   vars likeds(RPGAPI_Vars) const;' + LF);
-   append(output : '   list varchar(64) const;' + LF);
-   append(output : '   max int(10:0) const;' + LF);
-   append(output : 'end-pr;' + LF);
    append(output : 'dcl-pr RPGAPI_includeView;' + LF);
    append(output : '   template varchar(1024) const;' + LF);
-   append(output : '   vars likeds(RPGAPI_Vars) const;' + LF);
+   append(output : '   data pointer value;' + LF);
    append(output : 'end-pr;' + LF);
-   append(output : 'dcl-ds RPGAPI_view_vars likeds(RPGAPI_Vars);' + LF);
-   append(output : 'dcl-s RPGAPI_list_xml varchar(16000000:4) ' +
-                   'based(RPGAPI_list_xml_ptr);' + LF);
-   append(output : 'dcl-ds RPGAPI_view_status psds qualified;' + LF);
-   append(output : '   xml_elements int(20:0) pos(372);' + LF);
-   append(output : 'end-ds;' + LF);
+   append(output : '   // the data the route passed to RPGAPI_render: the view ' +
+                   'bases its data' + LF);
+   append(output : '   // structure on it' + LF);
+   append(output : 'dcl-s RPGAPI_data pointer;' + LF);
    append(output : LF);
    append(output : 'dcl-proc RPGAPI_view;' + LF);
    append(output : '   dcl-pi *n;' + LF);
-   append(output : '      RPGAPI_values likeds(RPGAPI_Vars) const;' + LF);
+   append(output : '      RPGAPI_passed pointer const;' + LF);
    append(output : '   end-pi;' + LF);
    appendBuffer(output : declarations);
-   append(output : '   RPGAPI_view_vars = RPGAPI_values;' + LF);
+   append(output : '   RPGAPI_data = RPGAPI_passed;' + LF);
    appendBuffer(output : statements);
    append(output : 'end-proc;' + LF);
    append(output : LF);
-   append(output : '   // a value the route set' + LF);
-   append(output : 'dcl-proc RPGAPI_getVar;' + LF);
-   append(output : '   dcl-pi *n varchar(32000);' + LF);
-   append(output : '      name varchar(64) const;' + LF);
-   append(output : '   end-pi;' + LF);
-   append(output : '   return RPGAPI_varValue(RPGAPI_view_vars : name);' + LF);
-   append(output : 'end-proc;' + LF);
-   append(output : LF);
-   append(output : '   // the number of rows of a list the route set' + LF);
-   append(output : 'dcl-proc RPGAPI_rows;' + LF);
-   append(output : '   dcl-pi *n int(10:0);' + LF);
-   append(output : '      list varchar(64) const;' + LF);
-   append(output : '   end-pi;' + LF);
-   append(output : '   return RPGAPI_listCount(RPGAPI_view_vars : list);' + LF);
-   append(output : 'end-proc;' + LF);
-   append(output : LF);
-   append(output : '   // another view, written here' + LF);
+   append(output : '   // another view, written here, with this one''s data or ' +
+                   'other data' + LF);
    append(output : 'dcl-proc RPGAPI_include;' + LF);
    append(output : '   dcl-pi *n;' + LF);
    append(output : '      template varchar(1024) const;' + LF);
+   append(output : '      data pointer value options(*nopass);' + LF);
    append(output : '   end-pi;' + LF);
-   append(output : '   RPGAPI_includeView(template : RPGAPI_view_vars);' + LF);
+   append(output : '   if %parms() >= 2;' + LF);
+   append(output : '      RPGAPI_includeView(template : data);' + LF);
+   append(output : '   else;' + LF);
+   append(output : '      RPGAPI_includeView(template : RPGAPI_data);' + LF);
+   append(output : '   endif;' + LF);
    append(output : 'end-proc;' + LF);
    freeGenerated(declarations);
    freeGenerated(statements);
@@ -1599,97 +1236,16 @@ dcl-proc addCode;
          start = break_at + 1;
       endif;
       text = %trim(%xlate(CR : ' ' : text));
-      if text <> '';
-         addStatement(buffer : text : line);
+      if text <> '' and %subst(text : 1 : 1) = '/';
+            // a directive (/include, /copy, /if...): at the start of its
+            // line, with the template line on the line before
+         append(buffer : '   // ' + template_name + ':' + %char(line) + LF);
+         append(buffer : text + LF);
+      elseif text <> '';
+         emit(buffer : '   ' + text : line);
       endif;
       line += 1;
    enddo;
-end-proc;
-
-
-   // a line of code from a tag. target = RPGAPI_getList(list); becomes the
-   // XML-INTO that fills the array target, a dim(*var) array of a data
-   // structure, from the list, with as many elements as there are rows
-dcl-proc addStatement;
-   dcl-pi *n;
-      buffer likeds(buffer_t);
-      text varchar(32000) const;
-      line int(10:0) const;
-   end-pi;
-   dcl-s upper varchar(32000);
-   dcl-s call_at int(10:0);
-   dcl-s equals_at int(10:0);
-   dcl-s start int(10:0);
-   dcl-s close_at int(10:0);
-   dcl-s end_at int(10:0);
-   dcl-s depth int(10:0) inz(1);
-   dcl-s in_quotes ind inz(*off);
-   dcl-s position int(10:0);
-   dcl-s character char(1);
-   dcl-s target varchar(1000);
-   dcl-s list varchar(1000);
-
-   upper = %upper(text);
-   call_at = %scan('RPGAPI_GETLIST(' : upper);
-   if call_at = 0;
-      emit(buffer : '   ' + text : line);
-      return;
-   endif;
-
-      // the statement: after the ; before it, up to the ; after the call
-   equals_at = %scanr('=' : text : 1 : call_at);
-   start = %scanr(';' : text : 1 : call_at) + 1;
-   for position = call_at + 15 to %len(text);
-      character = %subst(text : position : 1);
-      if character = '''';
-         in_quotes = not in_quotes;
-      elseif not in_quotes and character = '(';
-         depth += 1;
-      elseif not in_quotes and character = ')';
-         depth -= 1;
-         if depth = 0;
-            close_at = position;
-            leave;
-         endif;
-      endif;
-   endfor;
-   if close_at > 0;
-      end_at = %scan(';' : text : close_at);
-   endif;
-   if equals_at < start or close_at = 0 or end_at = 0;
-      generateFailed(template_name + ':' + %char(line) + ': use RPGAPI_getList ' +
-                     'on a line of its own, as array = RPGAPI_getList(name);');
-   endif;
-   target = %trim(%subst(text : start : equals_at - start));
-   list = %trim(%subst(text : call_at + 15 : close_at - call_at - 15));
-   if target = '' or list = '';
-      generateFailed(template_name + ':' + %char(line) + ': RPGAPI_getList ' +
-                     'needs an array to fill and a list name');
-   endif;
-
-   if start > 1;
-      emit(buffer : '   ' + %trim(%subst(text : 1 : start - 1)) : line);
-   endif;
-   emit(buffer : '   %elem(' + target + ') = %elem(' + target + ' : *max);' :
-        line);
-      // a field a row does not have (a null) keeps the subfield's default,
-      // not what grew into the array
-   emit(buffer : '   clear ' + target + ';' : line);
-   emit(buffer : '   if RPGAPI_listCount(RPGAPI_view_vars : ' + list +
-                 ') > 0;' : line);
-   emit(buffer : '      RPGAPI_list_xml_ptr = RPGAPI_listXml(RPGAPI_view_vars : ' +
-                 list + ' : %elem(' + target + ' : *max));' : line);
-   emit(buffer : '      xml-into ' + target + ' %xml(RPGAPI_list_xml :' : line);
-   emit(buffer : '         ''path=rows/row case=any allowmissing=yes ' +
-                 'allowextra=yes'');' : line);
-   emit(buffer : '      %elem(' + target + ') = ' +
-                 'RPGAPI_view_status.xml_elements;' : line);
-   emit(buffer : '   else;' : line);
-   emit(buffer : '      %elem(' + target + ') = 0;' : line);
-   emit(buffer : '   endif;' : line);
-   if end_at < %len(text);
-      addStatement(buffer : %trim(%subst(text : end_at + 1)) : line);
-   endif;
 end-proc;
 
 

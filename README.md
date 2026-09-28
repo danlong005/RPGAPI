@@ -28,8 +28,8 @@ server, and each request is handed to your procedure as a data structure.
 - gzip compression of text and JSON responses, with the zlib that comes with
   IBM i
 - HTML pages from views: EJS-style templates with RPG in the tags (`<% %>`,
-  `<%= %>` escaped), given values and lists (straight from SQL) by the route,
-  and compiled by RPGAPI when they are first used or have changed
+  `<%= %>` escaped), given the route's data structure by its address, and
+  compiled by RPGAPI when they are first used or have changed
 - Several jobs serving one port, replaced when one ends, keep-alive
   connections, timeouts so one slow client cannot hold a job, and a controlled
   `ENDJOB` or `RPGAPI_shutdown()` that lets requests in progress finish
@@ -50,7 +50,7 @@ See the [Quick Start](QuickStart.md) to write and run a first app, and the
 - For gzip compression, the service program binds to `QSYS/QZIPZLIB`, the
   zlib that comes with IBM i (behind IBM's zip APIs); nothing to install
 - For views, the ILE RPG compiler on the system that compiles them (usually
-  where the app runs), and SQL for `RPGAPI_setList`
+  where the app runs)
 
 ## Installation
 

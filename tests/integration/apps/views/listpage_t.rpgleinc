@@ -1,0 +1,12 @@
+**free
+   // the data of views/listpage.erpg and views/item.erpg, shared with the
+   // route that renders them
+dcl-ds item_t qualified template;
+   id int(10:0);
+   label varchar(100);
+end-ds;
+dcl-ds listpage_t qualified template;
+   title varchar(100);
+   count int(10:0);
+   items likeds(item_t) dim(2000);
+end-ds;

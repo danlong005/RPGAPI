@@ -84,21 +84,10 @@ end-pr;
 dcl-pr RPGAPI_ownLibrary char(10);
 end-pr;
 
-   // for the RPGAPI module and compiled views, from the views module
-dcl-pr RPGAPI_clearVars;
-end-pr;
-dcl-pr RPGAPI_varValue varchar(32000);
-   vars likeds(RPGAPI_Vars) const;
-   name varchar(64) const;
-end-pr;
-dcl-pr RPGAPI_listXml pointer;
-   vars likeds(RPGAPI_Vars) const;
-   list varchar(64) const;
-   max int(10:0) const;
-end-pr;
+   // for compiled views, from the views module: another view, in place
 dcl-pr RPGAPI_includeView;
    template varchar(1024) const;
-   vars likeds(RPGAPI_Vars) const;
+   data pointer value;
 end-pr;
    // for ERPG: compiles a template into a library ahead of time
 dcl-pr RPGAPI_compileView char(21);

@@ -1,0 +1,16 @@
+**free
+   // the data of views/guestbook.erpg, shared with guestbook.rpgle, which
+   // fills it and renders the view: the same data structure on both sides
+dcl-ds note_t qualified template;
+   name varchar(50);
+   message varchar(500);
+   posted timestamp;
+end-ds;
+dcl-ds guestbook_t qualified template;
+   title varchar(100);
+      // what is wrong with the form just sent, or ''
+   problem varchar(100);
+   count int(10:0);
+      // newest first
+   notes likeds(note_t) dim(100);
+end-ds;

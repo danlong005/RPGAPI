@@ -1186,96 +1186,94 @@ see Large responses and streaming.
 
 ### Views (HTML templates)
 A view is a page written as HTML with RPG inside tags, the way Express apps
-use EJS templates. A route passes it values and lists and returns
-`RPGAPI_render`, and the page it makes is streamed to the browser:
+use EJS templates. The route fills a data structure the usual way (a fetch, a
+`CHAIN`, a loop) and passes its address to `RPGAPI_render`; the view bases
+the same data structure on that address and writes the page, which is
+streamed to the browser. It is like calling a program with a parameter.
+
+Put the data structure in a copybook next to the views, so the route and the
+view are sure to agree on it (`views/customers_t.rpgleinc`):
 ```
+**free
+dcl-ds customer_t qualified template;
+   name varchar(50);
+   city varchar(50);
+   balance packed(11:2);
+end-ds;
+dcl-ds customers_t qualified template;
+   title varchar(100);
+   count int(10:0);
+   customers likeds(customer_t) dim(500);
+end-ds;
+```
+The route:
+```
+/include 'customers_t.rpgleinc'
+
 dcl-proc listCustomers;
    dcl-pi *n likeds(RPGAPI_Response);
       request likeds(RPGAPI_Request) const;
    end-pi;
-   dcl-ds vars likeds(RPGAPI_Vars) inz;
+   dcl-ds model likeds(customers_t) inz;
 
-   RPGAPI_setVar(vars : 'title' : 'Customers');
-   RPGAPI_setList(vars : 'customers' :
-      'select name, city, balance from customers where state = ?' :
-      RPGAPI_getQueryParam(request : 'state'));
-   return RPGAPI_render('customers.erpg' : vars);
+   model.title = 'Customers';
+   // ...fill model.customers and model.count...
+   return RPGAPI_render('customers.erpg' : %addr(model));
 end-proc;
 ```
-The view, `customers.erpg`:
+The view, `views/customers.erpg`:
 ```
-<%! dcl-ds customer_t qualified template;
-       name varchar(50);
-       city varchar(50);
-       balance packed(11:2);
-     end-ds;
-     dcl-ds customers likeds(customer_t) dim(*var : 500);
-     dcl-ds customer likeds(customer_t); -%>
-<% customers = RPGAPI_getList('customers'); -%>
-<h1><%= RPGAPI_getVar('title') %></h1>
+<%! /include 'customers_t.rpgleinc'
+     dcl-ds model likeds(customers_t) based(RPGAPI_data);
+     dcl-s i int(10:0); -%>
+<h1><%= model.title %></h1>
 <ul>
-<% for-each customer in customers; -%>
-  <li><%= customer.name %>, <%= customer.city %>: <%= customer.balance %></li>
+<% for i = 1 to model.count; -%>
+  <li><%= model.customers(i).name %>, <%= model.customers(i).city %>: <%= model.customers(i).balance %></li>
 <% endfor; -%>
 </ul>
 ```
+`RPGAPI_data` is the pointer the route passed. The view reads the route's
+data in place, with its own types: nothing is copied or converted. The data
+stays where it is while the page is written, since the view runs inside the
+`RPGAPI_render` call. (Call it `model`, or anything but `page`, which is a
+reserved word in RPG.)
 
 RPG cannot run code it reads while it runs, so RPGAPI compiles each view into
-a program the first time it is asked for, and again whenever the template
-changes: edit a view and refresh the page. That first request takes a few
-seconds; the rest just call the program.
+a program the first time it is asked for, and again whenever the template or
+a copybook it includes changes: edit a view and refresh the page. That first
+request takes a few seconds; the rest just call the program.
 
 #### Tags
 | Tag | |
 | --- | --- |
-| `<% code %>` | RPG statements: `for-each`, `if`, `dow`, `exec sql`, calls. Each ends with `;` as usual |
+| `<% code %>` | RPG statements: `for`, `if`, `dow`, `exec sql`, calls. Each ends with `;` as usual |
 | `<%= expr %>` | A value, HTML-escaped: `&`, `<`, `>`, `"` and `'` become entities, so a value from a user or a table cannot add tags or scripts to the page. Numbers and dates are formatted with `%char` |
 | `<%- expr %>` | A value as it is, for HTML you built and trust |
 | `<%# text %>` | A comment, left out of the page |
-| `<%! decls %>` | Declarations: `dcl-s`, `dcl-ds`, `dcl-c`. They go first in the view's program wherever they are in the template |
+| `<%! decls %>` | Declarations: `/include` of a copybook, `dcl-ds ... based(RPGAPI_data)`, `dcl-s`, `dcl-c`. They go first in the view's program wherever they are in the template |
 | `<%%` | A literal `<%` |
 | `-%>` | Ends any tag and leaves out the line break after it, so a line holding only a tag leaves no blank line in the page |
 
 Everything else is text, written as it is.
 
-#### Values and lists
-The route puts what the view needs into an `RPGAPI_Vars`, by name. Declare it
-with `inz` in the procedure; it lasts until the request ends.
-
-| In the route | In the view |
-| --- | --- |
-| `RPGAPI_setVar(vars : 'title' : text)` | `RPGAPI_getVar('title')`, as text: numbers with `%dec`, dates with `%date` |
-| `RPGAPI_setList(vars : 'rows' : sql : value1? ... value5?)` | `array = RPGAPI_getList('rows');` |
-| `RPGAPI_addRow(vars : 'rows')`, then `RPGAPI_setField(vars : 'rows' : 'name' : text)` | the same |
-| `RPGAPI_listCount(vars : 'rows')` | `RPGAPI_rows('rows')` |
-
-A list is rows of named fields:
-- `RPGAPI_setList` runs an SQL query and makes a row of each row it returns,
-  with a field for each column, named after the column (`select cust_name as
-  name` names it). Values for `?` markers in the statement come after it, up
-  to five, so what a user typed never becomes part of the SQL. A statement
-  that fails ends the route with escape message `CPF9898` naming the SQL
-  state, which is answered with a 500.
-- `RPGAPI_addRow` and `RPGAPI_setField` build one in RPG, a row at a time, for
-  data that does not come from one query.
-
-In the view, `array = RPGAPI_getList('rows');` fills an array of a data
-structure you declare, with `dim(*var : max)`: fields go into the subfields of
-the same name (in any case), converted to their types, so `balance` is a
-number and `since` a date. Afterwards `%elem(array)` is the number of rows,
-and `for-each` goes through them. Fields without a subfield are ignored,
-subfields without a field (and nulls) keep their default, and a list longer
-than `max` is cut to it. Keep the statement on a line of its own.
-
-#### Views in views, SQL, and responses
-- `<% RPGAPI_include('pagetop.erpg'); -%>` writes another view in place, with
-  the same values: shared headers and footers.
+#### The data, and views in views
+- `RPGAPI_render(template : %addr(ds) : response?)`: the data is any data
+  structure, variable or array element; a view that needs none leaves it out
+  (`RPGAPI_render('about.erpg')`). `response` gives the page the route's
+  status and headers, such as a 400, a cookie, or a `Content-Type` other than
+  `text/html; charset=utf-8`.
+- A pointer carries no type: if the route and the view declared the data
+  differently, the view would read the wrong bytes, as with a program called
+  with the wrong parameters. The shared copybook is what prevents it, and a
+  view is compiled again when its copybook changes. Change the route's
+  program too (recompile it) when a copybook changes.
+- `<% RPGAPI_include('pagetop.erpg'); -%>` writes another view in place,
+  with the same data. `RPGAPI_include('row.erpg' : %addr(model.customers(i)))`
+  gives it other data: part of this view's, such as the title or one row.
 - A view can run its own SQL too, `exec sql` and all; it is then compiled with
   `CRTSQLRPGI`. Close the cursors it opens.
-- `RPGAPI_render(template : vars : response)` sends the view with the status
-  and headers of `response`, such as a cookie, or a `Content-Type` other than
-  `text/html; charset=utf-8`. With compression on, views are gzipped like any
-  text.
+- With compression on, views are gzipped like any text.
 
 #### Where views are, and where they are compiled
 ```
@@ -1283,9 +1281,10 @@ RPGAPI_setViews(app : '/home/me/myapp/views');            // templates
 RPGAPI_setViews(app : '/home/me/myapp/views' : 'MYVIEWS'); // and a library
 ```
 A template path that does not start with `/` is relative to that directory
-(the job's current directory without it). The programs go into the library
-named, or the library of the app's program, and are named `RV` and 8 hex
-digits, after the template's file name and content. The job needs the ILE RPG
+(the job's current directory without it), and so are the copybooks a view
+includes. The programs go into the library named, or the library of the
+app's program, and are named `RV` and 8 hex digits, after the template's
+file name and content and its copybooks' content. The job needs the ILE RPG
 compiler (5770WDS) and authority to create programs there. Old versions are
 not deleted; any `RV...` program can be, and is compiled again when needed.
 
@@ -1310,20 +1309,17 @@ that fails while it runs ends the page there, as a streamed response does.
 - Templates are UTF-8, with or without a byte order mark; Windows line breaks
   are fine. Their text goes through the job's CCSID, as everything written
   with `RPGAPI_write` does.
-- A view's program has its own variables, so it cannot see the route's: pass
-  what it needs with `RPGAPI_setVar` and `RPGAPI_setList`.
 - `RPGAPI_writeHtml(text)` and `RPGAPI_escapeHtml(text)`, which `<%= %>` uses,
   work in any streamed response.
 - Not in this version: layouts, EJS's `<%_ _%>`, and passing a view the
-  request itself.
+  request itself (pass what it needs in the data).
 
 Two complete apps show views at work:
-- [examples/html-page.rpgle](examples/html-page.rpgle): a library's tables,
-  a list straight from the SQL catalog with `RPGAPI_setList`, in a view that
-  includes another.
-- [examples/guestbook.rpgle](examples/guestbook.rpgle): no SQL. The route
-  builds its list from an RPG array with `RPGAPI_addRow` and
-  `RPGAPI_setField`; the view has `if`/`else`, a form it posts back to, what
+- [examples/html-page.sqlrpgle](examples/html-page.sqlrpgle): a library's
+  tables, fetched from the SQL catalog into the route's data structure, in a
+  view that includes another for the top of the page.
+- [examples/guestbook.rpgle](examples/guestbook.rpgle): no SQL. The notes are
+  an RPG array; the view has `if`/`else`, a form it posts back to, what
   visitors typed escaped, and a 400 with the page when a field is missing
   (`RPGAPI_render`'s `response`).
 
@@ -1530,11 +1526,7 @@ include it.
 | `RPGAPI_savePart(request : path)` | Write the rest of the current part to an IFS file |
 | `RPGAPI_beginResponse(response : length?)` | Send the status and headers of a streamed response |
 | `RPGAPI_write(text)` | Add text to a streamed response |
-| `RPGAPI_render(template : vars? : response?)` | Send a view: a template of HTML with RPG in it; see Views |
-| `RPGAPI_setVar(vars : name : value)` | A value for a view |
-| `RPGAPI_setList(vars : name : sql : values?)` | A list for a view, from an SQL query |
-| `RPGAPI_addRow(vars : name)`, `RPGAPI_setField(vars : name : field : value)` | A list for a view, row by row |
-| `RPGAPI_listCount(vars : name)` | The rows of a list |
+| `RPGAPI_render(template : %addr(data)? : response?)` | Send a view: a template of HTML with RPG in it, given the route's data structure; see Views |
 | `RPGAPI_setViews(app : directory : library?)` | Where views are, and where they are compiled; see Views |
 | `RPGAPI_writeHtml(text)` | Add text to a streamed response, HTML-escaped |
 | `RPGAPI_escapeHtml(text)` | Text with `& < > " '` as HTML entities |

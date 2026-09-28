@@ -1,4 +1,4 @@
-"""The HTML page example (examples/html-page.rpgle): a list from the SQL
+"""The HTML page example (examples/html-page.sqlrpgle): a list from the SQL
 catalog rendered by views/tablelist.erpg, which includes views/pagetop.erpg,
 compiled at runtime and gzipped for a browser."""
 from common import *

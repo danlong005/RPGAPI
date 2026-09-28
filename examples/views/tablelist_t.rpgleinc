@@ -1,0 +1,14 @@
+**free
+   // the data of views/tablelist.erpg, shared with html-page.sqlrpgle, which
+   // fills it and renders the view: the same data structure on both sides
+dcl-ds table_t qualified template;
+   name varchar(128);
+   kind varchar(20);
+   text varchar(50);
+   changed timestamp;
+end-ds;
+dcl-ds tablelist_t qualified template;
+   title varchar(100);
+   count int(10:0);
+   tables likeds(table_t) dim(5000);
+end-ds;

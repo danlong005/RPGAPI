@@ -893,8 +893,6 @@ dcl-proc RPGAPI_startRequest;
    RPGAPI_output_length = 0;
    RPGAPI_gzip = *off;
    RPGAPI_vary_encoding = *off;
-      // the values views were given for the request before
-   RPGAPI_clearVars();
 end-proc;
 
 

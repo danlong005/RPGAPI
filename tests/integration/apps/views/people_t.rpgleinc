@@ -1,0 +1,12 @@
+**free
+   // the data of views/people.erpg: numbers and dates, read in place
+dcl-ds person_t qualified template;
+   id int(10:0);
+   name varchar(50);
+   balance packed(11:2);
+   since date;
+end-ds;
+dcl-ds people_t qualified template;
+   count int(10:0);
+   people likeds(person_t) dim(3);
+end-ds;

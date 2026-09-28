@@ -1,20 +1,14 @@
-<%# the tables and views of a library: the list the route made from SQL -%>
-<%! dcl-ds table_t qualified template;
-       name varchar(128);
-       kind varchar(20);
-       text varchar(50);
-       changed timestamp;
-     end-ds;
-     dcl-ds tables likeds(table_t) dim(*var : 5000);
-     dcl-ds tbl likeds(table_t); -%>
-<% tables = RPGAPI_getList('tables'); -%>
-<% RPGAPI_include('pagetop.erpg'); -%>
+<%# the tables and views of a library, from the route's data structure -%>
+<%! /include 'tablelist_t.rpgleinc'
+     dcl-ds model likeds(tablelist_t) based(RPGAPI_data);
+     dcl-s i int(10:0); -%>
+<% RPGAPI_include('pagetop.erpg' : %addr(model.title)); -%>
 <table>
   <tr><th>Name</th><th>Type</th><th>Description</th><th>Changed</th></tr>
-<% for-each tbl in tables; -%>
-  <tr><td><%= tbl.name %></td><td><%= tbl.kind %></td><td><%= tbl.text %></td><td><%= %date(tbl.changed) %></td></tr>
+<% for i = 1 to model.count; -%>
+  <tr><td><%= model.tables(i).name %></td><td><%= model.tables(i).kind %></td><td><%= model.tables(i).text %></td><td><%= %date(model.tables(i).changed) %></td></tr>
 <% endfor; -%>
 </table>
-<p><%= %elem(tables) %> tables and views</p>
+<p><%= model.count %> tables and views</p>
 </body>
 </html>

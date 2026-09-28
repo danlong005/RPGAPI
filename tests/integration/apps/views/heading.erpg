@@ -1,1 +1,2 @@
-<h1><%= RPGAPI_getVar('title') %></h1>
+<%! dcl-s title varchar(100) based(RPGAPI_data); -%>
+<h1><%= title %></h1>

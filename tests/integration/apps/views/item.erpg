@@ -1,0 +1,3 @@
+<%! /include 'listpage_t.rpgleinc'
+     dcl-ds item likeds(item_t) based(RPGAPI_data); -%>
+  <li id="row<%= item.id %>"><%= item.label %></li>

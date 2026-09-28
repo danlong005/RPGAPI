@@ -1,30 +1,25 @@
-<%# the guestbook: a form, a problem with the last one sent if there was
-    one, and the notes the route passed as a list, newest first -%>
-<%! dcl-ds note_t qualified template;
-       name varchar(50);
-       message varchar(500);
-       posted timestamp;
-     end-ds;
-     dcl-ds notes likeds(note_t) dim(*var : 100);
-     dcl-ds note likeds(note_t); -%>
-<% notes = RPGAPI_getList('notes'); -%>
-<% RPGAPI_include('pagetop.erpg'); -%>
-<% if RPGAPI_getVar('problem') <> ''; -%>
-<p style="color: #b00"><%= RPGAPI_getVar('problem') %></p>
+<%# the guestbook: a form, what is wrong with the last one sent if there is
+    something, and the notes, newest first -%>
+<%! /include 'guestbook_t.rpgleinc'
+     dcl-ds model likeds(guestbook_t) based(RPGAPI_data);
+     dcl-s i int(10:0); -%>
+<% RPGAPI_include('pagetop.erpg' : %addr(model.title)); -%>
+<% if model.problem <> ''; -%>
+<p style="color: #b00"><%= model.problem %></p>
 <% endif; -%>
 <form method="post" action="/guestbook">
   <p><label>Name <input name="name" maxlength="50"></label></p>
   <p><label>Message <textarea name="message" maxlength="500"></textarea></label></p>
   <p><button>Sign</button></p>
 </form>
-<% if %elem(notes) = 0; -%>
+<% if model.count = 0; -%>
 <p>No one has signed yet. Be the first!</p>
 <% else; -%>
-<p><%= %elem(notes) %> <%= RPGAPI_getVar('noun') %> so far</p>
-<% for-each note in notes; -%>
+<p><%= model.count %> <% if model.count = 1; %>note<% else; %>notes<% endif; %> so far</p>
+<% for i = 1 to model.count; -%>
 <blockquote>
-  <p><%= note.message %></p>
-  <footer>&mdash; <%= note.name %>, <%= %date(note.posted) %> at <%= %char(%time(note.posted) : *hms:) %></footer>
+  <p><%= model.notes(i).message %></p>
+  <footer>&mdash; <%= model.notes(i).name %>, <%= %date(model.notes(i).posted) %> at <%= %char(%time(model.notes(i).posted) : *hms:) %></footer>
 </blockquote>
 <% endfor; -%>
 <% endif; -%>

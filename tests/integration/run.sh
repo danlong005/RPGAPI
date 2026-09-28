@@ -64,7 +64,7 @@ compile() {
 # copies the templates in apps/views to WORK/views, where the templates app
 # finds them and the client adds to them. They are compiled when first used
 views() {
-  rm -rf "$WORK/views" && mkdir -p "$WORK/views" && cp "$TESTS"/apps/views/*.erpg "$WORK/views/"
+  rm -rf "$WORK/views" && mkdir -p "$WORK/views" && cp "$TESTS"/apps/views/*.erpg "$TESTS"/apps/views/*.rpgleinc "$WORK/views/"
 }
 
 # compiles an example from examples/ as $2, only to check that it builds
@@ -72,8 +72,8 @@ compile_example() {
   file=$1 object=$2
   cl "CHGATR OBJ('$REPO/examples/*') ATR(*CCSID) VALUE(1252)" >/dev/null
   case $file in
-    *.sqlrpgle) command="CRTSQLRPGI OBJ($LIB/$object) SRCSTMF('$REPO/examples/$file') CVTCCSID(*JOB) COMPILEOPT('INCDIR(''$REPO/qrpglesrc'') TGTCCSID(*JOB)')" ;;
-    *)          command="CRTBNDRPG PGM($LIB/$object) SRCSTMF('$REPO/examples/$file') INCDIR('$REPO/qrpglesrc') TGTCCSID(*JOB)" ;;
+    *.sqlrpgle) command="CRTSQLRPGI OBJ($LIB/$object) SRCSTMF('$REPO/examples/$file') CVTCCSID(*JOB) INCDIR('$REPO/examples/views') COMPILEOPT('INCDIR(''$REPO/qrpglesrc'' ''$REPO/examples/views'') TGTCCSID(*JOB)')" ;;
+    *)          command="CRTBNDRPG PGM($LIB/$object) SRCSTMF('$REPO/examples/$file') INCDIR('$REPO/qrpglesrc' '$REPO/examples/views') TGTCCSID(*JOB)" ;;
   esac
   cl "DLTOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null
   $QSH -c "liblist -a $LIB >/dev/null 2>&1; system \"$command\"" </dev/null > "$WORK/compile-$object.log" 2>&1
@@ -95,8 +95,8 @@ example_suite() {
   cl "CHGATR OBJ('$WORK/$file') ATR(*CCSID) VALUE(1252)" >/dev/null
   cl "DLTOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null
   case $file in
-    *.sqlrpgle) command="CRTSQLRPGI OBJ($LIB/$object) SRCSTMF('$WORK/$file') CVTCCSID(*JOB) $options COMPILEOPT('INCDIR(''$REPO/qrpglesrc'') TGTCCSID(*JOB)')" ;;
-    *)          command="CRTBNDRPG PGM($LIB/$object) SRCSTMF('$WORK/$file') INCDIR('$REPO/qrpglesrc') TGTCCSID(*JOB)" ;;
+    *.sqlrpgle) command="CRTSQLRPGI OBJ($LIB/$object) SRCSTMF('$WORK/$file') CVTCCSID(*JOB) INCDIR('$REPO/examples/views') $options COMPILEOPT('INCDIR(''$REPO/qrpglesrc'' ''$REPO/examples/views'') TGTCCSID(*JOB)')" ;;
+    *)          command="CRTBNDRPG PGM($LIB/$object) SRCSTMF('$WORK/$file') INCDIR('$REPO/qrpglesrc' '$REPO/examples/views') TGTCCSID(*JOB)" ;;
   esac
   $QSH -c "liblist -a $LIB $extra >/dev/null 2>&1; system \"$command\"" </dev/null > "$WORK/compile-$object.log" 2>&1
   if ! cl "CHKOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null; then
@@ -284,7 +284,7 @@ for suite_name in $SUITES; do
     handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
     compress)  compile compress && suite compress ";;;$T;" compress ;;
     templates) views && compile templates && suite templates ";;;$T;" templates
-               EXAMPLE_VIEWS="$REPO/examples/views" example_suite html-page.rpgle EXHTML htmlpage
+               EXAMPLE_VIEWS="$REPO/examples/views" example_suite html-page.sqlrpgle EXHTML htmlpage
                EXAMPLE_VIEWS="$REPO/examples/views" example_suite guestbook.rpgle EXGUEST guestbook ;;
     examples)  compile_example hello.rpgle EXHELLO
                compile_example notes-api.sqlrpgle EXNOTES
@@ -294,7 +294,7 @@ for suite_name in $SUITES; do
                compile_example upload.rpgle EXUPLOAD
                compile_example production.rpgle EXPROD
                compile_example memberships.sqlrpgle EXMEMBERS
-               compile_example html-page.rpgle EXHTML
+               compile_example html-page.sqlrpgle EXHTML
                compile_example guestbook.rpgle EXGUEST ;;
     sqljson)   example_suite notes-api.sqlrpgle EXNOTES notes
                example_suite memberships.sqlrpgle EXMEMBERS memberships ;;

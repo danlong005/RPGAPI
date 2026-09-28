@@ -1,14 +1,16 @@
 **free
-   // A guestbook from a view, without SQL: the notes are kept in an RPG array,
-   // and the route passes them to views/guestbook.erpg as a list, a row at a
-   // time. The view loops over them, shows whatever visitors typed escaped (so
-   // no one can add HTML or scripts to the page), and includes
-   // views/pagetop.erpg for the top of the page. A form with a field missing
-   // is answered 400, with the page and what is wrong.
+   // A guestbook from a view, without SQL: the notes are kept in an RPG array.
+   // To show them, the route fills the page's data structure (newest first)
+   // and renders views/guestbook.erpg with its address; the view bases the
+   // same data structure (views/guestbook_t.rpgleinc, included by both) on it,
+   // loops over the notes, shows whatever visitors typed escaped (so no one
+   // can add HTML or scripts to the page), and includes views/pagetop.erpg
+   // for the top of the page. A form with a field missing is answered 400,
+   // with the page and what is wrong.
    //
    // Build:
    //   CRTBNDRPG PGM(MYLIB/GUESTBOOK) SRCSTMF('<clone>/examples/guestbook.rpgle')
-   //             INCDIR('<clone>/qrpglesrc') TGTCCSID(*JOB)
+   //             INCDIR('<clone>/qrpglesrc' '<clone>/examples/views') TGTCCSID(*JOB)
    // with VIEWS below set to <clone>/examples/views. The views are compiled
    // into MYLIB the first time the page is asked for.
    // Run:
@@ -21,14 +23,11 @@
 ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI') dftactgrp(*no);
 
 /include 'rpgapi_h.rpgle'
+   // note_t, and guestbook_t, the view's data
+/include 'guestbook_t.rpgleinc'
 
 dcl-c VIEWS '/home/myuser/RPGAPI/examples/views';
 
-dcl-ds note_t qualified template;
-   name varchar(50);
-   message varchar(500);
-   posted timestamp;
-end-ds;
    // the notes, oldest first; the oldest go when it is full
 dcl-ds notes likeds(note_t) dim(100);
 dcl-s note_count int(10:0) inz(0);
@@ -92,25 +91,16 @@ dcl-proc guestbookPage;
       status int(10:0) const;
       problem varchar(100) const;
    end-pi;
-   dcl-ds vars likeds(RPGAPI_Vars) inz;
+   dcl-ds model likeds(guestbook_t) inz;
    dcl-ds response likeds(RPGAPI_Response) inz;
    dcl-s index int(10:0);
 
-   RPGAPI_setVar(vars : 'title' : 'Guestbook');
-   RPGAPI_setVar(vars : 'problem' : problem);
-   if note_count = 1;
-      RPGAPI_setVar(vars : 'noun' : 'note');
-   else;
-      RPGAPI_setVar(vars : 'noun' : 'notes');
-   endif;
-      // the list: a row for each note, newest first, with a field for each
-      // subfield of the view's data structure
+   model.title = 'Guestbook';
+   model.problem = problem;
    for index = note_count downto 1;
-      RPGAPI_addRow(vars : 'notes');
-      RPGAPI_setField(vars : 'notes' : 'name' : notes(index).name);
-      RPGAPI_setField(vars : 'notes' : 'message' : notes(index).message);
-      RPGAPI_setField(vars : 'notes' : 'posted' : %char(notes(index).posted));
+      model.count += 1;
+      model.notes(model.count) = notes(index);
    endfor;
    response.status = status;
-   return RPGAPI_render('guestbook.erpg' : vars : response);
+   return RPGAPI_render('guestbook.erpg' : %addr(model) : response);
 end-proc;

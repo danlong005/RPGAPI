@@ -1,9 +1,11 @@
-<%# the top of every page: the head, and the title as a heading -%>
+<%# the top of every page: the head, and the title as a heading. Its data
+    is the title: RPGAPI_include('pagetop.erpg' : %addr(model.title)) -%>
+<%! dcl-s title varchar(100) based(RPGAPI_data); -%>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title><%= RPGAPI_getVar('title') %></title>
+<title><%= title %></title>
 <style>
   body { font-family: sans-serif; margin: 2em; }
   th, td { padding: 4px 12px; text-align: left; }
@@ -11,4 +13,4 @@
 </style>
 </head>
 <body>
-<h1><%= RPGAPI_getVar('title') %></h1>
+<h1><%= title %></h1>
