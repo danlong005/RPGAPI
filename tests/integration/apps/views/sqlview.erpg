@@ -1,0 +1,17 @@
+<%! dcl-s name varchar(128);
+     dcl-s count int(10:0) inz(0); -%>
+<ol>
+<% exec sql declare tables_cursor cursor for
+     select table_name from qsys2.systables
+      where table_schema = 'QSYS2' order by table_name
+      fetch first 3 rows only;
+   exec sql open tables_cursor;
+   exec sql fetch tables_cursor into :name;
+   dow sqlcode = 0;
+      count += 1; -%>
+  <li><%= name %></li>
+<%    exec sql fetch tables_cursor into :name;
+   enddo;
+   exec sql close tables_cursor; -%>
+</ol>
+<p><%= count %> tables</p>

@@ -319,6 +319,9 @@ end-pr;
    // compression, from the app's settings
 dcl-s RPGAPI_compression ind inz(*off);
 dcl-s RPGAPI_compression_threshold int(10:0) inz(1024);
+   // views, from the app's settings, for the views module
+dcl-s RPGAPI_views_directory varchar(1024) export;
+dcl-s RPGAPI_views_library char(10) export;
 dcl-c RPGAPI_DEFAULT_THRESHOLD 1024;
    // the response being sent: gzipped (Content-Encoding: gzip), and whether
    // it says Vary: Accept-Encoding, as every response that could be is
@@ -890,6 +893,18 @@ dcl-proc RPGAPI_startRequest;
    RPGAPI_output_length = 0;
    RPGAPI_gzip = *off;
    RPGAPI_vary_encoding = *off;
+      // the values views were given for the request before
+   RPGAPI_clearVars();
+end-proc;
+
+
+   // whether a streamed response has begun and not ended, for views
+dcl-proc RPGAPI_streaming export;
+   dcl-pi *n ind;
+   end-pi;
+
+   return RPGAPI_stream <> RPGAPI_STREAM_NONE and
+          RPGAPI_stream <> RPGAPI_STREAM_ENDED;
 end-proc;
 
 
@@ -1123,7 +1138,7 @@ end-proc;
 
    // the IFS path of the program this job was started with: the oldest entry
    // on the call stack outside QSYS, e.g. MYAPP for SBMJOB CMD(CALL MYAPP)
-dcl-proc RPGAPI_jobProgram;
+dcl-proc RPGAPI_jobProgram export;
    dcl-pi *n varchar(64);
    end-pi;
    dcl-ds stack len(65535) qualified;
@@ -1164,6 +1179,48 @@ dcl-proc RPGAPI_jobProgram;
    endfor;
 
    return '/QSYS.LIB/' + %trim(library) + '.LIB/' + %trim(program) + '.PGM';
+end-proc;
+
+
+   // the library of the RPGAPI service program, which compiled views are
+   // bound to
+dcl-proc RPGAPI_ownLibrary export;
+   dcl-pi *n char(10);
+   end-pi;
+   dcl-ds stack len(65535) qualified;
+      bytes_returned int(10:0) pos(1);
+      entry_count int(10:0) pos(17);
+      entry_offset int(10:0) pos(13);
+   end-ds;
+   dcl-ds entry qualified based(entry_ptr);
+      length int(10:0) pos(1);
+      program char(10) pos(25);
+      library char(10) pos(35);
+   end-ds;
+   dcl-ds job_id len(56) qualified;
+      name char(10) pos(1) inz('*');
+      user char(10) pos(11) inz(*blanks);
+      number char(6) pos(21) inz(*blanks);
+      internal_id char(16) pos(27) inz(*blanks);
+      reserved char(2) pos(43) inz(*allx'00');
+      thread_indicator int(10:0) pos(45) inz(1);
+      thread_id char(8) pos(49) inz(*allx'00');
+   end-ds;
+   dcl-s error_code char(8) inz(*allx'00');
+   dcl-s index int(10:0);
+
+   retrieve_call_stack(stack : %size(stack) : 'CSTK0100' :
+                       job_id : 'JIDF0100' : error_code);
+
+      // this procedure's own entry comes first: the service program's
+   entry_ptr = %addr(stack) + stack.entry_offset;
+   for index = 1 to stack.entry_count;
+      if entry.program = 'RPGAPI';
+         return entry.library;
+      endif;
+      entry_ptr += entry.length;
+   endfor;
+   return '*LIBL';
 end-proc;
 
 
@@ -1886,6 +1943,8 @@ dcl-proc RPGAPI_applySettings;
       RPGAPI_keepalive_requests = config.keepalive_requests;
    endif;
 
+   RPGAPI_views_directory = %trim(config.views_directory);
+   RPGAPI_views_library = %upper(config.views_library);
    RPGAPI_compression = config.compression;
    RPGAPI_compression_threshold = RPGAPI_DEFAULT_THRESHOLD;
    if config.compression_threshold > 0;
@@ -3029,7 +3088,7 @@ end-proc;
 
    // writes a message to the job log, as an informational message
    // RPGAPI <LEVEL>: text, when the app's log level includes level
-dcl-proc RPGAPI_log;
+dcl-proc RPGAPI_log export;
    dcl-pi *n;
       level int(10:0) const;
       text varchar(1000) const;
@@ -4914,7 +4973,7 @@ dcl-proc RPGAPI_requestHeader;
 end-proc;
 
 
-dcl-proc RPGAPI_hasHeader;
+dcl-proc RPGAPI_hasHeader export;
    dcl-pi *n ind;
       response likeds(RPGAPI_Response) const;
       name varchar(50) const;
@@ -5416,6 +5475,21 @@ dcl-proc RPGAPI_setSecurityHeaders export;
       config.content_security_policy = %trim(policy);
    else;
       config.content_security_policy = RPGAPI_DEFAULT_CSP;
+   endif;
+end-proc;
+
+
+dcl-proc RPGAPI_setViews export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      directory varchar(1024) const;
+      library char(10) const options(*nopass);
+   end-pi;
+
+   config.views_directory = %trim(directory);
+   config.views_library = '';
+   if %parms() >= 3;
+      config.views_library = %upper(library);
    endif;
 end-proc;
 

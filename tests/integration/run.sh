@@ -61,19 +61,10 @@ compile() {
   return 1
 }
 
-# runs ERPG on the templates in a directory of views (apps/views, for the
-# templates app, by default)
+# copies the templates in apps/views to WORK/views, where the templates app
+# finds them and the client adds to them. They are compiled when first used
 views() {
-  directory=${1:-$TESTS/apps/views}
-  cl "CHGATR OBJ('$directory/*') ATR(*CCSID) VALUE(1208)" >/dev/null
-  for template in "$directory"/*.erpg; do
-    out=$(cl "CALL PGM($LIB/ERPG) PARM('$template')")
-    case $out in
-      *"ERPG wrote"*) ;;
-      *) fail "ERPG $(basename "$template"): $out"; return 1 ;;
-    esac
-  done
-  pass "ERPG turns the templates in $(basename "$(dirname "$directory")")/views into procedures"
+  rm -rf "$WORK/views" && mkdir -p "$WORK/views" && cp "$TESTS"/apps/views/*.erpg "$WORK/views/"
 }
 
 # compiles an example from examples/ as $2, only to check that it builds
@@ -99,7 +90,8 @@ compile_example() {
 example_suite() {
   file=$1 object=$2 extra=$4 options=$5
   sed -e "s/RPGAPI_start(app : 8080)/RPGAPI_start(app : $PORT)/" \
-      -e "s/app.port = [0-9]*;/app.port = $PORT;/" "$REPO/examples/$file" > "$WORK/$file"
+      -e "s/app.port = [0-9]*;/app.port = $PORT;/" \
+      -e "s|'/home/myuser/RPGAPI/examples/views'|'$EXAMPLE_VIEWS'|" "$REPO/examples/$file" > "$WORK/$file"
   cl "CHGATR OBJ('$WORK/$file') ATR(*CCSID) VALUE(1252)" >/dev/null
   cl "DLTOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null
   case $file in
@@ -292,10 +284,7 @@ for suite_name in $SUITES; do
     handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
     compress)  compile compress && suite compress ";;;$T;" compress ;;
     templates) views && compile templates && suite templates ";;;$T;" templates
-               # the example is compiled from a copy in WORK: its views too
-               views "$REPO/examples/views" && mkdir -p "$WORK/views" &&
-                 cp "$REPO"/examples/views/*.erpg.rpgle "$WORK/views/" &&
-                 example_suite html-page.sqlrpgle EXHTML htmlpage "" "RPGPPOPT(*LVL2) INCDIR('$REPO/qrpglesrc')" ;;
+               EXAMPLE_VIEWS="$REPO/examples/views" example_suite html-page.rpgle EXHTML htmlpage ;;
     examples)  compile_example hello.rpgle EXHELLO
                compile_example notes-api.sqlrpgle EXNOTES
                compile_example table-export.sqlrpgle EXEXPORT
@@ -303,7 +292,8 @@ for suite_name in $SUITES; do
                compile_example static-files.rpgle EXFILES
                compile_example upload.rpgle EXUPLOAD
                compile_example production.rpgle EXPROD
-               compile_example memberships.sqlrpgle EXMEMBERS ;;
+               compile_example memberships.sqlrpgle EXMEMBERS
+               compile_example html-page.rpgle EXHTML ;;
     sqljson)   example_suite notes-api.sqlrpgle EXNOTES notes
                example_suite memberships.sqlrpgle EXMEMBERS memberships ;;
     yajl)      if cl "CHKOBJ OBJ(YAJL/YAJLINTO) OBJTYPE(*PGM)" >/dev/null; then

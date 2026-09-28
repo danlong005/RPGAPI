@@ -27,8 +27,9 @@ server, and each request is handed to your procedure as a data structure.
   pages and their assets) with caching headers and range requests
 - gzip compression of text and JSON responses, with the zlib that comes with
   IBM i
-- HTML pages from EJS-style templates with RPG in the tags (`<% %>`,
-  `<%= %>` escaped), turned into RPG procedures by the `ERPG` precompiler
+- HTML pages from views: EJS-style templates with RPG in the tags (`<% %>`,
+  `<%= %>` escaped), given values and lists (straight from SQL) by the route,
+  and compiled by RPGAPI when they are first used or have changed
 - Several jobs serving one port, replaced when one ends, keep-alive
   connections, timeouts so one slow client cannot hold a job, and a controlled
   `ENDJOB` or `RPGAPI_shutdown()` that lets requests in progress finish
@@ -48,6 +49,8 @@ See the [Quick Start](QuickStart.md) to write and run a first app, and the
   (`yum install make`) to build it
 - For gzip compression, the service program binds to `QSYS/QZIPZLIB`, the
   zlib that comes with IBM i (behind IBM's zip APIs); nothing to install
+- For views, the ILE RPG compiler on the system that compiles them (usually
+  where the app runs), and SQL for `RPGAPI_setList`
 
 ## Installation
 
@@ -85,7 +88,7 @@ This will:
 - Compile the RPGAPI module (`CRTRPGMOD ... TGTCCSID(*JOB)`)
 - Create the service program
 - Add it to the binding directory
-- Compile `ERPG`, the template precompiler (see HTML templates in the
+- Compile `ERPG`, which compiles a view ahead of time (see Views in the
   [API Documentation](ApiDocumentation.md))
 
 If `LIB` does not exist the build stops immediately and tells you so, rather than
@@ -263,6 +266,6 @@ sent exactly as set, where it used to be trimmed: trim bodies set from
 fixed-length fields. The CORS settings added `cors_` fields to `RPGAPI_App`,
 and keep-alive the `keepalive_` fields, and the not-found and error handlers
 `not_found_handler` and `error_handler`, `trusted_proxies`, `route_prefix`, `statics`, `security_headers` and
-`content_security_policy`, and `compression` and `compression_threshold`; `RPGAPI_Request`
+`content_security_policy`, `compression` and `compression_threshold`, and `views_directory` and `views_library`; `RPGAPI_Request`
 gained `remote_ip` and `connection_ip`; connections now stay open between
 requests (`RPGAPI_setKeepAlive(app : 0)` to close them as before).

@@ -1,16 +1,18 @@
-<%! dcl-pi *n;
-       title varchar(100) const;
-       rows int(10:0) const;
-     end-pi;
-     dcl-s index int(10:0); -%>
-<%# a page: a view for the header, a list, and text with quotes, a tab and umlauts -%>
+<%! dcl-ds item_t qualified template;
+       id int(10:0);
+       label varchar(100);
+     end-ds;
+     dcl-ds items likeds(item_t) dim(*var : 5000);
+     dcl-ds item likeds(item_t); -%>
+<%# a page: a view for the heading, a list, and text with quotes, a tab and umlauts -%>
+<% items = RPGAPI_getList('items'); -%>
 <!DOCTYPE html>
-<html><head><title><%= title %></title></head>
+<html><head><title><%= RPGAPI_getVar('title') %></title></head>
 <body>
-<% heading(title); -%>
+<% RPGAPI_include('heading.erpg'); -%>
 <ul>
-<% for index = 1 to rows; -%>
-  <li id="row<%= index %>">Row <%= index %> of <%- rows %></li>
+<% for-each item in items; -%>
+  <li id="row<%= item.id %>"><%= item.label %> of <%- %elem(items) %></li>
 <% endfor; -%>
 </ul>
 <p>It's "quoted", a	tab, and Grüße</p>

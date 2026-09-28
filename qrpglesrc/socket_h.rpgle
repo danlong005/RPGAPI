@@ -183,6 +183,8 @@ dcl-c O_CREAT 8;
 dcl-c O_TRUNC 64;
    // with O_CREAT: the file is tagged with the CCSID in conversion_id
 dcl-c O_CCSID 32;
+   // text read is converted from the file's CCSID to the job's
+dcl-c O_TEXTDATA 16777216;
 dcl-c SHUT_WR 1;
 dcl-c MSG_PEEK 8;
 

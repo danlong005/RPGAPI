@@ -313,7 +313,34 @@
   (2026-09-28, templates suite, 23 checks and 4 for the example): a page byte
   for byte with a view in it, escaping, a page over 32K, an SQL cursor view,
   the generated code, every refusal, Windows line breaks. The full run
-  passes (481 checks)
+  passes (481 checks). Replaced the same day by views compiled at runtime
+  (next entry)
+- [x] Views compiled at runtime: `RPGAPI_render(template : vars : response?)`
+  turns a template into RPG (the ERPG parser, now the service program's
+  `views` module, `views.sqlrpgle`), compiles it into a program the first
+  time and whenever the template changes (`CRTRPGMOD`, or `CRTSQLRPGI` for
+  one with SQL, then `CRTPGM ... ACTGRP(*CALLER)` bound to the RPGAPI service
+  program, so it writes through the same connection), and calls it; the page
+  streams. Programs are `RV` + CRC32 of the template's name and content, in
+  `RPGAPI_setViews`' library (default the app's), so a view compiled
+  elsewhere (`CALL ERPG PARM(path lib)`) is reused. Values and lists by name
+  in an `RPGAPI_Vars`: `RPGAPI_setVar`, `RPGAPI_setList` (dynamic SQL through
+  a descriptor, every column as text, up to 5 `?` values), `RPGAPI_addRow`,
+  `RPGAPI_setField`; in a view `RPGAPI_getVar`, `RPGAPI_rows`,
+  `RPGAPI_include` and `array = RPGAPI_getList(name);`, which becomes
+  XML-INTO a `dim(*var)` array of the view's own data structure (types
+  converted, nulls left at their default, cut to the array). Compile errors
+  give a 500 page at their template lines, from the compiler's event file.
+  Found on the way: a `%size` of a data structure with a pointer leaves out
+  the padding between array elements (the store under-allocated and failed
+  with MCH0601 at row 944 of 2500); `XML-INTO` does not size a `dim(*var)`
+  array (set `%elem` to its maximum first, then to the count from the PSDS)
+  and leaves grown elements uncleared; a list returned as a large varchar
+  overflows the view's stack (now a pointer). Verified on PUB400
+  (2026-09-28, templates suite, 19 checks and 4 for the example): a page
+  byte for byte with an included view, escaping, 2000 rows, typed SQL
+  lists, a view's own SQL, custom status and headers, recompiling after a
+  change, the error pages, ERPG. The full run passes (481 checks)
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default
@@ -566,12 +593,10 @@
   variable, try installing iRPGUnit into a library we own on PUB400, and run
   the tests added since (they have never been compiled)
 
-- [ ] Templates, later: `include()` of a view by file name, layouts,
-  EJS's `<%_ _%>`, and a Jbuilder-style streaming JSON builder
-  (`RPGAPI_jsonBeginObject` and so on, its own feature). A runtime engine
-  (edit and refresh without a build) was discussed on 2026-09-28: build time
-  was kept, since RPG in a template has to be compiled and typed parameters
-  need the view in the app's program
+- [ ] Views, later: layouts, EJS's `<%_ _%>`, passing a view the request
+  itself, deleting a view's older `RV...` programs when it is compiled again,
+  and a Jbuilder-style streaming JSON builder (`RPGAPI_jsonBeginObject` and
+  so on, its own feature)
 
 ## Cleanup
 - [ ] The unit tests in `qtestsrc` have never been compiled or run: check they

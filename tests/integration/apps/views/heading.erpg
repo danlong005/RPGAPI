@@ -1,4 +1,1 @@
-<%! dcl-pi *n;
-       title varchar(100) const;
-     end-pi; -%>
-<h1><%= title %></h1>
+<h1><%= RPGAPI_getVar('title') %></h1>

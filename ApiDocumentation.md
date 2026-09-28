@@ -158,6 +158,7 @@ Set them with these procedures, which check the values, before
 | `trusted_proxies` | `RPGAPI_setTrustedProxies(app : addresses)`; see Client address | none |
 | `security_headers`, `content_security_policy` | `RPGAPI_setSecurityHeaders(app : policy?)`; see Security headers | off |
 | `compression`, `compression_threshold` | `RPGAPI_setCompression(app : minBytes?)`; see Compression | off; 1024 bytes |
+| `views_directory`, `views_library` | `RPGAPI_setViews(app : directory : library?)`; see Views | the job's current directory; the app's library |
 | `not_found_handler`, `error_handler` | `RPGAPI_setNotFound(app : %paddr(proc))`, `RPGAPI_setErrorHandler(app : %paddr(proc))`; see Not found and errors | plain 404 and 500 |
 
 A setter given a value it does not accept ends your program with escape
@@ -1183,96 +1184,141 @@ the file (`DATA-INTO` with `doc=file`, or YAJL's `yajl_stmf_load_tree`). For
 large responses,
 see Large responses and streaming.
 
-### HTML templates (ERPG)
-Pages are written as templates with RPG inside tags, the way Express apps use
-EJS, and the `ERPG` program that `make all` builds turns each one into an RPG
-procedure. RPG cannot run code it reads at runtime, so this happens when you
-build: a template becomes code in your program, like any other.
-
-A template is a `.erpg` file on the IFS, in UTF-8:
-```
-<%! dcl-pi *n;
-       title varchar(100) const;
-       people likeds(customer_t) dim(50) const;
-       count int(10:0) const;
-     end-pi;
-     dcl-s index int(10:0); -%>
-<h1><%= title %></h1>
-<ul>
-<% for index = 1 to count; -%>
-  <li><%= people(index).name %>, <%= people(index).city %></li>
-<% endfor; -%>
-</ul>
-```
-
-| Tag | |
-| --- | --- |
-| `<% code %>` | RPG statements: `for`, `if`, `dow`, `exec sql fetch`, calls. Each ends with `;` as usual |
-| `<%= expr %>` | A value, HTML-escaped: `&`, `<`, `>`, `"` and `'` become entities, so a value from a user or a table cannot add tags or scripts to the page. Numbers and dates are formatted with `%char` |
-| `<%- expr %>` | A value as it is, for HTML you built and trust |
-| `<%# text %>` | A comment, left out of the page |
-| `<%! decls %>` | Declarations: the procedure's `dcl-pi` for its parameters, and `dcl-s`, `dcl-ds`. They go first in the procedure wherever they are in the template |
-| `<%%` | A literal `<%` |
-| `-%>` | Ends any tag and leaves out the line break after it, so a line holding only a tag leaves no blank line in the page |
-
-Everything else is text, written as it is.
-
-**Building.** Run `ERPG` on each template, which writes the procedure next to
-it, named after the file: `customerlist.erpg` becomes
-`customerlist.erpg.rpgle` holding `dcl-proc customerlist`.
-```
-CALL PGM(MYLIB/ERPG) PARM('/home/me/myapp/views/customerlist.erpg')
-```
-`/include` the generated files after your program's main code, and call a
-view between `RPGAPI_beginResponse` and `RPGAPI_endResponse`. The page
-streams, so it can be any length:
+### Views (HTML templates)
+A view is a page written as HTML with RPG inside tags, the way Express apps
+use EJS templates. A route passes it values and lists and returns
+`RPGAPI_render`, and the page it makes is streamed to the browser:
 ```
 dcl-proc listCustomers;
    dcl-pi *n likeds(RPGAPI_Response);
       request likeds(RPGAPI_Request) const;
    end-pi;
-   dcl-ds response likeds(RPGAPI_Response) inz;
-   ...fill customers and count...
-   RPGAPI_setHeader(response : 'Content-Type' : 'text/html; charset=utf-8');
-   RPGAPI_beginResponse(response);
-   customerlist('Our customers' : customers : count);
-   RPGAPI_endResponse();
-   return response;
-end-proc;
+   dcl-ds vars likeds(RPGAPI_Vars) inz;
 
-/include 'views/customerlist.erpg.rpgle'
+   RPGAPI_setVar(vars : 'title' : 'Customers');
+   RPGAPI_setList(vars : 'customers' :
+      'select name, city, balance from customers where state = ?' :
+      RPGAPI_getQueryParam(request : 'state'));
+   return RPGAPI_render('customers.erpg' : vars);
+end-proc;
 ```
-A view uses another by calling it (`<% pagetop(title); -%>`), which gives
-shared headers and footers. With embedded SQL in a view, compile the program
-with `CRTSQLRPGI ... RPGPPOPT(*LVL2) INCDIR('<RPGAPI clone>/qrpglesrc')`, so
-that the SQL precompiler sees the SQL in the included views;
-[examples/html-page.sqlrpgle](examples/html-page.sqlrpgle) is a page over the
-SQL catalog built that way. When a template changes, run `ERPG` on it again
-and recompile the program.
+The view, `customers.erpg`:
+```
+<%! dcl-ds customer_t qualified template;
+       name varchar(50);
+       city varchar(50);
+       balance packed(11:2);
+     end-ds;
+     dcl-ds customers likeds(customer_t) dim(*var : 500);
+     dcl-ds customer likeds(customer_t); -%>
+<% customers = RPGAPI_getList('customers'); -%>
+<h1><%= RPGAPI_getVar('title') %></h1>
+<ul>
+<% for-each customer in customers; -%>
+  <li><%= customer.name %>, <%= customer.city %>: <%= customer.balance %></li>
+<% endfor; -%>
+</ul>
+```
+
+RPG cannot run code it reads while it runs, so RPGAPI compiles each view into
+a program the first time it is asked for, and again whenever the template
+changes: edit a view and refresh the page. That first request takes a few
+seconds; the rest just call the program.
+
+#### Tags
+| Tag | |
+| --- | --- |
+| `<% code %>` | RPG statements: `for-each`, `if`, `dow`, `exec sql`, calls. Each ends with `;` as usual |
+| `<%= expr %>` | A value, HTML-escaped: `&`, `<`, `>`, `"` and `'` become entities, so a value from a user or a table cannot add tags or scripts to the page. Numbers and dates are formatted with `%char` |
+| `<%- expr %>` | A value as it is, for HTML you built and trust |
+| `<%# text %>` | A comment, left out of the page |
+| `<%! decls %>` | Declarations: `dcl-s`, `dcl-ds`, `dcl-c`. They go first in the view's program wherever they are in the template |
+| `<%%` | A literal `<%` |
+| `-%>` | Ends any tag and leaves out the line break after it, so a line holding only a tag leaves no blank line in the page |
+
+Everything else is text, written as it is.
+
+#### Values and lists
+The route puts what the view needs into an `RPGAPI_Vars`, by name. Declare it
+with `inz` in the procedure; it lasts until the request ends.
+
+| In the route | In the view |
+| --- | --- |
+| `RPGAPI_setVar(vars : 'title' : text)` | `RPGAPI_getVar('title')`, as text: numbers with `%dec`, dates with `%date` |
+| `RPGAPI_setList(vars : 'rows' : sql : value1? ... value5?)` | `array = RPGAPI_getList('rows');` |
+| `RPGAPI_addRow(vars : 'rows')`, then `RPGAPI_setField(vars : 'rows' : 'name' : text)` | the same |
+| `RPGAPI_listCount(vars : 'rows')` | `RPGAPI_rows('rows')` |
+
+A list is rows of named fields:
+- `RPGAPI_setList` runs an SQL query and makes a row of each row it returns,
+  with a field for each column, named after the column (`select cust_name as
+  name` names it). Values for `?` markers in the statement come after it, up
+  to five, so what a user typed never becomes part of the SQL. A statement
+  that fails ends the route with escape message `CPF9898` naming the SQL
+  state, which is answered with a 500.
+- `RPGAPI_addRow` and `RPGAPI_setField` build one in RPG, a row at a time, for
+  data that does not come from one query.
+
+In the view, `array = RPGAPI_getList('rows');` fills an array of a data
+structure you declare, with `dim(*var : max)`: fields go into the subfields of
+the same name (in any case), converted to their types, so `balance` is a
+number and `since` a date. Afterwards `%elem(array)` is the number of rows,
+and `for-each` goes through them. Fields without a subfield are ignored,
+subfields without a field (and nulls) keep their default, and a list longer
+than `max` is cut to it. Keep the statement on a line of its own.
+
+#### Views in views, SQL, and responses
+- `<% RPGAPI_include('pagetop.erpg'); -%>` writes another view in place, with
+  the same values: shared headers and footers.
+- A view can run its own SQL too, `exec sql` and all; it is then compiled with
+  `CRTSQLRPGI`. Close the cursors it opens.
+- `RPGAPI_render(template : vars : response)` sends the view with the status
+  and headers of `response`, such as a cookie, or a `Content-Type` other than
+  `text/html; charset=utf-8`. With compression on, views are gzipped like any
+  text.
+
+#### Where views are, and where they are compiled
+```
+RPGAPI_setViews(app : '/home/me/myapp/views');            // templates
+RPGAPI_setViews(app : '/home/me/myapp/views' : 'MYVIEWS'); // and a library
+```
+A template path that does not start with `/` is relative to that directory
+(the job's current directory without it). The programs go into the library
+named, or the library of the app's program, and are named `RV` and 8 hex
+digits, after the template's file name and content. The job needs the ILE RPG
+compiler (5770WDS) and authority to create programs there. Old versions are
+not deleted; any `RV...` program can be, and is compiled again when needed.
+
+For a server without the compiler, compile the views where there is one, and
+bring the library along: a view is found by its name and content, so the same
+template uses the same program.
+```
+CALL PGM(MYLIB/ERPG) PARM('/home/me/myapp/views/customers.erpg' 'MYVIEWS')
+```
+`ERPG`, which `make all` builds, compiles one view into a library, and is
+also a quick way to check a template.
+
+#### When a view is wrong
+A view that does not compile, or a template with a tag that is never closed,
+is answered with a 500 page listing the errors at their template lines, such
+as `customers.erpg:7: RNF7030 The name or indicator NMAE is not defined.`,
+and logged at ERROR. Every line of the generated program carries a comment
+naming its template line (the source is in `/tmp/RPGAPI_RV....rpgle`). A view
+that fails while it runs ends the page there, as a streamed response does.
 
 **Good to know**
-- The file's name is the procedure's name, so it has to be an RPG name
-  (letters, digits and `_`) and not a reserved word: `page.erpg` fails to
-  compile because `PAGE` is one.
-- Every generated line ends with a comment naming the template's line, such
-  as `// customerlist.erpg:7`, so a compile error leads back to the
-  template.
-- `ERPG` ends with `CPF9898` for a template it cannot use, naming the file
-  and line: a tag that is never closed, an empty `<%= %>`, a file name that
-  is not an RPG name, or a file that is not UTF-8.
-- Templates are UTF-8, with or without a byte order mark, and Windows line
-  breaks are fine. Their text goes through the job's CCSID on its way to the
-  page, as everything written with `RPGAPI_write` does, so it can use the
-  characters the job's CCSID has.
-- Keep lines of code in tags under about 90 characters: the SQL precompiler
-  copies lines into a file of 100 characters. `ERPG` keeps the lines it writes
-  itself within that.
-- The generated files are build output: `*.erpg.rpgle` in `.gitignore` keeps
-  them out of the repository.
+- Templates are UTF-8, with or without a byte order mark; Windows line breaks
+  are fine. Their text goes through the job's CCSID, as everything written
+  with `RPGAPI_write` does.
+- A view's program has its own variables, so it cannot see the route's: pass
+  what it needs with `RPGAPI_setVar` and `RPGAPI_setList`.
 - `RPGAPI_writeHtml(text)` and `RPGAPI_escapeHtml(text)`, which `<%= %>` uses,
-  work without templates too, in any streamed response.
-- Not in this version: `include()` by file name (call the view instead),
-  layouts, and EJS's `<%_ _%>` whitespace trimming.
+  work in any streamed response.
+- Not in this version: layouts, EJS's `<%_ _%>`, and passing a view the
+  request itself.
+
+[examples/html-page.rpgle](examples/html-page.rpgle) is a complete app: a
+library's tables from the SQL catalog, in a view that includes another.
 
 ### Health checks
 Load balancers and monitoring tools poll a URL to see whether an API is up,
@@ -1477,7 +1523,13 @@ include it.
 | `RPGAPI_savePart(request : path)` | Write the rest of the current part to an IFS file |
 | `RPGAPI_beginResponse(response : length?)` | Send the status and headers of a streamed response |
 | `RPGAPI_write(text)` | Add text to a streamed response |
-| `RPGAPI_writeHtml(text)` | Add text to a streamed response, HTML-escaped; see HTML templates |
+| `RPGAPI_render(template : vars? : response?)` | Send a view: a template of HTML with RPG in it; see Views |
+| `RPGAPI_setVar(vars : name : value)` | A value for a view |
+| `RPGAPI_setList(vars : name : sql : values?)` | A list for a view, from an SQL query |
+| `RPGAPI_addRow(vars : name)`, `RPGAPI_setField(vars : name : field : value)` | A list for a view, row by row |
+| `RPGAPI_listCount(vars : name)` | The rows of a list |
+| `RPGAPI_setViews(app : directory : library?)` | Where views are, and where they are compiled; see Views |
+| `RPGAPI_writeHtml(text)` | Add text to a streamed response, HTML-escaped |
 | `RPGAPI_escapeHtml(text)` | Text with `& < > " '` as HTML entities |
 | `RPGAPI_writeBytes(buffer : length)` | Add bytes to a streamed response |
 | `RPGAPI_endResponse()` | Finish a streamed response |

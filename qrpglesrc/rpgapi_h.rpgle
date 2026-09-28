@@ -147,6 +147,17 @@ dcl-ds RPGAPI_App qualified template;
       // bytes: 1024 when 0
    compression ind;
    compression_threshold int(10:0);
+      // views (RPGAPI_setViews): the directory template paths are relative
+      // to (blank: the job's current directory), and the library their
+      // compiled programs go into (blank: the app program's library)
+   views_directory varchar(1024);
+   views_library char(10);
+end-ds;
+
+   // values and lists for a view (RPGAPI_render), by name: declare one with
+   // inz in the procedure that renders
+dcl-ds RPGAPI_Vars qualified template;
+   handle int(10:0);
 end-ds;
 
    // what went wrong, for the error handler
@@ -490,8 +501,8 @@ dcl-pr RPGAPI_write;
 end-pr;
 
    // text written as HTML shows it: & < > " and ' as entities, so a value
-   // from a user or a table cannot add tags or scripts to a page. What ERPG
-   // templates use for <%= %>
+   // from a user or a table cannot add tags or scripts to a page. What views
+   // use for <%= %>
 dcl-pr RPGAPI_writeHtml;
    text varchar(32000) const;
 end-pr;
@@ -499,6 +510,71 @@ end-pr;
    // text with & < > " and ' as HTML entities (&amp; &lt; &gt; &quot; &#39;)
 dcl-pr RPGAPI_escapeHtml varchar(192000);
    text varchar(32000) const;
+end-pr;
+
+   // renders a view: the template (an .erpg file of HTML with RPG in <% %>
+   // tags), with the values and lists in vars. The template is compiled
+   // into a program the first time and whenever it changes; the program
+   // writes the page, which is streamed to the client as text/html unless
+   // response sets a Content-Type, with response's status and headers. A
+   // template that cannot be compiled is answered with a 500 naming why.
+   // Return what it returns from the procedure
+dcl-pr RPGAPI_render likeds(RPGAPI_Response);
+   template varchar(1024) const;
+   vars likeds(RPGAPI_Vars) const options(*nopass : *omit);
+   response likeds(RPGAPI_Response) const options(*nopass);
+end-pr;
+
+   // a value for a view, read there with RPGAPI_getVar(name). Numbers and
+   // dates as text: %char(amount)
+dcl-pr RPGAPI_setVar;
+   vars likeds(RPGAPI_Vars);
+   name varchar(64) const;
+   value varchar(32000) const;
+end-pr;
+
+   // a list for a view from an SQL query: a row for each row it returns,
+   // with a field for each column, named after it. Up to 5 values for ?
+   // markers in the statement. A view reads it with RPGAPI_getList(name)
+   // into an array of a data structure with subfields of those names
+dcl-pr RPGAPI_setList;
+   vars likeds(RPGAPI_Vars);
+   list varchar(64) const;
+   statement varchar(32000) const;
+   value1 varchar(1000) const options(*nopass);
+   value2 varchar(1000) const options(*nopass);
+   value3 varchar(1000) const options(*nopass);
+   value4 varchar(1000) const options(*nopass);
+   value5 varchar(1000) const options(*nopass);
+end-pr;
+
+   // a list built row by row: adds a row to it (returns its number), and
+   // sets a field of its last row
+dcl-pr RPGAPI_addRow int(10:0);
+   vars likeds(RPGAPI_Vars);
+   list varchar(64) const;
+end-pr;
+
+dcl-pr RPGAPI_setField;
+   vars likeds(RPGAPI_Vars);
+   list varchar(64) const;
+   name varchar(64) const;
+   value varchar(32000) const;
+end-pr;
+
+   // the number of rows of a list
+dcl-pr RPGAPI_listCount int(10:0);
+   vars likeds(RPGAPI_Vars) const;
+   list varchar(64) const;
+end-pr;
+
+   // where views are: the directory template paths are relative to, and the
+   // library their programs are compiled into (the app's library when left
+   // out)
+dcl-pr RPGAPI_setViews;
+   config likeds(RPGAPI_App);
+   directory varchar(1024) const;
+   library char(10) const options(*nopass);
 end-pr;
 
    // bytes sent as they are, for binary content

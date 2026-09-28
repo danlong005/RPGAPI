@@ -23,12 +23,15 @@ all:
 	}
 	-system "CRTBNDDIR BNDDIR($(LIB)/$(BNDDIR))"
 	system "CHGATR OBJ('$(IFS_PATH)/qrpglesrc/*.rpgle') ATR(*CCSID) VALUE(1252)"
+	system "CHGATR OBJ('$(IFS_PATH)/qrpglesrc/*.sqlrpgle') ATR(*CCSID) VALUE(1252)"
 	system "CRTRPGMOD MODULE($(LIB)/RPGAPI) SRCSTMF('$(IFS_PATH)/qrpglesrc/RPGAPI.rpgle') REPLACE(*YES) DBGVIEW(*SOURCE) OPTION(*EVENTF) TGTCCSID(*JOB) INCDIR('$(IFS_PATH)/qrpglesrc')"
 	-system "CPYTOSTMF FROMMBR('/QSYS.LIB/$(LIB).LIB/EVFEVENT.FILE/RPGAPI.MBR') TOSTMF('$(IFS_PATH)/RPGAPI.evfevent') STMFOPT(*REPLACE)"
 	-cat $(IFS_PATH)/RPGAPI.evfevent
-	system "CRTSRVPGM SRVPGM($(LIB)/RPGAPI) MODULE($(LIB)/RPGAPI) SRCSTMF('$(IFS_PATH)/qbndsrc/RPGAPI_B.bnd') BNDSRVPGM((QSYS/QZIPZLIB))"
+	system "CRTSQLRPGI OBJ($(LIB)/VIEWS) SRCSTMF('$(IFS_PATH)/qrpglesrc/views.sqlrpgle') OBJTYPE(*MODULE) REPLACE(*YES) CVTCCSID(*JOB) COMMIT(*NONE) DBGVIEW(*SOURCE) OPTION(*EVENTF) COMPILEOPT('TGTCCSID(*JOB) INCDIR(''$(IFS_PATH)/qrpglesrc'')')"
+	-system "CPYTOSTMF FROMMBR('/QSYS.LIB/$(LIB).LIB/EVFEVENT.FILE/VIEWS.MBR') TOSTMF('$(IFS_PATH)/VIEWS.evfevent') STMFOPT(*REPLACE)"
+	system "CRTSRVPGM SRVPGM($(LIB)/RPGAPI) MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) SRCSTMF('$(IFS_PATH)/qbndsrc/RPGAPI_B.bnd') BNDSRVPGM((QSYS/QZIPZLIB))"
 	-system "ADDBNDDIRE BNDDIR($(LIB)/$(BNDDIR)) OBJ(($(LIB)/RPGAPI))"
-	system "CRTBNDRPG PGM($(LIB)/ERPG) SRCSTMF('$(IFS_PATH)/qrpglesrc/erpg.rpgle') REPLACE(*YES) DBGVIEW(*SOURCE) TGTCCSID(*JOB) INCDIR('$(IFS_PATH)/qrpglesrc')"
+	system "CRTBNDRPG PGM($(LIB)/ERPG) SRCSTMF('$(IFS_PATH)/qrpglesrc/erpg.rpgle') REPLACE(*YES) DBGVIEW(*SOURCE) TGTCCSID(*JOB) INCDIR('$(IFS_PATH)/qrpglesrc') DFTACTGRP(*NO) BNDDIR($(LIB)/$(BNDDIR))"
 
 # RUCRTTST is run from qtestsrc so that the /include '../qrpglesrc/...' in the
 # test source resolves: RPGAPI is precompiled into a QTEMP member, so relative
@@ -37,7 +40,7 @@ test:
 	system "CHGATR OBJ('$(IFS_PATH)/qtestsrc/*.sqlrpgle') ATR(*CCSID) VALUE(1252)"
 	cd $(IFS_PATH)/qtestsrc && \
 	liblist -a RPGUNIT && \
-	system "RPGUNIT/RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI) BNDSRVPGM((RUTESTCASE) (QSYS/QZIPZLIB))" && \
+	system "RPGUNIT/RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) BNDSRVPGM((RUTESTCASE) (QSYS/QZIPZLIB))" && \
 	system "RPGUNIT/RUCALLTST TSTPGM($(LIB)/RPGAPITEST)"
 
 # Runs the integration tests in tests/integration against a build in LIB: see
@@ -53,4 +56,5 @@ clean:
 	-system "RMVBNDDIRE BNDDIR($(LIB)/$(BNDDIR)) OBJ(($(LIB)/RPGAPI))"
 	-system "DLTOBJ OBJ($(LIB)/RPGAPI) OBJTYPE(*SRVPGM)"
 	-system "DLTOBJ OBJ($(LIB)/RPGAPI) OBJTYPE(*MODULE)"
+	-system "DLTOBJ OBJ($(LIB)/VIEWS) OBJTYPE(*MODULE)"
 	-system "DLTOBJ OBJ($(LIB)/$(BNDDIR)) OBJTYPE(*BNDDIR)"

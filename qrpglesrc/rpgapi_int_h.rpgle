@@ -66,4 +66,45 @@ end-pr;
 dcl-pr RPGAPI_initHttp;
 end-pr;
 
+   // for the views module (views.sqlrpgle), from the RPGAPI module
+dcl-pr RPGAPI_log;
+   level int(10:0) const;
+   text varchar(1000) const;
+end-pr;
+dcl-pr RPGAPI_hasHeader ind;
+   response likeds(RPGAPI_Response) const;
+   name varchar(50) const;
+end-pr;
+dcl-pr RPGAPI_jobProgram varchar(64);
+end-pr;
+   // whether a streamed response has begun and not ended
+dcl-pr RPGAPI_streaming ind;
+end-pr;
+   // the library of the RPGAPI service program
+dcl-pr RPGAPI_ownLibrary char(10);
+end-pr;
+
+   // for the RPGAPI module and compiled views, from the views module
+dcl-pr RPGAPI_clearVars;
+end-pr;
+dcl-pr RPGAPI_varValue varchar(32000);
+   vars likeds(RPGAPI_Vars) const;
+   name varchar(64) const;
+end-pr;
+dcl-pr RPGAPI_listXml pointer;
+   vars likeds(RPGAPI_Vars) const;
+   list varchar(64) const;
+   max int(10:0) const;
+end-pr;
+dcl-pr RPGAPI_includeView;
+   template varchar(1024) const;
+   vars likeds(RPGAPI_Vars) const;
+end-pr;
+   // for ERPG: compiles a template into a library ahead of time
+dcl-pr RPGAPI_compileView char(21);
+   path varchar(1024) const;
+   library char(10) const;
+   errors varchar(4000);
+end-pr;
+
 /endif

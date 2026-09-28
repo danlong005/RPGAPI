@@ -1,5 +1,6 @@
-"""The HTML page example (examples/html-page.sqlrpgle): ERPG views over the
-SQL catalog, one calling the other, gzipped for a browser."""
+"""The HTML page example (examples/html-page.rpgle): a list from the SQL
+catalog rendered by views/tablelist.erpg, which includes views/pagetop.erpg,
+compiled at runtime and gzipped for a browser."""
 from common import *
 import gzip
 
@@ -13,7 +14,7 @@ check('pagetop: the head and the heading', page.startswith('<!DOCTYPE html>\n<ht
       '<title>Tables in QSYS2</title>' in page and '<h1>Tables in QSYS2</h1>' in page, page[:300])
 rows = page.count('<tr><td>')
 check('tablelist: a row for each table and view, and their count', rows > 100 and
-      '<tr><td>SYSTABLES</td><td>View</td>' in page and f'<p>{rows} tables and views</p>' in page and
+      '<tr><td>SYSTABLES</td><td>View</td>' in page and page.count('<td>20') >= rows and f'<p>{rows} tables and views</p>' in page and
       page.endswith('</body>\n</html>\n'), (rows, page[-200:]))
 status, headers, body = get('/tables/NOSUCHLIB')
 page = dechunk(body)[0].decode()

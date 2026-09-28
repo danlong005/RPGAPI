@@ -1,0 +1,13 @@
+<%! dcl-ds person_t qualified template;
+       id int(10:0);
+       name varchar(50);
+       balance packed(11:2);
+       since date;
+     end-ds;
+     dcl-ds people likeds(person_t) dim(*var : 3);
+     dcl-ds person likeds(person_t); -%>
+<% people = RPGAPI_getList('people'); -%>
+<% for-each person in people; -%>
+<%= person.id %>|<%= person.name %>|<%= person.balance + 1 %>|<%= %char(person.since : *eur) %>
+<% endfor; -%>
+count=<%= %elem(people) %> rows=<%= RPGAPI_rows('people') %>
