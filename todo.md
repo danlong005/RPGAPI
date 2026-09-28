@@ -621,10 +621,8 @@
   variable, try installing iRPGUnit into a library we own on PUB400, and run
   the tests added since (they have never been compiled)
 
-- [ ] Views, later: layouts, EJS's `<%_ _%>`, passing a view the request
-  itself, deleting a view's older `RV...` programs when it is compiled again,
-  and a Jbuilder-style streaming JSON builder (`RPGAPI_jsonBeginObject` and
-  so on, its own feature)
+- [ ] Views, later: layouts, and deleting a view's older `RV...` programs
+  when it is compiled again
 
 ## Cleanup
 - [ ] The unit tests in `qtestsrc` have never been compiled or run: check they
