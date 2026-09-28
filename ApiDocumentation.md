@@ -1317,8 +1317,15 @@ that fails while it runs ends the page there, as a streamed response does.
 - Not in this version: layouts, EJS's `<%_ _%>`, and passing a view the
   request itself.
 
-[examples/html-page.rpgle](examples/html-page.rpgle) is a complete app: a
-library's tables from the SQL catalog, in a view that includes another.
+Two complete apps show views at work:
+- [examples/html-page.rpgle](examples/html-page.rpgle): a library's tables,
+  a list straight from the SQL catalog with `RPGAPI_setList`, in a view that
+  includes another.
+- [examples/guestbook.rpgle](examples/guestbook.rpgle): no SQL. The route
+  builds its list from an RPG array with `RPGAPI_addRow` and
+  `RPGAPI_setField`; the view has `if`/`else`, a form it posts back to, what
+  visitors typed escaped, and a 400 with the page when a field is missing
+  (`RPGAPI_render`'s `response`).
 
 ### Health checks
 Load balancers and monitoring tools poll a URL to see whether an API is up,

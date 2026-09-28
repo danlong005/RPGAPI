@@ -1471,7 +1471,7 @@ dcl-proc addTextLiteral;
    dcl-s start int(10:0) inz(1);
    dcl-s count int(10:0);
 
-   if pending = '';
+   if %len(pending) = 0;
       pending_line = line;
    endif;
    dow start <= %len(text);
@@ -1504,7 +1504,7 @@ dcl-proc flushText;
       text char(1) overlay(value);
    end-ds;
 
-   if pending = '' and not line_break;
+   if %len(pending) = 0 and not line_break;
       return;
    endif;
    for index = 1 to %len(pending);

@@ -9,6 +9,7 @@ build it, run it and try it with curl.
 | [notes-api.sqlrpgle](notes-api.sqlrpgle) | A JSON API over an SQL table (GET, POST, PUT, DELETE), with SQL building and reading the JSON. Creates its table in QTEMP, so there is nothing to set up |
 | [table-export.sqlrpgle](table-export.sqlrpgle) | Streaming a large SQL result as JSON or as a CSV download, row by row, with `RPGAPI_beginResponse` / `RPGAPI_write`, gzipped for clients that accept it |
 | [html-page.rpgle](html-page.rpgle) | An HTML page from views ([views/](views)): a list straight from SQL rendered by a template of HTML and RPG that includes another, compiled at runtime and gzipped |
+| [guestbook.rpgle](guestbook.rpgle) | A view without SQL ([views/guestbook.erpg](views/guestbook.erpg)): a list built from an RPG array a row at a time, `if`/`else` in the template, a form posted back with what visitors typed escaped, and a 400 re-rendering the page |
 | [api-key.rpgle](api-key.rpgle) | Middleware that checks an API key header and answers 401, a public health check, and INFO logging |
 | [static-files.rpgle](static-files.rpgle) | Serving an IFS directory with `RPGAPI_serveStatic` (content types, `index.html`, caching with 304s, ranges with 206), and one file as a download with `RPGAPI_sendFile` |
 | [upload.rpgle](upload.rpgle) | A browser upload form, and `multipart/form-data` files saved to the IFS with `RPGAPI_savePart` |

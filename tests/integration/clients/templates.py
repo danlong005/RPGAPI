@@ -79,6 +79,12 @@ check("the route's status and headers", status == 201 and headers.get('x-view') 
 status, headers, body = body_of(get('/badsql'))
 check('an SQL statement that fails: 500', status == 500, (status, body[:200]))
 
+# text of only blanks between tags stays where it is (a varchar of blanks
+# compares equal to '' in RPG)
+write_view('blanks.erpg', "<%= 'a' %> <%= 'b' %>  <%- 'c' %>\n <% if 1 = 1; %> <% endif; %>|\n")
+status, headers, body = body_of(get('/view/blanks'))
+check('blanks between tags are written where they are', body == b'a b  c\n  |\n', body)
+
 # a template that changes is compiled again
 write_view('changed.erpg', "one <%= RPGAPI_getVar('title') %>\n")
 one = body_of(get('/view/changed'))[2]

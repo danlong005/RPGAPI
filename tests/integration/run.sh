@@ -284,7 +284,8 @@ for suite_name in $SUITES; do
     handlers)  compile handlers && suite handlers ";1000;3000;$T;" handlers ;;
     compress)  compile compress && suite compress ";;;$T;" compress ;;
     templates) views && compile templates && suite templates ";;;$T;" templates
-               EXAMPLE_VIEWS="$REPO/examples/views" example_suite html-page.rpgle EXHTML htmlpage ;;
+               EXAMPLE_VIEWS="$REPO/examples/views" example_suite html-page.rpgle EXHTML htmlpage
+               EXAMPLE_VIEWS="$REPO/examples/views" example_suite guestbook.rpgle EXGUEST guestbook ;;
     examples)  compile_example hello.rpgle EXHELLO
                compile_example notes-api.sqlrpgle EXNOTES
                compile_example table-export.sqlrpgle EXEXPORT
@@ -293,7 +294,8 @@ for suite_name in $SUITES; do
                compile_example upload.rpgle EXUPLOAD
                compile_example production.rpgle EXPROD
                compile_example memberships.sqlrpgle EXMEMBERS
-               compile_example html-page.rpgle EXHTML ;;
+               compile_example html-page.rpgle EXHTML
+               compile_example guestbook.rpgle EXGUEST ;;
     sqljson)   example_suite notes-api.sqlrpgle EXNOTES notes
                example_suite memberships.sqlrpgle EXMEMBERS memberships ;;
     yajl)      if cl "CHKOBJ OBJ(YAJL/YAJLINTO) OBJTYPE(*PGM)" >/dev/null; then

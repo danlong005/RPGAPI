@@ -341,6 +341,15 @@
   byte for byte with an included view, escaping, 2000 rows, typed SQL
   lists, a view's own SQL, custom status and headers, recompiling after a
   change, the error pages, ERPG. The full run passes (481 checks)
+- [x] A views example without SQL: `examples/guestbook.rpgle` with
+  `views/guestbook.erpg`, a list built from an RPG array with
+  `RPGAPI_addRow`/`RPGAPI_setField`, `if`/`else` in the view, a form posted
+  back (303 to the page) with what was typed escaped, and a 400 with the page
+  through `RPGAPI_render`'s `response`. It found a bug: text of only blanks
+  between two tags (`<%= a %> <%= b %>`) was written after the second value,
+  because a varchar of blanks compares equal to '' in RPG (now `%len`).
+  Verified on PUB400 (2026-09-28): the guestbook suite (5 checks) and a new
+  templates check for blanks between tags. The full run passes (488 checks)
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default
