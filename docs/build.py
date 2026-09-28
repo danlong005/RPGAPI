@@ -4,6 +4,12 @@ ApiDocumentation.md. Run it after changing the Markdown:
 
     python3 docs/build.py
 
+With --wiki and a clone of the repository's wiki, it writes the reference
+there too, as wiki pages (Home, Application, Request, ...) with a _Sidebar
+that GitHub shows beside every page; commit and push the wiki after it:
+
+    python3 docs/build.py --wiki ../RPGAPI.wiki
+
 It needs only Python 3's standard library. The Markdown it reads is the
 subset ApiDocumentation.md uses: headings, paragraphs, nested lists, tables,
 fenced code, <details> blocks, inline code, bold and links. Ids follow
@@ -12,6 +18,7 @@ of the repository go to them on GitHub."""
 import html
 import os
 import re
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCE = os.path.join(HERE, '..', 'ApiDocumentation.md')
@@ -212,6 +219,97 @@ def without_contents(lines):
     return out
 
 
+def wiki(lines, directory):
+    """The reference as wiki pages: one for each ## section (the text before
+    the first, and Getting started, go on Home), a _Sidebar listing every
+    entry, and a _Footer. Links to entries on other pages are made to point
+    there, and links to files of the repository to GitHub."""
+    pages = [('Home', [])]
+    in_code = False
+    for line in without_contents(lines[1:]):
+        if line.strip().startswith('```'):
+            in_code = not in_code
+        if not in_code and line.startswith('## ') and line[3:].strip() != 'Getting started':
+            pages.append((line[3:].strip().replace(' ', '-'), []))
+            continue
+        pages[-1][1].append(line)
+
+        # which page each heading's anchor is on
+    anchor_page = {}
+    for name, body in pages:
+        anchor_page[slug(name.replace('-', ' '))] = name
+        in_code = False
+        for line in body:
+            if line.strip().startswith('```'):
+                in_code = not in_code
+            if not in_code and re.match(r'#{2,6} ', line):
+                anchor_page[slug(line.lstrip('#').strip())] = name
+
+    def target(url, page):
+        if url.startswith('ApiDocumentation.md#'):
+            url = url[len('ApiDocumentation.md'):]
+        if url.startswith('#'):
+            anchor = url[1:]
+            where = anchor_page.get(anchor, page)
+            if where != page and slug(where.replace('-', ' ')) == anchor:
+                return where
+            return url if where == page else f'{where}{url}'
+        if url.startswith(('http://', 'https://', 'mailto:')):
+            return url
+        if url == 'ApiDocumentation.md':
+            return 'Home'
+        return f'{REPOSITORY}/blob/main/{url}'
+
+    def fix_links(text, page):
+        return re.sub(r'\]\(([^)\s]+)\)', lambda m: f']({target(m.group(1), page)})', text)
+
+    os.makedirs(directory, exist_ok=True)
+    for name, body in pages:
+        out = []
+        in_code = False
+        for line in body:
+            if line.strip().startswith('```'):
+                in_code = not in_code
+            elif not in_code:
+                if line.strip() == '---':
+                    continue
+                    # the page's name is its title: its entries one level up
+                if re.match(r'#{3,6} ', line) and name != 'Home':
+                    line = line[1:]
+                line = fix_links(line, name)
+            out.append(line)
+        text = '\n'.join(out).strip('\n') + '\n'
+        if name == 'Home':
+            text = (lines[0].lstrip('# ').strip() + '\n\n').replace('RPGAPI API reference\n\n', '') + text
+        with open(os.path.join(directory, name + '.md'), 'w', encoding='utf-8', newline='\n') as file:
+            file.write(text)
+
+    sidebar_lines = ['**[RPGAPI API reference](Home)**', '']
+    in_code = False
+    for name, body in pages:
+        entries = []
+        for line in body:
+            if line.strip().startswith('```'):
+                in_code = not in_code
+            if not in_code and line.startswith('### '):
+                entries.append(line[4:].strip())
+        title = name.replace('-', ' ')
+        if name == 'Home':
+            sidebar_lines.append('**[Getting started](Home#getting-started)**')
+        else:
+            sidebar_lines.append(f'**[{title}]({name})**')
+        for entry in entries:
+            sidebar_lines.append(f'- [{entry}]({name}#{slug(entry)})')
+        sidebar_lines.append('')
+    with open(os.path.join(directory, '_Sidebar.md'), 'w', encoding='utf-8', newline='\n') as file:
+        file.write('\n'.join(sidebar_lines))
+    with open(os.path.join(directory, '_Footer.md'), 'w', encoding='utf-8', newline='\n') as file:
+        file.write(f'Generated from [ApiDocumentation.md]({REPOSITORY}/blob/main/ApiDocumentation.md) '
+                   f'by `docs/build.py`: change it there, not here. '
+                   f'Also as a [web page with a sidebar]({REPOSITORY}/blob/main/docs/index.html).\n')
+    print(f'wrote {len(pages)} pages, _Sidebar and _Footer to {directory}')
+
+
 def main():
     with open(SOURCE, encoding='utf-8') as file:
         lines = file.read().replace('\r\n', '\n').split('\n')
@@ -224,6 +322,8 @@ def main():
     with open(TARGET, 'w', encoding='utf-8', newline='\n') as file:
         file.write(page)
     print(f'wrote {os.path.relpath(TARGET)}')
+    if len(sys.argv) >= 3 and sys.argv[1] == '--wiki':
+        wiki(lines, sys.argv[2])
 
 
 TEMPLATE = r'''<!DOCTYPE html>
