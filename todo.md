@@ -490,8 +490,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] A health check / statistics endpoint: uptime, requests served, worker
-  jobs
 - [ ] Security headers in one call, as Express's helmet
   (`X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security`
   with HTTPS, ...)

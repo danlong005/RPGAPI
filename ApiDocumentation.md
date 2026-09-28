@@ -1068,6 +1068,42 @@ the file (`DATA-INTO` with `doc=file`, or YAJL's `yajl_stmf_load_tree`). For
 large responses,
 see Large responses and streaming.
 
+### Health checks
+Load balancers and monitoring tools poll a URL to see whether an API is up,
+and take a server out of rotation when it does not answer `200`. A health
+check is a route of your own, since only your app knows what it needs to
+work, such as its database:
+
+```
+RPGAPI_get(app : '/health' : %paddr(health));
+
+dcl-proc health;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-s one int(10:0);
+
+   exec sql values 1 into :one;
+   RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+   if sqlcode = 0;
+      response.status = HTTP_OK;
+      response.body = '{"status":"up"}';
+   else;
+      response.status = 503;               // Service Unavailable: "down"
+      response.body = '{"status":"down","sqlcode":' + %char(sqlcode) + '}';
+   endif;
+   return response;
+end-proc;
+```
+
+Keep it quick, and keep it out of the way of authentication: put middleware
+that checks credentials on the paths that need it (such as `/api`) rather
+than on `*`, or let it pass `/health`. With several jobs, each request goes
+to whichever job takes it, so a check answered is one job answering; the
+INFO log shows every request, and WARN a worker job that ended and was
+replaced.
+
 ### Not found and errors
 Without handlers, a request no route matches is answered with a plain `404`,
 and a request that fails with a plain `500` (or `400`, `408`, `413`, `431` or
