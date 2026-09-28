@@ -88,8 +88,8 @@ This will:
 - Compile the RPGAPI module (`CRTRPGMOD ... TGTCCSID(*JOB)`)
 - Create the service program
 - Add it to the binding directory
-- Compile `ERPG`, which compiles a view ahead of time (see Views in the
-  [API Documentation](ApiDocumentation.md))
+- Compile `ERPG`, which compiles a view ahead of time (see
+  [ERPG](ApiDocumentation.md#erpg) in the API reference)
 
 If `LIB` does not exist the build stops immediately and tells you so, rather than
 failing later with a confusing compile error.
@@ -140,8 +140,8 @@ SBMJOB CMD(CALL PGM(MYLIB/MYAPP)) JOB(MYAPP)
 ENDJOB JOB(MYAPP)
 ```
 The app can also stop itself: `RPGAPI_shutdown()`, called from a route or
-middleware, does what the controlled `ENDJOB` does (see Stopping the server in
-the [API Documentation](ApiDocumentation.md)).
+middleware, does what the controlled `ENDJOB` does (see
+[RPGAPI_shutdown](ApiDocumentation.md#rpgapi_shutdown) in the API reference).
 [QuickStart.md](QuickStart.md) walks through this with a first app, and
 [examples](examples/README.md) has complete apps to start from: a JSON API
 over SQL, streaming exports, API keys, static files, uploads, production
@@ -263,7 +263,7 @@ earlier `rpgapi_h.rpgle` have to be recompiled; they fail to start with a
 signature error until they are. The setters now take the app first:
 `RPGAPI_setMaxRequestSize(app : bytes)`, `RPGAPI_setMaxUploadSize(app : bytes)`,
 `RPGAPI_setTlsApplication(app : id)` and `RPGAPI_setTlsKeystore(app : ...)`.
-See Settings in the [API Documentation](ApiDocumentation.md).
+See [RPGAPI_App](ApiDocumentation.md#rpgapi_app) in the API reference for them all.
 `RPGAPI_Request` also gained `header_text`, so that `RPGAPI_getHeader` returns
 whole header values; that too needs a recompile. And `response.body` is now
 sent exactly as set, where it used to be trimmed: trim bodies set from

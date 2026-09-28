@@ -84,12 +84,12 @@ Things to try next in your app, all of them already in RPGAPI:
 - See what the server does: `RPGAPI_setLogLevel(app : RPGAPI_LOG_INFO)` logs a
   line per request to the job log, `RPGAPI_LOG_DEBUG` everything
 - Send HTML pages from views, templates of HTML with RPG in them:
-  `return RPGAPI_render('customers.erpg' : %addr(model));` (see Views in the
-  API Documentation)
+  `return RPGAPI_render('customers.erpg' : %addr(model));` (see
+  [Views](ApiDocumentation.md#views))
 - Make responses smaller for browsers: `RPGAPI_setCompression(app)` gzips
   text and JSON
 - Stop the server from a route, such as an admin endpoint:
   `RPGAPI_shutdown()` lets the requests in progress finish, as `ENDJOB` does
 
-All of it is in the [API Documentation](ApiDocumentation.md), and
+All of it is in the [API reference](ApiDocumentation.md), and
 [examples](examples/README.md) has complete apps that use it.

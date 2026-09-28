@@ -1,212 +1,294 @@
-# RPGAPI Documentation
+# RPGAPI API reference
 
-### Application Data Structures
-```
-        //
-        // the request data structure
-        //
-        dcl-ds RPGAPI_Request qualified template;
-          body varchar(32000);
-          headers likeds(RPGAPI_header_ds) dim(100);
-          hostname char(250);
-          method char(10);
-          params likeds(RPGAPI_param_ds) dim(100);
-          protocol char(8);
-          query_params likeds(RPGAPI_param_ds) dim(100);
-          query_string char(1024);
-          route char(250);
-          header_text varchar(32000);              // for RPGAPI_getHeader
-          remote_ip varchar(45);                   // see Client address
-          connection_ip varchar(45);
-        end-ds;
+RPGAPI is a web framework for ILE RPG in the spirit of Express. This page
+describes every procedure, data structure and constant that `rpgapi_h.rpgle`
+declares, grouped the way Express groups its API: the application, the
+request, the response, and views. The guides at the end explain how the
+pieces work together (several jobs, HTTPS, CORS, uploads, JSON, logging, and
+so on).
 
-        //
-        // the response data structure
-        //
-        dcl-ds RPGAPI_Response qualified template;
-          body varchar(32000);
-          headers likeds(RPGAPI_header_ds) dim(100);
-          status int(10:0);
-        end-ds;
+New to RPGAPI? Start with the [Quick Start](QuickStart.md), and see
+[examples](examples/README.md) for complete apps.
 
-        //
-        // the application data structure
-        //
-        dcl-ds RPGAPI_App qualified template;
-          port int(10:0);                          // default is 3000
-          socket_descriptor int(10:0);
-          return_socket_descriptor int(10:0);
-          routes likeds(RPGAPI_route_ds) dim(250);
-          middlewares likeds(RPGAPI_route_ds) dim(100);
-          jobs int(10:0);                          // see Settings
-          log_level int(10:0);
-          max_request_size int(10:0);
-          max_upload_size int(10:0);
-          read_timeout int(10:0);
-          write_timeout int(10:0);
-          tls_application_id varchar(100);
-          tls_keystore varchar(1024);
-          tls_password varchar(128);
-          tls_label varchar(128);
-          cors_origins varchar(2000);              // see CORS
-          cors_credentials ind;
-          cors_max_age int(10:0);
-          cors_allow_headers varchar(1000);
-          cors_expose_headers varchar(1000);
-          keepalive_timeout int(10:0);             // see Keep-alive
-          keepalive_requests int(10:0);
-          not_found_handler pointer(*proc);        // see Not found and errors
-          error_handler pointer(*proc);
-          trusted_proxies varchar(1000);           // see Client address
-          route_prefix varchar(1000);              // see Groups
-          statics likeds(RPGAPI_static_ds) dim(20); // see Serving a directory
-          security_headers ind;                     // see Security headers
-          content_security_policy varchar(2000);
-        end-ds;
+In the signatures, a parameter ending in `?` can be left out.
 
-        //
-        // what went wrong, for an error handler
-        //
-        dcl-ds RPGAPI_Error qualified template;
-          status int(10:0);
-          message_id char(7);
-          message_text varchar(400);
-        end-ds;
+## Contents
 
-        dcl-ds RPGAPI_header_ds qualified template;
-          name char(50);
-          value varchar(1024);
-        end-ds;
+**[Getting started](#getting-started)**:
+[a route procedure](#a-route-procedure) ·
+[a middleware procedure](#a-middleware-procedure) ·
+[starting the app](#starting-the-app)
 
-        dcl-ds RPGAPI_param_ds qualified template;
-          name char(50);
-          value varchar(1024);
-        end-ds;
+**[Application](#application)**: [RPGAPI_App](#rpgapi_app)
+- Running: [RPGAPI_start](#rpgapi_start) ·
+  [RPGAPI_shutdown](#rpgapi_shutdown)
+- Routes: [RPGAPI_get, post, put, patch, delete](#rpgapi_get-rpgapi_post-rpgapi_put-rpgapi_patch-rpgapi_delete) ·
+  [RPGAPI_setRoute](#rpgapi_setroute) ·
+  [RPGAPI_setPrefix](#rpgapi_setprefix) ·
+  [RPGAPI_setMiddleware](#rpgapi_setmiddleware) ·
+  [RPGAPI_serveStatic](#rpgapi_servestatic) ·
+  [RPGAPI_setNotFound](#rpgapi_setnotfound) ·
+  [RPGAPI_setErrorHandler](#rpgapi_seterrorhandler)
+- Settings: [RPGAPI_setLogLevel](#rpgapi_setloglevel) ·
+  [RPGAPI_setMaxRequestSize](#rpgapi_setmaxrequestsize) ·
+  [RPGAPI_setMaxUploadSize](#rpgapi_setmaxuploadsize) ·
+  [RPGAPI_setTimeouts](#rpgapi_settimeouts) ·
+  [RPGAPI_setKeepAlive](#rpgapi_setkeepalive) ·
+  [RPGAPI_setCors](#rpgapi_setcors) ·
+  [RPGAPI_setSecurityHeaders](#rpgapi_setsecurityheaders) ·
+  [RPGAPI_setCompression](#rpgapi_setcompression) ·
+  [RPGAPI_setTrustedProxies](#rpgapi_settrustedproxies) ·
+  [RPGAPI_setTlsApplication](#rpgapi_settlsapplication) ·
+  [RPGAPI_setTlsKeystore](#rpgapi_settlskeystore) ·
+  [RPGAPI_setViews](#rpgapi_setviews)
 
-        dcl-ds RPGAPI_route_ds qualified template;
-          method char(10);
-          url varchar(32000);
-          procedure pointer(*proc);
-        end-ds;
-```
+**[Request](#request)**: [RPGAPI_Request](#rpgapi_request)
+- Values: [RPGAPI_getParam](#rpgapi_getparam) ·
+  [RPGAPI_getQueryParam](#rpgapi_getqueryparam) ·
+  [RPGAPI_getHeader](#rpgapi_getheader) ·
+  [RPGAPI_getCookie](#rpgapi_getcookie) ·
+  [RPGAPI_getFormParam](#rpgapi_getformparam)
+- Credentials: [RPGAPI_getBearerToken](#rpgapi_getbearertoken) ·
+  [RPGAPI_getBasicAuth](#rpgapi_getbasicauth) ·
+  [RPGAPI_checkUserProfile](#rpgapi_checkuserprofile)
+- Body: [RPGAPI_bodyLength](#rpgapi_bodylength) ·
+  [RPGAPI_readBody](#rpgapi_readbody) ·
+  [RPGAPI_readBodyBytes](#rpgapi_readbodybytes) ·
+  [RPGAPI_saveBody](#rpgapi_savebody)
+- Forms with files: [RPGAPI_Part](#rpgapi_part) ·
+  [RPGAPI_nextPart](#rpgapi_nextpart) ·
+  [RPGAPI_readPart](#rpgapi_readpart) ·
+  [RPGAPI_readPartBytes](#rpgapi_readpartbytes) ·
+  [RPGAPI_savePart](#rpgapi_savepart)
 
-### Application
-For a simple application to get you up and running checkout our [Quick Start](QuickStart.md) guide. This will get you up and running with a RPG web application in no time.
+**[Response](#response)**: [RPGAPI_Response](#rpgapi_response)
+- Headers and status: [RPGAPI_setHeader](#rpgapi_setheader) ·
+  [RPGAPI_setResponse](#rpgapi_setresponse) ·
+  [RPGAPI_setCookie](#rpgapi_setcookie) ·
+  [RPGAPI_CookieOptions](#rpgapi_cookieoptions) ·
+  [RPGAPI_clearCookie](#rpgapi_clearcookie)
+- Streaming: [RPGAPI_beginResponse](#rpgapi_beginresponse) ·
+  [RPGAPI_write](#rpgapi_write) ·
+  [RPGAPI_writeBytes](#rpgapi_writebytes) ·
+  [RPGAPI_writeHtml](#rpgapi_writehtml) ·
+  [RPGAPI_escapeHtml](#rpgapi_escapehtml) ·
+  [RPGAPI_endResponse](#rpgapi_endresponse)
+- Files and pages: [RPGAPI_sendFile](#rpgapi_sendfile) ·
+  [RPGAPI_render](#rpgapi_render)
 
-#### Callbacks
-To create web application in RPGAPI you have to follow a simple pattern on your callbacks(procedures) that process the requests. 
+**[Views](#views)**: [how views work](#how-views-work) ·
+[tags](#tags) · [RPGAPI_data](#rpgapi_data) ·
+[RPGAPI_include](#rpgapi_include) ·
+[where views are compiled](#where-views-are-compiled) ·
+[ERPG](#erpg) · [when a view is wrong](#when-a-view-is-wrong)
 
-```
+**[Constants and other data structures](#constants-and-other-data-structures)**:
+[status codes](#status-codes) · [methods](#methods) ·
+[log levels](#log-levels) · [RPGAPI_Error](#rpgapi_error) ·
+[other constants](#other-constants) ·
+[internal data structures](#internal-data-structures)
+
+**[Guides](#guides)**:
+[routing rules](#routing-rules) ·
+[several jobs](#several-jobs) ·
+[stopping the server](#stopping-the-server) ·
+[HTTPS](#https) ·
+[keep-alive and timeouts](#keep-alive-and-timeouts) ·
+[CORS](#cors) ·
+[security headers](#security-headers) ·
+[compression](#compression) ·
+[client address](#client-address) ·
+[request bodies and uploads](#request-bodies-and-uploads) ·
+[authentication](#authentication) ·
+[streaming responses](#streaming-responses) ·
+[files and directories](#files-and-directories) ·
+[working with JSON](#working-with-json) ·
+[health checks](#health-checks) ·
+[not found and errors](#not-found-and-errors) ·
+[logging](#logging) ·
+[character sets](#character-sets)
+
+---
+
+## Getting started
+
+### A route procedure
+A route is a procedure that takes the request and returns the response:
+
+```rpgle
 dcl-proc index;
-  dcl-pi *n likeds(RPGAPI_Response);
-    request likeds(RPGAPI_Request) const;
-  end-pi;
-  dcl-ds response likeds(RPGAPI_Response) inz;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
 
-  ...your code...
+   // ...your code...
 
-  response.status = HTTP_OK;
-  return response;
+   response.status = HTTP_OK;
+   response.body = 'Hello';
+   return response;
 end-proc;
 ```
-You will notice that the procedure takes a RPGAPI_Request(RPGAPI request) and returns a RPGAPI_Response(RPGAPI response). That's it! Inside of the method you can create whatever you need and load it into the response before you return it. We will dive more into this later.
 
 Declare the response with `inz`, in the procedure. Without it, RPG fills the
 data structure with blanks, which leaves `status` a meaningless number, and a
-response declared outside the procedure keeps the headers of earlier requests.
+response declared outside the procedure keeps the headers of earlier
+requests.
 
-#### Kicking off the application
-Once you have registered some routes in the app data structure you can start the application so that your app can start handling request. You can start the application using the following api call
+### A middleware procedure
+Middleware runs before the route and can end the request itself. It gets the
+request and the response, and returns `*on` to go on to the route, or `*off`
+to answer with the response it set:
 
+```rpgle
+dcl-proc checkAuth;
+   dcl-pi *n ind;
+      request likeds(RPGAPI_Request) const;
+      response likeds(RPGAPI_Response);
+   end-pi;
+
+   if RPGAPI_getBearerToken(request) = '';
+      response.status = HTTP_UNAUTHORIZED;
+      return *off;
+   endif;
+   return *on;
+end-proc;
 ```
-RPGAPI_start(app);
+
+### Starting the app
+Declare the app, `clear` it, register routes and settings, and start it:
+
+```rpgle
+dcl-ds app likeds(RPGAPI_App);
+
+clear app;
+RPGAPI_get(app : '/' : %paddr(index));
+RPGAPI_start(app : 3000);
+
+*inlr = *on;
+return;
 ```
 
-or add the port on the start command
-```
-RPGAPI_start(app: 3000);
-```
+`RPGAPI_start` serves requests until its job ends, so run the program in a job
+of its own (`SBMJOB CMD(CALL PGM(MYLIB/MYAPP))`) and end that job to stop the
+server. Compile with `TGTCCSID(*JOB)` (see [character sets](#character-sets)).
 
-or configure the port via the app
-```
-app.port = 3000;
-RPGAPI_start(app);
-```
-_NOTE:_ The default port is 3000.
+---
 
-`RPGAPI_start` serves requests until its job ends, so start your program in a
-job of its own (`SBMJOB CMD(CALL PGM(MYLIB/MYAPP))`) and end that job to stop
-the server. The [Quick Start](QuickStart.md) shows the whole cycle.
+## Application
 
-#### Settings
-Everything about how the server runs is in the app data structure. `clear app`
-first: a setting left at 0 or blank gets its default when `RPGAPI_start` runs.
-Set them with these procedures, which check the values, before
-`RPGAPI_start`:
+### RPGAPI_App
+The app: its routes, middleware and settings. Declare one, `clear` it, and
+pass it to the procedures below. A setting left at 0 or blank gets its
+default when `RPGAPI_start` runs. Set them with the procedures, which check
+the values, before `RPGAPI_start`.
 
-| Setting | Procedure | Default |
+| Field | Set with | Default |
 | --- | --- | --- |
-| `port` | `app.port = 8080`, or `RPGAPI_start(app : 8080)` | 3000 |
+| `port` | `app.port = 8080`, or [RPGAPI_start](#rpgapi_start)`(app : 8080)` | 3000 |
 | `jobs` | `app.jobs = 4`, or `RPGAPI_start(app : 8080 : 4)` | 1 |
-| `log_level` | `RPGAPI_setLogLevel(app : RPGAPI_LOG_INFO)` | off |
-| `max_request_size` | `RPGAPI_setMaxRequestSize(app : bytes)` | 1MB |
-| `max_upload_size` | `RPGAPI_setMaxUploadSize(app : bytes)` | 0, off |
-| `read_timeout`, `write_timeout` | `RPGAPI_setTimeouts(app : readSeconds : writeSeconds)` | 30, 30 |
-| `tls_...` | `RPGAPI_setTlsApplication(app : id)` or `RPGAPI_setTlsKeystore(app : path : password : label)` | plain HTTP |
-| `cors_...` | `RPGAPI_setCors(app : origins)`, and the other `cors_` fields; see CORS | no CORS |
-| `keepalive_timeout`, `keepalive_requests` | `RPGAPI_setKeepAlive(app : seconds : maxRequests)`; see Keep-alive | 5 seconds, 100 requests |
-| `trusted_proxies` | `RPGAPI_setTrustedProxies(app : addresses)`; see Client address | none |
-| `security_headers`, `content_security_policy` | `RPGAPI_setSecurityHeaders(app : policy?)`; see Security headers | off |
-| `compression`, `compression_threshold` | `RPGAPI_setCompression(app : minBytes?)`; see Compression | off; 1024 bytes |
-| `views_directory`, `views_library` | `RPGAPI_setViews(app : directory : library?)`; see Views | the job's current directory; the app's library |
-| `not_found_handler`, `error_handler` | `RPGAPI_setNotFound(app : %paddr(proc))`, `RPGAPI_setErrorHandler(app : %paddr(proc))`; see Not found and errors | plain 404 and 500 |
+| `log_level` | [RPGAPI_setLogLevel](#rpgapi_setloglevel) | off |
+| `max_request_size` | [RPGAPI_setMaxRequestSize](#rpgapi_setmaxrequestsize) | 1MB |
+| `max_upload_size` | [RPGAPI_setMaxUploadSize](#rpgapi_setmaxuploadsize) | 0, off |
+| `read_timeout`, `write_timeout` | [RPGAPI_setTimeouts](#rpgapi_settimeouts) | 30, 30 seconds |
+| `tls_application_id`, `tls_keystore`, `tls_password`, `tls_label` | [RPGAPI_setTlsApplication](#rpgapi_settlsapplication), [RPGAPI_setTlsKeystore](#rpgapi_settlskeystore) | plain HTTP |
+| `cors_origins`, `cors_credentials`, `cors_max_age`, `cors_allow_headers`, `cors_expose_headers` | [RPGAPI_setCors](#rpgapi_setcors) and the fields | no CORS |
+| `keepalive_timeout`, `keepalive_requests` | [RPGAPI_setKeepAlive](#rpgapi_setkeepalive) | 5 seconds, 100 requests |
+| `not_found_handler`, `error_handler` | [RPGAPI_setNotFound](#rpgapi_setnotfound), [RPGAPI_setErrorHandler](#rpgapi_seterrorhandler) | plain 404 and 500 |
+| `trusted_proxies` | [RPGAPI_setTrustedProxies](#rpgapi_settrustedproxies) | none |
+| `route_prefix` | [RPGAPI_setPrefix](#rpgapi_setprefix) | none |
+| `statics` | [RPGAPI_serveStatic](#rpgapi_servestatic) (up to 20) | none |
+| `security_headers`, `content_security_policy` | [RPGAPI_setSecurityHeaders](#rpgapi_setsecurityheaders) | off |
+| `compression`, `compression_threshold` | [RPGAPI_setCompression](#rpgapi_setcompression) | off; 1024 bytes |
+| `views_directory`, `views_library` | [RPGAPI_setViews](#rpgapi_setviews) | the job's current directory; the app's library |
+| `routes`, `middlewares` | the route procedures and [RPGAPI_setMiddleware](#rpgapi_setmiddleware) | up to 250 routes, 100 middleware |
+| `socket_descriptor`, `return_socket_descriptor` | RPGAPI | |
 
 A setter given a value it does not accept ends your program with escape
-message `CPF9898` saying why. Every job serving the app, including the extra
-jobs below, runs your program and so gets the same settings.
+message `CPF9898` saying why. Every job serving the app (see
+[several jobs](#several-jobs)) runs your program, and so gets the same
+settings.
 
-#### Handling several requests at once
-By default one job handles one request at a time. Pass the number of jobs to
-serve with as a third parameter:
-```
-RPGAPI_start(app : 3000 : 4);
-```
-The job that calls `RPGAPI_start` opens the port and starts 3 more jobs, each
-running the program this job was started with (the first program on the call
-stack outside `QSYS`, e.g. `MYAPP` for `SBMJOB CMD(CALL MYAPP)`). Each of them
-registers its routes and serves the same port, and every connection goes to
-one of the jobs that is free. Keep in mind that:
-- the program is started again without parameters, so it must not need any,
-  and whatever it does before `RPGAPI_start` it does in every job
-- the jobs have the same name and library list as the one you started
-- to stop the server, end the job you started, or call `RPGAPI_shutdown()`
-  (see Stopping the server). The others end with it, each once it has
-  finished the request it is on, and the job you started waits for them
-- a job that ends while the server runs (it failed, or someone ended it) is
-  replaced by the job you started, once that job is between requests, and
-  logged at WARN. At most 5 are replaced a minute, so a job that keeps failing
-  does not keep the server busy starting it
+<details><summary>The declaration</summary>
 
-#### Stopping the server
-`ENDJOB` ends a job controlled by default (`OPTION(*CNTRLD) DELAY(30)`), and
-so does `ENDSBS *CNTRLD`. RPGAPI then takes no new requests and lets the ones
-in progress finish before the job ends, within the delay. An idle kept-open
-connection is closed. `ENDJOB OPTION(*IMMED)` stops at once, cutting off
-requests in progress.
+```rpgle
+dcl-ds RPGAPI_App qualified template;
+   port int(10:0);
+   socket_descriptor int(10:0);
+   return_socket_descriptor int(10:0);
+   routes likeds(RPGAPI_route_ds) dim(250);
+   middlewares likeds(RPGAPI_route_ds) dim(100);
+   jobs int(10:0);
+   log_level int(10:0);
+   max_request_size int(10:0);
+   max_upload_size int(10:0);
+   read_timeout int(10:0);
+   write_timeout int(10:0);
+   tls_application_id varchar(100);
+   tls_keystore varchar(1024);
+   tls_password varchar(128);
+   tls_label varchar(128);
+   cors_origins varchar(2000);
+   cors_credentials ind;
+   cors_max_age int(10:0);
+   cors_allow_headers varchar(1000);
+   cors_expose_headers varchar(1000);
+   keepalive_timeout int(10:0);
+   keepalive_requests int(10:0);
+   not_found_handler pointer(*proc);
+   error_handler pointer(*proc);
+   trusted_proxies varchar(1000);
+   route_prefix varchar(1000);
+   statics likeds(RPGAPI_static_ds) dim(20);
+   security_headers ind;
+   content_security_policy varchar(2000);
+   compression ind;
+   compression_threshold int(10:0);
+   views_directory varchar(1024);
+   views_library char(10);
+end-ds;
+```
+</details>
 
+### RPGAPI_start
+```rpgle
+RPGAPI_start(app : port? : jobs?)
 ```
-ENDJOB JOB(MYAPP)                        // finish the requests in progress
-ENDJOB JOB(MYAPP) OPTION(*IMMED)         // stop now
+Opens the port and serves requests until the job ends or
+[RPGAPI_shutdown](#rpgapi_shutdown) is called.
+
+| Parameter | Type | |
+| --- | --- | --- |
+| `app` | `RPGAPI_App` | the app |
+| `port` | `int(10:0)` | the port; `app.port`, or 3000, when left out |
+| `jobs` | `int(10:0)` | how many jobs serve the port; `app.jobs`, or 1. See [several jobs](#several-jobs) |
+
+```rpgle
+RPGAPI_start(app);                 // app.port, or 3000
+RPGAPI_start(app : 8080);
+RPGAPI_start(app : 8080 : 4);      // 4 jobs
 ```
 
-To stop the server from the app itself, such as from an admin route or at a
-cutoff time, call `RPGAPI_shutdown()` in a route or middleware. It works as
-the controlled `ENDJOB` does, in every job serving the app, whichever of them
-took the request: each finishes the request it is on and takes no more. The
-request that called it is answered first, with `Connection: close`. Then
-`RPGAPI_start` returns, in the job you started once all of its jobs have
-ended, and the job goes on with what follows it in your program.
+When the server cannot listen on the port, such as when another job is
+already using it, `RPGAPI_start` ends with escape message `CPF9898` naming the
+failed call and the reason, for example
+`bind() failed for port 3000: Address already in use. (errno 3420).` Monitor
+for it if your program should handle this itself. With HTTPS, it also ends
+with an escape message when TLS cannot be set up. When the server stops,
+`RPGAPI_start` returns and your program goes on after it.
+
+### RPGAPI_shutdown
+```rpgle
+RPGAPI_shutdown()
 ```
+Stops the server from the app itself, such as from an admin route or at a
+cutoff time. Call it in a route or middleware. It works as a controlled
+`ENDJOB` does, in every job serving the app, whichever took the request: each
+finishes the request it is on and takes no more. The request that called it
+is answered first, with `Connection: close`. Then `RPGAPI_start` returns, in
+the job you started once all of its jobs have ended.
+
+```rpgle
 dcl-proc stopServer;
    dcl-pi *n likeds(RPGAPI_Response);
       request likeds(RPGAPI_Request) const;
@@ -216,133 +298,58 @@ dcl-proc stopServer;
    return RPGAPI_setResponse(request : HTTP_ACCEPTED);
 end-proc;
 ```
-Guard such a route, e.g. with middleware checking credentials (see
-Authentication): anyone who can call it can stop the server.
 
-#### HTTPS
-Call one of these before `RPGAPI_start` to serve HTTPS instead of HTTP:
+Guard such a route, for example with middleware that checks credentials:
+anyone who can call it can stop the server. See also
+[stopping the server](#stopping-the-server).
+
+### RPGAPI_get, RPGAPI_post, RPGAPI_put, RPGAPI_patch, RPGAPI_delete
+```rpgle
+RPGAPI_get(app : url : %paddr(procedure))
+RPGAPI_post(app : url : %paddr(procedure))
+RPGAPI_put(app : url : %paddr(procedure))
+RPGAPI_patch(app : url : %paddr(procedure))
+RPGAPI_delete(app : url : %paddr(procedure))
 ```
-RPGAPI_setTlsApplication(app : 'MYCO_RPGAPI_ORDERS');   // DCM application ID
-RPGAPI_setTlsKeystore(app : path : password : label);   // or a certificate store
-RPGAPI_start(app : 8443);
-```
-Everything else works the same over HTTPS. The certificate has to be set up in
-Digital Certificate Manager first; the README's HTTPS (TLS) section has the
-steps and the error messages. Each job sets up TLS when it starts, and
-`RPGAPI_start` ends with an escape message if it cannot. A client has 30
-seconds to complete its TLS handshake; one that fails it is disconnected.
+Adds a route for that method: requests for the path are handed to the
+[route procedure](#a-route-procedure).
 
-If the server cannot listen on the port, such as when another job is
-already using it, `RPGAPI_start` ends with escape message `CPF9898` naming the
-failed call and the reason, for example:
-```
-bind() failed for port 3000: Address already in use. (errno 3420).
-```
-Monitor for it if your program should handle this itself.
+| Parameter | Type | |
+| --- | --- | --- |
+| `app` | `RPGAPI_App` | the app |
+| `url` | `varchar(32000)` | the path, with `{name}` segments for params and `*` for any segment |
+| `procedure` | `pointer(*proc)` | the route procedure |
 
-Requests are converted from UTF-8 to the job's CCSID before your procedures see
-them, and responses from the job's CCSID to UTF-8, so `Content-Length` counts
-UTF-8 bytes. Compile your application with `TGTCCSID(*JOB)`, as described in
-the README under Character sets, so that its literals are in the job's CCSID
-as well.
-
-#### Keep-alive
-A connection stays open after a response, so the client can send its next
-request without connecting again, as browsers and HTTP client libraries do.
-Responses say `Connection: keep-alive` and `Keep-Alive: timeout=5`.
-
-- It is kept 5 seconds for the next request, for up to 100 requests;
-  `RPGAPI_setKeepAlive(app : 15 : 1000)` changes that, and
-  `RPGAPI_setKeepAlive(app : 0)` turns keep-alive off.
-- Each job serves one connection at a time, so a job waiting on an idle kept
-  connection closes it when a new connection is waiting: keep-alive does not
-  keep other clients waiting. A connection is only closed like this once it
-  has been quiet for 250ms after its response, so a client sending its next
-  request right away is answered, not cut off. A new client therefore waits
-  at most 250ms for an idle connection's job, and a busy connection keeps its
-  job until its request limit. Clients open a new connection when they find
-  theirs closed.
-- The connection is closed instead after a request the client sent with
-  `Connection: close` (or HTTP/1.0 without `Connection: keep-alive`), a
-  refused request (413, 431, ...), a request body your procedure did not read
-  to the end, and a streamed response to an HTTP/1.0 client.
-- Requests a client sends one after the other without waiting (pipelining)
-  are answered in order.
-
-Each job handles one connection at a time, so a client has 30 seconds (the
-read timeout, see Settings) to send its whole request. If it has not by then, or it closes the connection before the
-headers are complete, the connection is closed without a response and the next
-one is accepted.
-
-Likewise, a client that takes none of a response for 30 seconds (the write
-timeout), for example
-one that stopped reading a large download, is given up on and its connection
-closed. From then on `RPGAPI_write` and `RPGAPI_writeBytes` do nothing, so a
-procedure writing rows still runs to its end and can close what it opened.
-
-
-#### Routing
-To create routes in your application we have given you several ways to create those. 
-
-First up is the setRoute method. This can be used for all types of routes. POST, PATCH, PUT, DELETE, GET... etc You simply pass the application data structure, METHOD, url and a pointer to the procedure you want to call when this route is hit. 
-
-```
-RPGAPI_setRoute(app : METHOD : url : %paddr(procedure));
-RPGAPI_setRoute(app : HTTP_PUT : '/api/users/{id}' : %paddr(USR_update));
-```
-The method is compared as it is sent, so give it in upper case. `HTTP_GET`,
-`HTTP_POST`, `HTTP_PUT`, `HTTP_PATCH` and `HTTP_DELETE` are defined for you.
-
-There are also the following methods that are more descriptive that you may want to use for creating your routes.
-
-```
-RPGAPI_get(app : url : %paddr(procedure));
-RPGAPI_post(app : url : %paddr(procedure));
-RPGAPI_put(app : url : %paddr(procedure));
-RPGAPI_delete(app : url : %paddr(procedure));
-RPGAPI_patch(app : url : %paddr(procedure));
-```
-
-We find that these make the code _MUCH_ more readable.
-
-##### Defining Routes
-For route params you can define routes in the following way
-```
-RPGAPI_get(app: '/v1/things/{id}': %paddr(procedure));
-```
-Now there will be a route param of id that will be available to you in the produre that is ran when this route is matched. 
-
-You can gain access to that param using the following code. This will be a string value. Convert it as needed. 
-```
-RPGAPI_getParam(request: 'id');
-```
-
-A route has to match the whole path, one `/` segment at a time. `/api/users`
-matches `/api/users` and `/api/users/`, but not `/api/users/1` or
-`/x/api/users`. A `{name}` segment matches any one segment and captures it as a
-param, and `*` matches any one segment without capturing it.
-
-Routes are tried in the order they were added, and the first that matches
-handles the request. Since a route matches the whole path, order only matters
-when two routes match the same one, such as a fixed segment and a param in the
-same place: add the fixed one first.
-```
-RPGAPI_get(app : '/api/v1/memberships/new' : %paddr(MBR_new));
+```rpgle
 RPGAPI_get(app : '/api/v1/memberships/{id}' : %paddr(MBR_show));
-RPGAPI_get(app : '/api/v1/memberships' : %paddr(MBR_index));
+RPGAPI_post(app : '/api/v1/memberships' : %paddr(MBR_create));
 ```
-A request that matches no route gets `404 Not Found` (see Not found and
-errors). An app can have up to 250 routes and 100 middleware; adding one more
-ends your program with escape message `CPF9898` saying so, instead of the
-route never answering.
+A `{name}` segment is read with [RPGAPI_getParam](#rpgapi_getparam). A `GET`
+route also answers `HEAD`. How paths match, and in which order routes are
+tried: [routing rules](#routing-rules).
 
-##### Groups
-Routes that share the start of their path, such as an API version, can be
-added as a group: `RPGAPI_setPrefix` puts a prefix in front of the path of
-every route and middleware added after it, until the next `RPGAPI_setPrefix`.
-`''` ends the group.
-
+### RPGAPI_setRoute
+```rpgle
+RPGAPI_setRoute(app : method : url : %paddr(procedure))
 ```
+Adds a route for any method, such as one the procedures above do not cover.
+`method` (`char(10)`) is compared as it is sent, so give it in upper case; see
+[methods](#methods) for the constants.
+
+```rpgle
+RPGAPI_setRoute(app : HTTP_PUT : '/api/users/{id}' : %paddr(USR_update));
+RPGAPI_setRoute(app : HTTP_OPTIONS : '/api/users' : %paddr(USR_options));
+```
+
+### RPGAPI_setPrefix
+```rpgle
+RPGAPI_setPrefix(app : prefix)
+```
+Puts `prefix` (`varchar(1000)`) in front of the path of every route and
+middleware added after it, until the next `RPGAPI_setPrefix`: a group of
+routes, such as an API version. `''` ends the group.
+
+```rpgle
 RPGAPI_setPrefix(app : '/api/v1');
 RPGAPI_setMiddleware(app : '*' : %paddr(needKey));   // /api/v1 and below only
 RPGAPI_get(app : '/notes' : %paddr(listNotes));       // GET /api/v1/notes
@@ -361,202 +368,404 @@ and everything below it), so a check such as an API key covers the group and
 nothing else. A prefix can have `{params}`, and a missing `/` in front of the
 prefix or a path, or a `/` at the end of the prefix, is added or dropped.
 Groups do not nest: each `RPGAPI_setPrefix` replaces the last. The prefix is
-kept in `app.route_prefix`.
+kept in `app.route_prefix`, and [RPGAPI_serveStatic](#rpgapi_servestatic)
+follows it too.
 
-##### HEAD and OPTIONS
-- A `HEAD` request is answered by the `GET` route for its path (unless you add
-  a `HEAD` route), with the same status and headers, including the
-  `Content-Length` the body would have, but without the body. Your procedure
-  runs as for `GET`, and sees `request.method = 'HEAD'`. Streamed responses
-  and `RPGAPI_sendFile` send only their headers too.
-- An `OPTIONS` request for a path that has routes, but no `OPTIONS` route of
-  its own, is answered with `204` and an `Allow` header listing their methods,
-  such as `GET, HEAD, POST, OPTIONS`. It goes through middleware first.
-  `HTTP_HEAD` and `HTTP_OPTIONS` name the methods for `RPGAPI_setRoute`.
-
-#### CORS
-A page from another origin (scheme, host and port), such as a front end on
-`https://app.example.com` calling the API on `https://api.example.com`, may only
-use the API's responses when the API allows that origin. Name the origins:
-
+### RPGAPI_setMiddleware
+```rpgle
+RPGAPI_setMiddleware(app : url : %paddr(procedure))
 ```
+Adds [middleware](#a-middleware-procedure) for a path and every path below it,
+or for all requests with `'*'` (`RPGAPI_GLOBAL_MIDDLEWARE`).
+
+```rpgle
+RPGAPI_setMiddleware(app : '*' : %paddr(logRequest));                 // every request
+RPGAPI_setMiddleware(app : '/api/v1/memberships' : %paddr(checkAuth));
+```
+The second runs for `/api/v1/memberships` and `/api/v1/memberships/5`, but not
+for `/api/v1/membershipsX` or `/x/api/v1/memberships`. `{name}` and `*`
+segments work as in routes.
+
+Every middleware that matches runs once per request, in the order it was
+added, before the route, and also when no route matches. One that returns
+`*off` ends the request with the response it set. An app can have up to 100.
+
+### RPGAPI_serveStatic
+```rpgle
+RPGAPI_serveStatic(app : url : directory)
+```
+Serves the files of an IFS directory (`varchar(1024)`) below a path
+(`varchar(1000)`), such as a web page with its styles, scripts and images, the
+way `express.static` does.
+
+```rpgle
+RPGAPI_serveStatic(app : '/web' : '/www/myapp');
+```
+`GET /web/css/app.css` then sends `/www/myapp/css/app.css`, and `/web/` sends
+`/www/myapp/index.html`. The directory has to exist: `RPGAPI_serveStatic` ends
+your program with `CPF9898` when it does not. An app can serve up to 20
+directories. What is served and how:
+[files and directories](#files-and-directories).
+
+### RPGAPI_setNotFound
+```rpgle
+RPGAPI_setNotFound(app : %paddr(procedure))
+```
+Answers requests no route matches with a [route procedure](#a-route-procedure)
+of yours, such as a JSON error, instead of a plain `404`. A status left at 0 is
+sent as 404. See [not found and errors](#not-found-and-errors).
+
+### RPGAPI_setErrorHandler
+```rpgle
+RPGAPI_setErrorHandler(app : %paddr(procedure))
+```
+Answers requests that fail, or that RPGAPI refused, with a procedure of yours
+instead of a plain `500` (or 400, 408, 413, 431, 501). The procedure gets the
+request and an [RPGAPI_Error](#rpgapi_error), and returns the response:
+
+```rpgle
+dcl-proc failed;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+      error likeds(RPGAPI_Error) const;
+   end-pi;
+   dcl-ds response likeds(RPGAPI_Response) inz;
+
+   response.status = error.status;
+   RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+   response.body = '{"error":"' + %char(error.status) + '"}';
+   return response;
+end-proc;
+```
+When it is called: [not found and errors](#not-found-and-errors).
+
+### RPGAPI_setLogLevel
+```rpgle
+RPGAPI_setLogLevel(app : level)
+```
+How much RPGAPI logs to the job log: one of the [log levels](#log-levels)
+(`int(10:0)`). Off by default. See [logging](#logging).
+
+```rpgle
+RPGAPI_setLogLevel(app : RPGAPI_LOG_INFO);   // a line per request
+```
+
+### RPGAPI_setMaxRequestSize
+```rpgle
+RPGAPI_setMaxRequestSize(app : bytes)
+```
+The largest request body read into memory before your procedure is called:
+1MB by default, up to 16,000,000 bytes. A larger body is refused with 413,
+unless [RPGAPI_setMaxUploadSize](#rpgapi_setmaxuploadsize) allows it.
+
+```rpgle
+RPGAPI_setMaxRequestSize(app : 5000000);
+```
+
+### RPGAPI_setMaxUploadSize
+```rpgle
+RPGAPI_setMaxUploadSize(app : bytes)
+```
+Allows bodies over the request size limit, up to this larger one (at most
+2GB); 0, the default, is off. Such a body is not read into memory: your
+procedure reads it from the connection, or saves it with
+[RPGAPI_saveBody](#rpgapi_savebody). See
+[request bodies and uploads](#request-bodies-and-uploads).
+
+```rpgle
+RPGAPI_setMaxUploadSize(app : 500000000);   // 500MB
+```
+
+### RPGAPI_setTimeouts
+```rpgle
+RPGAPI_setTimeouts(app : readSeconds : writeSeconds)
+```
+How long a client has to send its whole request (the read timeout), and how
+long it may take none of a response (the write timeout). Both are 30 seconds
+by default, and have to be at least 1. See
+[keep-alive and timeouts](#keep-alive-and-timeouts).
+
+```rpgle
+RPGAPI_setTimeouts(app : 20 : 60);
+```
+
+### RPGAPI_setKeepAlive
+```rpgle
+RPGAPI_setKeepAlive(app : seconds : maxRequests?)
+```
+How long a connection stays open after a response for the client's next
+request (5 seconds by default), and how many requests one connection may send
+(100). `0` seconds turns keep-alive off.
+
+```rpgle
+RPGAPI_setKeepAlive(app : 15 : 1000);
+RPGAPI_setKeepAlive(app : 0);          // close after each response
+```
+See [keep-alive and timeouts](#keep-alive-and-timeouts).
+
+### RPGAPI_setCors
+```rpgle
+RPGAPI_setCors(app : origins)
+```
+Allows pages on other origins to call the app: origins (`varchar(2000)`)
+separated by spaces or commas, or `'*'` for any. The other `cors_` fields of
+[RPGAPI_App](#rpgapi_app) fine-tune it.
+
+```rpgle
 RPGAPI_setCors(app : 'https://app.example.com https://admin.example.com');
 app.cors_credentials = *on;          // let the browser send cookies along
 app.cors_max_age = 600;              // cache preflight answers 10 minutes
 app.cors_expose_headers = 'X-Total'; // headers scripts may read
-RPGAPI_start(app);
+```
+See [CORS](#cors).
+
+### RPGAPI_setSecurityHeaders
+```rpgle
+RPGAPI_setSecurityHeaders(app : policy?)
+```
+Adds the browser protection headers Express apps get from `helmet` to every
+response. `policy` (`varchar(2000)`) is the `Content-Security-Policy`:
+`RPGAPI_DEFAULT_CSP` when left out, `''` for none.
+
+```rpgle
+RPGAPI_setSecurityHeaders(app);
+RPGAPI_setSecurityHeaders(app : 'default-src ''self''; script-src ''self'' https://cdn.example.com');
+```
+The headers, and how a route overrides them:
+[security headers](#security-headers).
+
+### RPGAPI_setCompression
+```rpgle
+RPGAPI_setCompression(app : minBytes?)
+```
+Gzips text and JSON responses for clients that accept it, as Express's
+`compression` middleware does: bodies of `minBytes` (1024 when left out) and
+more, and every streamed response of unknown length.
+
+```rpgle
+RPGAPI_setCompression(app);
+RPGAPI_setCompression(app : 10000);
+```
+Which responses are gzipped, and how: [compression](#compression).
+
+### RPGAPI_setTrustedProxies
+```rpgle
+RPGAPI_setTrustedProxies(app : addresses)
+```
+The proxies in front of the app (`varchar(1000)`, separated by spaces or
+commas, or `'*'`), whose `X-Forwarded-For` header gives
+`request.remote_ip` the client's address.
+
+```rpgle
+RPGAPI_setTrustedProxies(app : '10.0.0.5 10.0.0.6');
+```
+See [client address](#client-address).
+
+### RPGAPI_setTlsApplication
+```rpgle
+RPGAPI_setTlsApplication(app : applicationId)
+```
+Serves HTTPS with the certificate assigned to a DCM application ID
+(`varchar(100)`). See [HTTPS](#https).
+
+```rpgle
+RPGAPI_setTlsApplication(app : 'MYCO_RPGAPI_ORDERS');
+RPGAPI_start(app : 8443);
 ```
 
-| Field | Default | |
-| --- | --- | --- |
-| `cors_origins` | blank: no CORS | origins, separated by spaces or commas, or `*` for any |
-| `cors_credentials` | `*off` | send `Access-Control-Allow-Credentials: true` |
-| `cors_max_age` | 0: not sent | seconds a browser may cache a preflight answer |
-| `cors_allow_headers` | blank: the ones asked for | request headers allowed in preflight answers |
-| `cors_expose_headers` | blank | response headers scripts may read |
-
-- A request from an allowed origin gets `Access-Control-Allow-Origin` with its
-  origin (or `*` when any origin is allowed without credentials), with
-  `Vary: Origin`, on every response, errors included. Other origins get no
-  CORS headers, so the browser keeps the response from the page.
-- A preflight (an `OPTIONS` request with `Origin` and
-  `Access-Control-Request-Method`) is answered with `204` before any
-  middleware runs, since browsers never send credentials with it: an auth
-  middleware would refuse it. It lists the methods of the routes for the path
-  in `Access-Control-Allow-Methods`.
-- Headers you set yourself, such as `Access-Control-Allow-Origin`, are left
-  as you set them.
-
-### Middleware
-
-#### Global Middleware 
-For global middleware you can create do the following.
-
+### RPGAPI_setTlsKeystore
+```rpgle
+RPGAPI_setTlsKeystore(app : path : password : label?)
 ```
-  RPGAPI_setMiddleware(app: RPGAPI_GLOBAL_MIDDLEWARE: %paddr(CHECK_AUTH));
-```
-or
-```
-  RPGAPI_setMiddleware(app: '*': %paddr(CHECK_AUTH));
-```
-if you don't want to type the constant name.
+Serves HTTPS with a certificate from a certificate store file (`path`,
+`varchar(1024)`), opened with `password` (`varchar(128)`); `label`
+(`varchar(128)`) picks the certificate, the store's default when left out.
+See [HTTPS](#https).
 
-
-#### Route Middleware
-
-To create middleware on your routes you can use the following method.
-
+### RPGAPI_setViews
+```rpgle
+RPGAPI_setViews(app : directory : library?)
 ```
-  RPGAPI_setMiddleware(app : '/api/v1/memberships' : %paddr(CHECK_AUTH));
+Where [views](#views) are: the directory (`varchar(1024)`) template paths and
+copybooks are relative to (the job's current directory when not set), and
+the library (`char(10)`) their compiled programs go into (the library of the
+app's program when left out).
+
+```rpgle
+RPGAPI_setViews(app : '/home/me/myapp/views');
+RPGAPI_setViews(app : '/home/me/myapp/views' : 'MYVIEWS');
 ```
 
-Route middleware runs for its own path and every path below it, so the one
-above also runs for `/api/v1/memberships/5`, but not for
-`/api/v1/membershipsX` or `/x/api/v1/memberships`. `{name}` and `*` segments
-work the same as in routes.
+---
 
-and the defintion of the middleware callback is as follows
+## Request
 
+### RPGAPI_Request
+What the client sent, handed to every route and middleware.
+
+| Field | |
+| --- | --- |
+| `method` | `GET`, `POST`, ... (`HEAD` for a HEAD request answered by a GET route) |
+| `route` | the path, as it was sent (still URL-encoded) |
+| `query_string` | the query string, as it was sent; read values with [RPGAPI_getQueryParam](#rpgapi_getqueryparam) |
+| `query_params` | the query values, decoded |
+| `params` | the route's `{name}` params, decoded; read them with [RPGAPI_getParam](#rpgapi_getparam) |
+| `protocol` | `HTTP/1.1` or `HTTP/1.0` |
+| `hostname` | the host the client asked for: the `Host` header without its port, as Express's `req.hostname` (`api.example.com` for `Host: api.example.com:8080`, `[::1]` for `Host: [::1]:3000`, blank without a `Host` header) |
+| `headers` | the first 50 headers, with values cut at 1,024 characters: read values with [RPGAPI_getHeader](#rpgapi_getheader) |
+| `header_text` | the headers as sent, for `RPGAPI_getHeader` |
+| `body` | the body, up to 32,000 characters, converted to the job's CCSID; larger bodies are read with [RPGAPI_readBody](#rpgapi_readbody) |
+| `remote_ip` | the client's IP address, as Express's `req.ip`; see [client address](#client-address) |
+| `connection_ip` | the address the connection came from (a proxy's, behind one) |
+
+<details><summary>The declaration</summary>
+
+```rpgle
+dcl-ds RPGAPI_Request qualified template;
+   body varchar(32000);
+   headers likeds(RPGAPI_header_ds) dim(100);
+   hostname char(250);
+   method char(10);
+   params likeds(RPGAPI_param_ds) dim(100);
+   protocol char(8);
+   query_params likeds(RPGAPI_param_ds) dim(100);
+   query_string char(1024);
+   route char(250);
+   header_text varchar(32000);
+   remote_ip varchar(45);
+   connection_ip varchar(45);
+end-ds;
 ```
-  dcl-proc CHECK_AUTH;
-    dcl-pi *n ind;
-      request likeds(RPGAPI_Request) const;
-      response likeds(RPGAPI_Response);
-    end-pi;
+</details>
 
-    return *on;
-  end-proc;
+### RPGAPI_getParam
+```rpgle
+value = RPGAPI_getParam(request : name)       // varchar(1024)
+```
+A route param, from a `{name}` segment of the route's path, as text: convert
+it as needed.
+
+```rpgle
+RPGAPI_get(app : '/v1/things/{id}' : %paddr(showThing));
+...
+id = %int(RPGAPI_getParam(request : 'id'));
+```
+Params are URL-decoded, as Express does: `%20` becomes a space and `%C3%BC` a
+`ü` (escapes are read as UTF-8, then converted to the job's CCSID). A `+`
+stays a `+`. An escape that is not two hex digits, or bytes that are not
+UTF-8, are left as they were sent. Routes are matched on the path as it was
+sent, so an encoded `/` (`%2F`) stays inside its segment and arrives in the
+param.
+
+### RPGAPI_getQueryParam
+```rpgle
+value = RPGAPI_getQueryParam(request : name)  // varchar(1024)
+```
+A value from the query string, such as `q` in `?q=fish`, decoded as params
+are, with `+` as a space too. The name is matched in any case. The whole
+query string, as sent, is `request.query_string`.
+
+```rpgle
+search = RPGAPI_getQueryParam(request : 'q');
 ```
 
-If you want to continue the request after the middleware method has ran then 
-return *on, else you can return *off and the request will be cancelled. You of 
-course will need to set the response accordingly in the middleware.
-
-Every middleware that matches runs once per request, in the order it was
-added, before the route. It runs even when no route matches the request.
-
-
-### Requests
-Given that you followed the outline specs for your callback procedures the request datastructure will be passed into the method that is handing the current request. You can find everything out about the request by looking in the request data structure. 
-
-#### Headers
-These are the headers that came in on the request. You can access those headers using the following api method
-
+### RPGAPI_getHeader
+```rpgle
+value = RPGAPI_getHeader(request : name)      // varchar(32000)
 ```
-header_value = RPGAPI_getHeader(request : 'Content-Type');
+A request header. The name is matched in any case, `''` is returned for a
+header that was not sent, and the whole value is returned however long it
+is, such as a long bearer token or a large `Cookie` header.
+
+```rpgle
+type = RPGAPI_getHeader(request : 'Content-Type');
 ```
-The name is matched in any case, `''` is returned for a header that was not
-sent, and the whole value is returned however long it is, such as a long
-bearer token or a large `Cookie` header. `request.headers` also lists the
-first 50 headers, but with their values cut at 1,024 characters: use
-`RPGAPI_getHeader` to read values.
 
-`request.hostname` is the host the client asked for: the `Host` header without
-its port, as Express's `req.hostname`. For `Host: api.example.com:8080` it is
-`api.example.com`, for `Host: [::1]:3000` it is `[::1]`, and it is blank when
-the request has no `Host` header.
-
-#### Cookies
-`RPGAPI_getCookie` returns a cookie the browser sent, from the `Cookie` header:
-
+### RPGAPI_getCookie
+```rpgle
+value = RPGAPI_getCookie(request : name)      // varchar(4096)
 ```
+A cookie the browser sent, from the `Cookie` header. The name is matched
+exactly (cookie names are case-sensitive), a value in quotes comes back
+without them, and `%XX` escapes are decoded, as Express's `req.cookies` does,
+so a value set with [RPGAPI_setCookie](#rpgapi_setcookie) comes back as it
+was set. A cookie that was not sent gives `''`.
+
+```rpgle
 session_id = RPGAPI_getCookie(request : 'session');
 ```
-The name is matched exactly (cookie names are case-sensitive), a value in
-quotes comes back without them, and `%XX` escapes are decoded, as Express's
-`req.cookies` does, so a value set with `RPGAPI_setCookie` comes back as it was
-set. A cookie that was not sent gives `''`.
 
-#### Authentication
-Two procedures read the credentials a client sends in the `Authorization`
-header:
-
+### RPGAPI_getFormParam
+```rpgle
+value = RPGAPI_getFormParam(request : name : occurrence?)   // varchar(32000)
 ```
-   // Authorization: Bearer <token>: API keys, JWTs, OAuth access tokens
-token = RPGAPI_getBearerToken(request);
+A field of an HTML form body: a form sent with `method="post"` (and no
+`enctype`) arrives as `application/x-www-form-urlencoded`, such as
+`name=J%C3%BCrgen+Long&tag=a&tag=b`. Fields are decoded as query values are.
 
-   // Authorization: Basic ...: curl -u, a browser's login prompt
+```rpgle
+name = RPGAPI_getFormParam(request : 'name');          // Jürgen Long
+second_tag = RPGAPI_getFormParam(request : 'tag' : 2); // b
+```
+- The name is matched in any case. `occurrence` picks the nth field of that
+  name, for checkboxes and multiple selects; past the last one it is `''`.
+- A field that was not sent, or was sent empty, gives `''`, and so does any
+  body with another `Content-Type`.
+- Values can be up to 32,000 characters, such as a long `<textarea>`, and the
+  whole body is searched, also past what `request.body` holds; a body larger
+  than the request size limit, which is streamed from the connection, is not.
+- Forms with files (`enctype="multipart/form-data"`) are read with
+  [RPGAPI_nextPart](#rpgapi_nextpart).
+
+### RPGAPI_getBearerToken
+```rpgle
+token = RPGAPI_getBearerToken(request)        // varchar(16000)
+```
+The token of an `Authorization: Bearer <token>` header (API keys, JWTs, OAuth
+access tokens), or `''` when the request has none. The scheme is matched in
+any case. Checking it is up to your app; see
+[authentication](#authentication).
+
+### RPGAPI_getBasicAuth
+```rpgle
+found = RPGAPI_getBasicAuth(request : user : password)   // ind
+```
+Decodes the user and password of an `Authorization: Basic ...` header (curl
+`-u`, a browser's login prompt) into `user` and `password` (`varchar(256)`
+each), and returns `*on`; `*off` when there are none (no header, another
+scheme, or a value that is not base64 or has no `:`). The password may contain
+colons; both are read as UTF-8. See [authentication](#authentication).
+
+```rpgle
 if RPGAPI_getBasicAuth(request : user : password);
    ...
 endif;
 ```
 
-`RPGAPI_getBearerToken` returns the token, or `''` when the request has none.
-`RPGAPI_getBasicAuth` decodes the user and password and returns `*on`, or
-`*off` when there are none (no header, another scheme, or a value that is not
-base64 or has no `:`). The password may contain colons; both are read as UTF-8
-and are up to 256 characters. The scheme is matched in any case.
-
-Checking them is up to your app, usually in middleware, so a route never runs
-without them. Answer `401`; for Basic, add a `WWW-Authenticate` header, so a
-browser asks for a user and password:
-
+### RPGAPI_checkUserProfile
+```rpgle
+valid = RPGAPI_checkUserProfile(user : password : messageId?)   // ind
 ```
-dcl-proc needLogin;
-   dcl-pi *n ind;
-      request likeds(RPGAPI_Request) const;
-      response likeds(RPGAPI_Response);
-   end-pi;
-   dcl-s user varchar(256);
-   dcl-s password varchar(256);
+Whether the password is right for an IBM i user profile, with the system's
+`QSYGETPH` API, so an API can use the sign-on its users already have. The
+handle it gets is released at once, so your job keeps running as its own
+user.
 
-   if RPGAPI_getBasicAuth(request : user : password) and
-      validLogin(user : password);             // your check
-      return *on;
-   endif;
-   response.status = HTTP_UNAUTHORIZED;
-   RPGAPI_setHeader(response : 'WWW-Authenticate' : 'Basic realm="orders"');
-   return *off;
-end-proc;
-```
-
-Basic credentials are only encoded, not encrypted, and a bearer token lets
-anyone who has it in: serve them over HTTPS (see HTTPS in the README). RPGAPI
-does not write the `Authorization` header to the log.
-
-##### Checking IBM i user profiles
-`RPGAPI_checkUserProfile` checks a user and password against the system's user
-profiles, so an API can use the IBM i sign-on its users already have:
-
-```
+```rpgle
 if RPGAPI_getBasicAuth(request : user : password) and
    RPGAPI_checkUserProfile(user : password : message_id);
    ...                                        // signed on as user
 endif;
 ```
-
-It returns `*on` when the password is right, using the system's
-`QSYGETPH` API; the handle it gets is released at once, so your job keeps
-running as its own user. `message_id` tells you why not, for your log (not for
-the client): `CPF22E2` for a wrong password, which the system also answers for
-a user that does not exist, `CPF22E3` for a disabled profile, `CPF22E4` for an
-expired password. Before asking the system, it refuses a user name starting
-with `*` (such as `*CURRENT`) or longer than 10 characters, an empty password,
-and `*NOPWD`, `*NOPWDCHK` and `*NOPWDSTS`, which would otherwise get a handle
+`messageId` (`char(7)`) tells you why not, for your log (not for the client):
+`CPF22E2` for a wrong password, which the system also answers for a user that
+does not exist, `CPF22E3` for a disabled profile, `CPF22E4` for an expired
+password. Before asking the system, it refuses a user name starting with `*`
+(such as `*CURRENT`) or longer than 10 characters, an empty password, and
+`*NOPWD`, `*NOPWDCHK` and `*NOPWDSTS`, which would otherwise get a handle
 without any password.
 
 Know what it means before you use it:
-
 - Every wrong password counts toward the system's limit on sign-on attempts
   (system value `QMAXSIGN`), exactly as at a sign-on screen. A client that
   guesses can disable a real user's profile, which then cannot sign on
@@ -568,127 +777,85 @@ Know what it means before you use it:
 - Checking a password takes the system some time; for many requests from the
   same client, sign on once and give the client a token of your own.
 
-#### Client address
-`request.remote_ip` is the client's IP address, as Express's `req.ip`, for
-logging, limits or allowing only some addresses. `request.connection_ip` is
-the address the connection came from. Without a proxy in front of the app,
-they are the same.
-
-Behind a proxy, such as nginx, IBM HTTP Server or a load balancer, every
-connection comes from the proxy, and the proxy passes the client's address in
-the `X-Forwarded-For` header. List the proxies' addresses, so that RPGAPI uses
-it:
-
+### RPGAPI_bodyLength
+```rpgle
+size = RPGAPI_bodyLength(request)             // int(10:0)
 ```
-RPGAPI_setTrustedProxies(app : '10.0.0.5 10.0.0.6');
+The body's size in bytes, as sent; -1 while the size of a chunked body being
+streamed is not known yet.
+
+### RPGAPI_readBody
+```rpgle
+piece = RPGAPI_readBody(request)              // varchar(32000)
 ```
+The next piece of the body as text in the job's CCSID, `''` at its end. Any
+body, whatever its size, can be read this way; `request.body` only holds the
+first 32,000 characters.
 
-Only a request whose connection comes from one of them gets `remote_ip` from
-`X-Forwarded-For`; anyone else could send the header with any address. The
-header lists every hop (`client, proxy1, proxy2`), and a client can put
-addresses of its own in front, so RPGAPI reads it from the right, skipping
-the trusted proxies: the first address that is not one of them is the client.
-`'*'` trusts every connection and takes the leftmost address; use it only when
-nothing can reach the app except through the proxy. Addresses are compared
-exactly (no ranges such as `10.0.0.0/8`).
-
-The INFO log line for each request shows `remote_ip`, as in
-`GET /hello from 203.0.113.9 -> 200, 11 bytes, 3 ms`.
-
-#### Params
-These are the route params that came in on the request. To define route params in your route see the section on routing. You can access the params using the following api method
-
-```
-id_value = RPGAPI_getParam(request : 'id');
-```
-Params and query values are URL decoded, as Express does: `%20` becomes a
-space and `%C3%BC` a `ü` (escapes are read as UTF-8, then converted to the
-job's CCSID). In query names and values `+` is a space too; in params it stays
-a `+`. An escape that is not two hex digits, or bytes that are not UTF-8, are
-left as they were sent. Routes are matched on the path as it was sent, so an
-encoded `/` (`%2F`) stays inside its segment and arrives in the param.
-`request.route` and `request.query_string` keep the text as it was sent.
-
-#### Body
-To access the body of the request you can use the following variable in the 
-request data structure.
-
-```
-body_value = request.body;
-```
-
-`request.body` holds a body of up to 32,000 characters. Bodies can be larger:
-up to 1MB by default, sent with a `Content-Length` or with
-`Transfer-Encoding: chunked`. Any body, whatever its size, can be read in
-pieces:
-
-```
-size = RPGAPI_bodyLength(request);          // bytes, as sent
-
-piece = RPGAPI_readBody(request);           // text in the job's CCSID
+```rpgle
+piece = RPGAPI_readBody(request);
 dow piece <> '';
-  ...
-  piece = RPGAPI_readBody(request);
+   ...
+   piece = RPGAPI_readBody(request);
 enddo;
 ```
+It reads from the same position as [RPGAPI_readBodyBytes](#rpgapi_readbodybytes),
+so use one or the other for a request. See
+[request bodies and uploads](#request-bodies-and-uploads) for bodies that are
+streamed from the connection.
 
-For binary content (images, PDFs, ...) read the bytes as they were sent,
-without conversion, into a buffer of your own:
-
+### RPGAPI_readBodyBytes
+```rpgle
+count = RPGAPI_readBodyBytes(request : %addr(buffer) : %size(buffer))   // int(10:0)
 ```
+Copies up to `size` bytes of the body, as they were sent, without conversion,
+into `buffer`, for binary content such as images and PDFs. Returns how many,
+0 at the end.
+
+```rpgle
 count = RPGAPI_readBodyBytes(request : %addr(buffer) : %size(buffer));
 dow count > 0;
-  ...
-  count = RPGAPI_readBodyBytes(request : %addr(buffer) : %size(buffer));
+   ...
+   count = RPGAPI_readBodyBytes(request : %addr(buffer) : %size(buffer));
 enddo;
 ```
 
-Both read from the same position, so use one or the other for a request.
-
-Change the limit, up to 16,000,000 bytes, before starting the app:
-
+### RPGAPI_saveBody
+```rpgle
+saved = RPGAPI_saveBody(request : path)       // ind
 ```
-RPGAPI_setMaxRequestSize(app : 5000000);
-RPGAPI_start(app);
-```
+Writes the body, unconverted, to an IFS file (`varchar(1024)`), replacing it.
+`*off` when the file cannot be created. With
+[RPGAPI_setMaxUploadSize](#rpgapi_setmaxuploadsize), the body goes from the
+connection to the file without being held in memory.
 
-#### Uploads larger than memory
-Bodies over the request size limit can be allowed too, up to a second, larger
-limit (at most 2GB):
-
-```
-RPGAPI_setMaxUploadSize(app : 500000000);   // 500MB; 0, the default, is off
-RPGAPI_start(app);
-```
-
-Such a body is not read into memory before your procedure is called. It is
-read from the connection as your procedure asks for it, with the same
-`RPGAPI_readBody` and `RPGAPI_readBodyBytes`, so memory stays the same
-whatever its size. To store it in a file:
-
-```
-if RPGAPI_saveBody(request : '/uploads/' + name);   // *off: cannot create it
+```rpgle
+if RPGAPI_saveBody(request : '/uploads/' + name);
    response.status = HTTP_CREATED;
 endif;
 ```
 
-- A client that sent `Expect: 100-continue` is only asked for the body when
-  your procedure first reads it. A procedure that refuses without reading it
-  (say with 403) is never sent it.
-- `RPGAPI_bodyLength` is -1 while a chunked body's size is not known yet.
-- When the body turns out larger than the upload limit, is not valid, or
-  stops arriving for the read timeout, the read ends your procedure with an escape
-  message and the request is answered with 413, 400 or 408. Monitor for it if
-  your procedure has to clean up.
-- A body your procedure does not read is dropped.
+### RPGAPI_Part
+A part of a `multipart/form-data` body, filled in by
+[RPGAPI_nextPart](#rpgapi_nextpart).
 
-#### Forms with files (multipart/form-data)
-Browsers send a form with a file input, and `curl -F`, as
-`multipart/form-data`: a body of parts, one per field or file. Go through them
-with `RPGAPI_nextPart`, which describes each part in an `RPGAPI_Part`:
+| Field | |
+| --- | --- |
+| `name` (`varchar(256)`) | the form field's name |
+| `filename` (`varchar(1024)`) | the file's name as the client sent it, `''` for a field that is not a file. Never use it as a path |
+| `content_type` (`varchar(256)`) | the part's `Content-Type`, such as `image/png` |
 
+### RPGAPI_nextPart
+```rpgle
+more = RPGAPI_nextPart(request : part)        // ind
 ```
-dcl-ds part likeds(RPGAPI_Part);      // name, filename, content_type
+Moves to the next part of a `multipart/form-data` body (a form with a file
+input, `curl -F`) and describes it in `part`, an
+[RPGAPI_Part](#rpgapi_part). Returns `*off` at the end, and for a body that is
+not `multipart/form-data`.
+
+```rpgle
+dcl-ds part likeds(RPGAPI_Part);
 
 dow RPGAPI_nextPart(request : part);
    if part.filename = '';
@@ -700,242 +867,421 @@ dow RPGAPI_nextPart(request : part);
    endif;
 enddo;
 ```
-
 - Parts are read from the body as you go, never all at once, so the size of
-  the files is only bounded by the request and upload limits above. Allow
-  larger uploads with `RPGAPI_setMaxUploadSize`.
-- `RPGAPI_readPart` returns the next piece of the part as text in the job's
-  CCSID and `''` at its end; `RPGAPI_readPartBytes` copies raw bytes, and
-  `RPGAPI_savePart` writes the rest of the part to an IFS file and returns
-  its size (-1 when the file cannot be created).
+  the files is only bounded by the request and upload limits. Allow larger
+  uploads with [RPGAPI_setMaxUploadSize](#rpgapi_setmaxuploadsize).
 - Whatever you do not read of a part is skipped when you move to the next.
-- `RPGAPI_nextPart` returns `*off` at the end, and for a body that is not
-  `multipart/form-data`. A body that is not valid multipart ends your
-  procedure with an escape message and a 400, like the other body errors.
-- `part.filename` is what the client sent. Never use it as a path: build the
-  file name yourself, as above.
+- A body that is not valid multipart ends your procedure with an escape
+  message and a 400, like the other body errors.
 - Use either the parts or `RPGAPI_readBody` / `RPGAPI_readBodyBytes` for a
   request, not both.
 
-Requests that are refused before your procedures are called:
-| Status | When |
+### RPGAPI_readPart
+```rpgle
+piece = RPGAPI_readPart(request)              // varchar(32000)
+```
+The next piece of the current part as text in the job's CCSID, `''` at its
+end.
+
+### RPGAPI_readPartBytes
+```rpgle
+count = RPGAPI_readPartBytes(request : %addr(buffer) : %size(buffer))   // int(10:0)
+```
+Copies up to `size` bytes of the current part, unconverted, to `buffer`.
+Returns how many, 0 at its end.
+
+### RPGAPI_savePart
+```rpgle
+size = RPGAPI_savePart(request : path)        // int(10:0)
+```
+Writes the rest of the current part, unconverted, to an IFS file, replacing
+it. Returns the bytes written, -1 when the file cannot be created. Build the
+path yourself: never from `part.filename`.
+
+---
+
+## Response
+
+### RPGAPI_Response
+What a route returns: the status, the headers and the body. Declare it with
+`inz` in the procedure (see [a route procedure](#a-route-procedure)). After
+the response, the connection is kept open for the client's next request (see
+[keep-alive and timeouts](#keep-alive-and-timeouts)).
+
+| Field | |
 | --- | --- |
-| 413 Content Too Large | the body is larger than the limit. With `Expect: 100-continue` this is answered before the client sends it |
-| 431 Request Header Fields Too Large | the request line and headers are over 32,000 bytes |
-| 400 Bad Request | `Content-Length` is not a number, or a chunk is not valid |
-| 501 Not Implemented | a `Transfer-Encoding` other than `chunked` |
+| `status` | the status code, such as `HTTP_OK` (see [status codes](#status-codes)) |
+| `headers` | up to 100 headers; set them with [RPGAPI_setHeader](#rpgapi_setheader) |
+| `body` | the body, up to 32,000 characters, sent as UTF-8. For more, stream the response (see [RPGAPI_beginResponse](#rpgapi_beginresponse)) |
 
-A streamed upload that is too large, not valid or stops arriving is answered
-with 413, 400 or 408 once your procedure reads it (see above). A procedure that
-fails with an error it does not handle gets `500 Internal Server Error`.
-
-#### QueryString/QueryParams
-The query string can be accessed in two different ways.
-
-First you can get they full query string by access the query_string variable 
-in the request data structure
-
-```
-query_string_value = request.query_string;
-```
-
-or you can access the various values in the query string using the following
-method
-
-```
-query_string_param = RPGAPI_getQueryParam(request : 'q');
-```
-Note: q would be the param name in the query string like `q=fish`
-
-#### Forms
-An HTML form sent with `method="post"` (and no `enctype`) arrives as an
-`application/x-www-form-urlencoded` body, `name=J%C3%BCrgen+Long&tag=a&tag=b`.
-`RPGAPI_getFormParam` reads a field from it, decoded as query params are:
-`+` is a space and `%XX` escapes are UTF-8.
-
-```
-name = RPGAPI_getFormParam(request : 'name');          // Jürgen Long
-second_tag = RPGAPI_getFormParam(request : 'tag' : 2); // b
-```
-
-The name is matched in any case, as for `RPGAPI_getQueryParam`. The optional
-third parameter picks the nth field with the name, for checkboxes and
-multiple selects; it is `''` past the last one. A field that was not sent, or
-was sent empty, gives `''`, and so does any body with another `Content-Type`.
-Values can be up to 32,000 characters, such as a long `<textarea>`, and the
-whole body is searched, also past what `request.body` holds; a body larger
-than the request size limit (1MB), which is streamed from the connection, is
-not. Forms with files (`enctype="multipart/form-data"`) are read with
-`RPGAPI_nextPart`; see Forms with files.
-
-#### Protocol
-The protocol that the request used can be accessed using the following variable 
-on the request data structure.
-
-```
-protocol = request.protocol;
-```
-
-#### Method
-The method that the request used can be accessed using the following variable 
-on the request data structure.
-
-```
-method = request.method;
-```
-
-#### Route
-The route that the request used can be accessed using the following variable 
-on the request data structure.
-
-```
-route = request.route;
-```
-
-### Responses
-The response object is something you will create in the callback methods. Inside the callback method you will define the response and return it from your callback. 
-```
-  dcl-ds response likeds(RPGAPI_Response) inz;
-
-  return response;
-```
-After the response the connection is kept open for the client's next request
-(see Keep-alive).
-
-#### Headers
-You can set response headers very easily. The following is an example. 
-
-```
+```rpgle
+response.status = HTTP_CREATED;
+response.body = '{"id":5}';
 RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+return response;
+```
+The body is sent exactly as it is set, blanks included. When you set it from
+a fixed-length (`char`) field, trim it, or its trailing blanks go out too:
+`response.body = %trim(row.name);`.
+
+<details><summary>The declaration</summary>
+
+```rpgle
+dcl-ds RPGAPI_Response qualified template;
+   body varchar(32000);
+   headers likeds(RPGAPI_header_ds) dim(100);
+   status int(10:0);
+end-ds;
+```
+</details>
+
+### RPGAPI_setHeader
+```rpgle
+RPGAPI_setHeader(response : name : value)
+```
+Adds a response header: `name` (`char(50)`), `value` (`varchar(1024)`).
+
+```rpgle
+RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+
+response.status = HTTP_FOUND;                          // a redirect
+RPGAPI_setHeader(response : 'Location' : '/api/v1/memberships/5');
 ```
 Up to 100 headers can be set. `Connection`, `Content-Length` and
-`Transfer-Encoding` are set by RPGAPI from how the body is sent; values you set
-for them are left out. A line break in a header name or value becomes a blank,
-so request data you put in a header (a file name, a redirect) cannot add
-headers of its own.
+`Transfer-Encoding` are set by RPGAPI from how the body is sent; values you
+set for them are left out. A line break in a header name or value becomes a
+blank, so request data you put in a header (a file name, a redirect) cannot
+add headers of its own.
 
-#### Security headers
-Browsers have protections they only turn on when a response asks for them:
-not guessing a file's type, not letting other sites show the page in a frame,
-not sending the page's address along with links, and more. Express apps get
-them from `helmet`; RPGAPI adds the same ones to every response (routes,
-404s, errors, static files, streamed responses) after one call:
-
+### RPGAPI_setResponse
+```rpgle
+return RPGAPI_setResponse(request : status)   // RPGAPI_Response
 ```
-RPGAPI_setSecurityHeaders(app);
-```
+A response that is just a status, with no body or headers, as Express's
+`res.sendStatus`.
 
-| Header | Value |
-| --- | --- |
-| `Content-Security-Policy` | helmet's default, `RPGAPI_DEFAULT_CSP`: `default-src 'self'` and the rest |
-| `Cross-Origin-Opener-Policy` | `same-origin` |
-| `Cross-Origin-Resource-Policy` | `same-origin` |
-| `Origin-Agent-Cluster` | `?1` |
-| `Referrer-Policy` | `no-referrer` |
-| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains`, only with HTTPS |
-| `X-Content-Type-Options` | `nosniff` |
-| `X-DNS-Prefetch-Control` | `off` |
-| `X-Download-Options` | `noopen` |
-| `X-Frame-Options` | `SAMEORIGIN` |
-| `X-Permitted-Cross-Domain-Policies` | `none` |
-| `X-XSS-Protection` | `0` |
-
-The Content-Security-Policy only lets a page load scripts, styles and images
-from its own site. That is right for an API and for most pages, but blocks a
-page with inline `<script>` or scripts from another site: pass your own
-policy, or `''` for none:
-
-```
-RPGAPI_setSecurityHeaders(app : 'default-src ''self''; script-src ''self'' https://cdn.example.com');
-RPGAPI_setSecurityHeaders(app : '');
+```rpgle
+return RPGAPI_setResponse(request : HTTP_NO_CONTENT);
 ```
 
-A header a procedure sets itself is sent instead of RPGAPI's, so one route
-can have its own policy or `X-Frame-Options`. `Cross-Origin-Resource-Policy:
-same-origin` does not stop other sites from calling the API through CORS
-(see CORS), but it does stop them from embedding its responses as images or
-scripts; a route that serves those to other sites sets
-`Cross-Origin-Resource-Policy: cross-origin`. The settings are the app's
-`security_headers` and `content_security_policy` fields.
-
-#### Cookies
-`RPGAPI_setCookie` adds a `Set-Cookie` header; call it once per cookie. Without
-options the cookie is for the whole site (`Path=/`) and lasts until the browser
-closes:
-
+### RPGAPI_setCookie
+```rpgle
+RPGAPI_setCookie(response : name : value : options?)
 ```
+Adds a `Set-Cookie` header; call it once per cookie. Without
+[options](#rpgapi_cookieoptions) the cookie is for the whole site (`Path=/`)
+and lasts until the browser closes.
+
+```rpgle
 RPGAPI_setCookie(response : 'theme' : 'dark');
-```
-For the other attributes, pass an `RPGAPI_CookieOptions`:
 
-```
 dcl-ds options likeds(RPGAPI_CookieOptions) inz(*likeds);
-
 options.max_age = 3600;          // seconds; Expires is sent too
 options.http_only = *on;         // not readable from JavaScript
 options.secure = *on;            // HTTPS only
 options.same_site = 'Lax';       // Strict, Lax or None
 RPGAPI_setCookie(response : 'session' : session_id : options);
 ```
-| Field | Attribute | Default |
-| --- | --- | --- |
-| `path` | `Path` | `/` |
-| `domain` | `Domain` | none: only the host that set it |
-| `max_age` | `Max-Age` and `Expires` | 0: until the browser closes |
-| `http_only` | `HttpOnly` | off |
-| `secure` | `Secure` | off |
-| `same_site` | `SameSite` (`Strict`, `Lax` or `None`) | none: the browser decides |
-
 This sends `Set-Cookie: session=...; Max-Age=3600; Path=/; Expires=...;
 HttpOnly; Secure; SameSite=Lax`. The value is sent `%XX` encoded as UTF-8, as
 Express does, so it can hold spaces, `;` and characters outside ASCII;
-`RPGAPI_getCookie` decodes it. Browsers need `secure` for `SameSite=None`.
+[RPGAPI_getCookie](#rpgapi_getcookie) decodes it. Browsers need `secure` for
+`SameSite=None`.
 
-`RPGAPI_clearCookie` tells the browser to delete a cookie (`Max-Age=0` and an
-`Expires` in 1970). Pass the same `path` and `domain` it was set with:
-
-```
-RPGAPI_clearCookie(response : 'session');
-```
 A name that is not one a cookie can have (it has to be letters, digits or
-``!#$%&'*+-.^_`|~``), a `path` or `domain` with a `;`, an unknown `same_site`,
-or a cookie longer than the 1,024 characters a response header holds ends your
-procedure with an escape message (CPF9898) that says which; the request is
-answered with a 500, and the message is logged at
+``!#$%&'*+-.^_`|~``), a `path` or `domain` with a `;`, an unknown
+`same_site`, or a cookie longer than the 1,024 characters a response header
+holds ends your procedure with an escape message (`CPF9898`) that says which;
+the request is answered with a 500, and the message is logged at
 `RPGAPI_LOG_ERROR`.
 
-#### Body
-Setting the body of the response can be done like so.
+### RPGAPI_CookieOptions
+The attributes of a cookie, for [RPGAPI_setCookie](#rpgapi_setcookie) and
+[RPGAPI_clearCookie](#rpgapi_clearcookie). Declare it with `inz(*likeds)` and
+set what you need.
+
+| Field | Attribute | Default |
+| --- | --- | --- |
+| `path` (`varchar(256)`) | `Path` | `/` |
+| `domain` (`varchar(256)`) | `Domain` | none: only the host that set it |
+| `max_age` (`int(10:0)`) | `Max-Age` and `Expires` | 0: until the browser closes |
+| `http_only` (`ind`) | `HttpOnly` | off |
+| `secure` (`ind`) | `Secure` | off |
+| `same_site` (`varchar(6)`) | `SameSite` (`Strict`, `Lax` or `None`) | none: the browser decides |
+
+### RPGAPI_clearCookie
+```rpgle
+RPGAPI_clearCookie(response : name : options?)
+```
+Tells the browser to delete a cookie (`Max-Age=0` and an `Expires` in 1970).
+Pass the same `path` and `domain` it was set with.
+
+```rpgle
+RPGAPI_clearCookie(response : 'session');
+```
+
+### RPGAPI_beginResponse
+```rpgle
+RPGAPI_beginResponse(response : length?)
+```
+Starts a streamed response: sends the status and headers of `response` (a
+status of 0 is 200). Write the body with [RPGAPI_write](#rpgapi_write) and
+[RPGAPI_writeBytes](#rpgapi_writebytes) in as many pieces as you like, then
+[RPGAPI_endResponse](#rpgapi_endresponse). For bodies over 32,000 characters,
+or rows sent as they are read.
+
+```rpgle
+RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
+RPGAPI_beginResponse(response);
+RPGAPI_write('[');
+// ... RPGAPI_write(...) for each row ...
+RPGAPI_write(']');
+RPGAPI_endResponse();
+return response;            // not sent again: the response has gone out
+```
+The body is sent with `Transfer-Encoding: chunked`, or up to the connection's
+close for an HTTP/1.0 client. When you know its size in bytes up front, pass
+`length` and it is sent with a `Content-Length` instead. See
+[streaming responses](#streaming-responses).
+
+### RPGAPI_write
+```rpgle
+RPGAPI_write(text)
+```
+Adds text (`varchar(32000)`) to a streamed response, converted from the job's
+CCSID to UTF-8. Writes are collected and sent in pieces of 32KB, so writing a
+row at a time is fine. After the client has stopped taking the response (the
+write timeout), it does nothing, so a procedure writing rows still runs to
+its end.
+
+### RPGAPI_writeBytes
+```rpgle
+RPGAPI_writeBytes(%addr(buffer) : length)
+```
+Adds `length` bytes at `buffer` to a streamed response, as they are, for
+binary content.
+
+### RPGAPI_writeHtml
+```rpgle
+RPGAPI_writeHtml(text)
+```
+Adds text to a streamed response as HTML shows it: `&`, `<`, `>`, `"` and `'`
+become entities, so a value from a user or a table cannot add tags or scripts
+to a page. It is what `<%= %>` does in a [view](#views).
+
+### RPGAPI_escapeHtml
+```rpgle
+html = RPGAPI_escapeHtml(text)                // varchar(192000)
+```
+Text with `&`, `<`, `>`, `"` and `'` as HTML entities (`&amp;` `&lt;` `&gt;`
+`&quot;` `&#39;`), for building HTML yourself.
+
+### RPGAPI_endResponse
+```rpgle
+RPGAPI_endResponse()
+```
+Finishes a streamed response. A response you do not end is ended when your
+procedure returns.
+
+### RPGAPI_sendFile
+```rpgle
+sent = RPGAPI_sendFile(response : path)       // ind
+```
+Sends an IFS file of any size as it is stored, with the status and headers of
+`response`, a `Content-Length`, and a `Content-Type` from its extension unless
+`response` has one. Returns `*off`, having sent nothing, when the file cannot
+be opened or the path contains a `..` segment, so your procedure can answer
+instead.
+
+```rpgle
+if not RPGAPI_sendFile(response : '/www/files/' + RPGAPI_getParam(request : 'name'));
+   response.status = HTTP_NOT_FOUND;
+endif;
+return response;
+```
+It answers conditional and range requests as Express does; see
+[files and directories](#files-and-directories).
+
+### RPGAPI_render
+```rpgle
+return RPGAPI_render(template : %addr(data)? : response?)   // RPGAPI_Response
+```
+Sends a [view](#views): a template of HTML with RPG in it (`varchar(1024)`),
+given the route's data structure by its address. The page streams as
+`text/html; charset=utf-8`, or with the status and headers of `response`,
+such as a 400 or a cookie. A template that cannot be compiled is answered
+with a 500 naming why.
+
+```rpgle
+dcl-ds model likeds(customers_t) inz;
+// ...fill model...
+return RPGAPI_render('customers.erpg' : %addr(model));
+
+return RPGAPI_render('about.erpg');                        // no data
+return RPGAPI_render('form.erpg' : %addr(model) : response); // response.status = 400
+```
+
+---
+
+## Views
+
+### How views work
+A view is a page written as HTML with RPG inside tags, the way Express apps
+use EJS templates. The route fills a data structure the usual way (a fetch, a
+`CHAIN`, a loop) and passes its address to [RPGAPI_render](#rpgapi_render);
+the view bases the same data structure on that address and writes the page,
+which is streamed to the browser. It is like calling a program with a
+parameter.
+
+Put the data structure in a copybook next to the views, so the route and the
+view are sure to agree on it (`views/customers_t.rpgleinc`):
+```rpgle
+**free
+dcl-ds customer_t qualified template;
+   name varchar(50);
+   city varchar(50);
+   balance packed(11:2);
+end-ds;
+dcl-ds customers_t qualified template;
+   title varchar(100);
+   count int(10:0);
+   customers likeds(customer_t) dim(500);
+end-ds;
+```
+The route:
+```rpgle
+/include 'customers_t.rpgleinc'
+
+dcl-proc listCustomers;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+   dcl-ds model likeds(customers_t) inz;
+
+   model.title = 'Customers';
+   // ...fill model.customers and model.count...
+   return RPGAPI_render('customers.erpg' : %addr(model));
+end-proc;
+```
+The view, `views/customers.erpg`:
+```
+<%! /include 'customers_t.rpgleinc'
+     dcl-ds model likeds(customers_t) based(RPGAPI_data);
+     dcl-s i int(10:0); -%>
+<h1><%= model.title %></h1>
+<ul>
+<% for i = 1 to model.count; -%>
+  <li><%= model.customers(i).name %>, <%= model.customers(i).city %>: <%= model.customers(i).balance %></li>
+<% endfor; -%>
+</ul>
+```
+Call the data structure `model`, or anything but `page`, which is a reserved
+word in RPG.
+
+RPG cannot run code it reads while it runs, so RPGAPI compiles each view into
+a program the first time it is asked for, and again whenever the template or
+a copybook it includes changes: edit a view and refresh the page. That first
+request takes a few seconds; the rest just call the program. With
+[compression](#compression) on, views are gzipped like any text.
+
+Two complete apps show views at work:
+- [examples/html-page.sqlrpgle](examples/html-page.sqlrpgle): a library's
+  tables, fetched from the SQL catalog into the route's data structure, in a
+  view that includes another for the top of the page.
+- [examples/guestbook.rpgle](examples/guestbook.rpgle): no SQL. The notes are
+  an RPG array; the view has `if`/`else`, a form it posts back to, what
+  visitors typed escaped, and a 400 with the page when a field is missing
+  (`RPGAPI_render`'s `response`).
+
+### Tags
+| Tag | |
+| --- | --- |
+| `<% code %>` | RPG statements: `for`, `if`, `dow`, `exec sql`, calls. Each ends with `;` as usual |
+| `<%= expr %>` | A value, HTML-escaped: `&`, `<`, `>`, `"` and `'` become entities, so a value from a user or a table cannot add tags or scripts to the page. Numbers and dates are formatted with `%char` |
+| `<%- expr %>` | A value as it is, for HTML you built and trust |
+| `<%# text %>` | A comment, left out of the page |
+| `<%! decls %>` | Declarations: `/include` of a copybook, `dcl-ds ... based(RPGAPI_data)`, `dcl-s`, `dcl-c`. They go first in the view's program wherever they are in the template |
+| `<%%` | A literal `<%` |
+| `-%>` | Ends any tag and leaves out the line break after it, so a line holding only a tag leaves no blank line in the page |
+
+Everything else is text, written as it is. A view can run its own SQL too,
+`exec sql` and all; it is then compiled with `CRTSQLRPGI`. Close the cursors
+it opens.
+
+### RPGAPI_data
+In a view, the pointer the route passed to `RPGAPI_render` (or `*null`). Base
+the view's data structure on it:
+```rpgle
+dcl-ds model likeds(customers_t) based(RPGAPI_data);
+```
+The view reads the route's data in place, with its own types: nothing is
+copied or converted, and the data stays where it is while the page is
+written, since the view runs inside the `RPGAPI_render` call.
+
+A pointer carries no type: if the route and the view declared the data
+differently, the view would read the wrong bytes, as with a program called
+with the wrong parameters. The shared copybook is what prevents it, and a
+view is compiled again when its copybook changes. Recompile the route's
+program too when a copybook changes.
+
+### RPGAPI_include
+```rpgle
+RPGAPI_include(template : %addr(data)?)
+```
+In a view, writes another view in place: with this view's data, or other data,
+such as part of this view's (the title, one row). Shared headers and footers
+are views of their own.
 
 ```
-response.body = 'Here is the body!';
-```
-The body is sent exactly as it is set, blanks included. When you set it from a
-fixed-length (`char`) field, trim it, or its trailing blanks go out too:
-`response.body = %trim(row.name);`. `response.body` holds up to 32,000
-characters; for more, see Large responses and streaming.
-
-#### Status
-Once again setting the status is a simple thing to to do.
-
-```
-response.status = 200;
-response.status = HTTP_CREATED;          // 201
-
-// a redirect
-response.status = HTTP_FOUND;            // 302
-RPGAPI_setHeader(response : 'Location' : '/api/v1/memberships/5');
+<% RPGAPI_include('pagetop.erpg' : %addr(model.title)); -%>
+<% for i = 1 to model.count; -%>
+<%    RPGAPI_include('row.erpg' : %addr(model.customers(i))); -%>
+<% endfor; -%>
 ```
 
-These statuses have constants, and are sent with their reason phrase. Any other
-status is sent with an empty one, which clients accept.
+### Where views are compiled
+[RPGAPI_setViews](#rpgapi_setviews) names the directory and the library. A
+template path that does not start with `/` is relative to that directory (the
+job's current directory without it), and so are the copybooks a view
+includes. The programs go into the library named, or the library of the app's
+program, and are named `RV` and 8 hex digits, after the template's file name
+and content and its copybooks' content. The job needs the ILE RPG compiler
+(5770WDS) and authority to create programs there. Old versions are not
+deleted; any `RV...` program can be, and is compiled again when needed.
 
-For a response that is just a status, with no body or headers, as Express's
-`res.sendStatus`:
+### ERPG
+```
+CALL PGM(MYLIB/ERPG) PARM('/home/me/myapp/views/customers.erpg' 'MYVIEWS')
+```
+`ERPG`, which `make all` builds, compiles one view into a library ahead of
+time. For a server without the compiler, compile the views where there is
+one, and bring the library along: a view is found by its name and content, so
+the same template uses the same program. It is also a quick way to check a
+template: one that does not compile ends `ERPG` with `CPF9898` and the errors.
 
-```
-return RPGAPI_setResponse(request : HTTP_NO_CONTENT);
-```
+### When a view is wrong
+A view that does not compile, or a template with a tag that is never closed,
+is answered with a 500 page listing the errors at their template lines, such
+as `customers.erpg:7: RNF7030 The name or indicator NMAE is not defined.`,
+and logged at ERROR. Every line of the generated program carries a comment
+naming its template line (the source is in `/tmp/RPGAPI_RV....rpgle`). A
+view that fails while it runs ends the page there, as a streamed response
+does.
+
+Good to know:
+- Templates are UTF-8, with or without a byte order mark; Windows line breaks
+  are fine. Their text goes through the job's CCSID, as everything written
+  with [RPGAPI_write](#rpgapi_write) does.
+- Not in this version: layouts, EJS's `<%_ _%>`, and passing a view the
+  request itself (pass what it needs in the data).
+
+---
+
+## Constants and other data structures
+
+### Status codes
+These statuses have constants, and are sent with their reason phrase. Any
+other status is sent with an empty one, which clients accept.
 
 | Constant | Status |
 | --- | --- |
@@ -958,101 +1304,250 @@ return RPGAPI_setResponse(request : HTTP_NO_CONTENT);
 | `HTTP_INTERNAL_SERVER` | 500 Internal Server Error |
 | `HTTP_NOT_IMPLEMENTED` | 501 Not Implemented |
 
-#### Large responses and streaming
-`response.body` holds up to 32,000 characters. For anything larger, or to send
-rows as they are read, stream the response instead of returning it: begin it
-with the status and headers of a response, write the body in as many pieces
-as you like, then end it.
+### Methods
+`HTTP_GET`, `HTTP_POST`, `HTTP_PUT`, `HTTP_PATCH`, `HTTP_DELETE`,
+`HTTP_HEAD` and `HTTP_OPTIONS`, for [RPGAPI_setRoute](#rpgapi_setroute) and
+for comparing with `request.method`.
 
-```
-RPGAPI_setHeader(response : 'Content-Type' : 'application/json');
-RPGAPI_beginResponse(response);
-RPGAPI_write('[');
-// ... RPGAPI_write(...) for each row ...
-RPGAPI_write(']');
-RPGAPI_endResponse();
-return response;            // not sent again: the response has gone out
-```
+### Log levels
+For [RPGAPI_setLogLevel](#rpgapi_setloglevel); each also logs the levels
+above it. See [logging](#logging) for what each logs.
 
-- `RPGAPI_write(text)` converts text from the job's CCSID to UTF-8.
-- `RPGAPI_writeBytes(%addr(buffer) : length)` sends bytes as they are, for
-  binary content.
-- Writes are collected and sent in pieces of 32KB, so writing a row at a time
-  is fine.
-- The body is sent with `Transfer-Encoding: chunked`. If you know its size in
-  bytes up front, pass it and it is sent with a `Content-Length` instead:
-  `RPGAPI_beginResponse(response : 11)`.
-- A response you do not end is ended when your procedure returns. If your
-  procedure fails after beginning it, the connection is closed, and the
-  client can tell the response is incomplete.
+| Constant | |
+| --- | --- |
+| `RPGAPI_LOG_OFF` | nothing (the default) |
+| `RPGAPI_LOG_ERROR` | failures |
+| `RPGAPI_LOG_WARN` | and refused requests and clients that time out |
+| `RPGAPI_LOG_INFO` | and a line per request |
+| `RPGAPI_LOG_DEBUG` | and everything RPGAPI does |
 
-#### Sending files
-`RPGAPI_sendFile` sends an IFS file of any size as it is stored, with a
-`Content-Length` and a `Content-Type` from its extension (`html`, `css`, `js`,
-`json`, `txt`, `csv`, `xml`, `svg`, `png`, `jpg`, `gif`, `ico`, `pdf`, `zip`,
-otherwise `application/octet-stream`). Headers you set on the response are
-sent too, and a `Content-Type` you set is used instead.
+### RPGAPI_Error
+What went wrong, for an [error handler](#rpgapi_seterrorhandler).
 
-```
-if not RPGAPI_sendFile(response : '/www/files/' + RPGAPI_getParam(request : 'name'));
-   response.status = HTTP_NOT_FOUND;
-endif;
-return response;
-```
+| Field | |
+| --- | --- |
+| `status` (`int(10:0)`) | the status RPGAPI answers with unless the handler sets another: 500, or 400, 408, 413, 431 or 501 for a request or body that was refused |
+| `message_id` (`char(7)`) | the escape message that ended the procedure, such as `MCH1211`; blank for a request refused before any procedure ran |
+| `message_text` (`varchar(400)`) | its text; for a refused request, the status's reason phrase, such as `Content Too Large` |
 
-It returns `*off`, having sent nothing, when the file cannot be opened or the
-path contains a `..` segment, so your procedure can answer instead. Text files
-are sent as stored, so keep them in UTF-8 or ASCII.
+### Other constants
+| Constant | |
+| --- | --- |
+| `RPGAPI_GLOBAL_MIDDLEWARE` | `'*'`: middleware for every request |
+| `RPGAPI_DEFAULT_CSP` | the Content-Security-Policy [RPGAPI_setSecurityHeaders](#rpgapi_setsecurityheaders) sends when it is given none: helmet's default, `default-src 'self'` and the rest |
+| `RPGAPI_CR`, `RPGAPI_LF`, `RPGAPI_CRLF` | carriage return and line feed in EBCDIC |
 
-Like Express, it also sends `Last-Modified`, an `ETag`, `Accept-Ranges: bytes`
-and `Cache-Control: public, max-age=0` (unless you set a `Cache-Control`), and
-for a GET it answers:
-- `If-None-Match` / `If-Modified-Since` with **304 Not Modified** and no body
-  when the client's copy is current
-- `Range: bytes=...` (one range) with **206 Partial Content** and just those
-  bytes, or **416 Range Not Satisfiable** when the range is outside the file.
-  Several ranges get the whole file, and so does a range whose `If-Range`
-  names an older version of the file
+### Internal data structures
+Parts of the ones above, which apps do not usually need:
 
-#### Serving a directory
-`RPGAPI_serveStatic` serves the files of an IFS directory below a path, such as
-a web page with its styles, scripts and images, the way `express.static` does:
+```rpgle
+dcl-ds RPGAPI_header_ds qualified template;   // request.headers, response.headers
+   name char(50);
+   value varchar(1024);
+end-ds;
 
-```
-RPGAPI_serveStatic(app : '/web' : '/www/myapp');
+dcl-ds RPGAPI_param_ds qualified template;    // request.params, request.query_params
+   name char(50);
+   value varchar(1024);
+end-ds;
+
+dcl-ds RPGAPI_route_ds qualified template;    // app.routes, app.middlewares
+   method char(10);
+   url varchar(32000);
+   procedure pointer(*proc);
+end-ds;
+
+dcl-ds RPGAPI_static_ds qualified template;   // app.statics
+   url varchar(1000);
+   directory varchar(1024);
+end-ds;
 ```
 
-`GET /web/css/app.css` then sends `/www/myapp/css/app.css`, through
-`RPGAPI_sendFile`, so with the same content types, caching headers, `304`s
-and ranges. `/web/` sends `/www/myapp/index.html`, and a directory asked for
-without its `/` at the end (`/web`, `/web/docs`) is redirected to it, so the
-relative links in its `index.html` work. A directory without an `index.html`
-is not listed.
+The procedures RPGAPI uses internally are declared in `rpgapi_int_h.rpgle`,
+for RPGAPI itself and its unit tests; apps do not include it.
 
-- Only `GET` and `HEAD` are served, after the middleware (so a login check
-  covers the files too) and before the routes. A path with no file behind it
-  goes on to the routes, and then to the 404.
-- The path is decoded one segment at a time (`%20`, UTF-8 names), and a path
-  that could leave the directory is not served: a `.` or `..` segment, or one
-  that decodes to one with `/`, `\` or a NUL (`%2e%2e`, `..%2f`). Files and
-  directories whose name starts with `.` (such as `.env`) are not served
-  either.
-- The directory has to exist: `RPGAPI_serveStatic` ends your program with
-  `CPF9898` when it does not. It follows `RPGAPI_setPrefix`, and an app can
-  serve up to 20 directories (`app.statics`).
-- The files are sent as stored, so keep text files in UTF-8 or ASCII, and the
-  job needs authority to read them. A symbolic link in the directory is
-  followed, wherever it points.
+---
 
-#### Compression
-`RPGAPI_setCompression` gzips responses for the clients that accept it, as
-Express's `compression` middleware does. JSON and text usually shrink to a
-fifth or less, which matters for large responses on slow connections:
+## Guides
+
+### Routing rules
+- A route has to match the whole path, one `/` segment at a time.
+  `/api/users` matches `/api/users` and `/api/users/`, but not `/api/users/1`
+  or `/x/api/users`. A `{name}` segment matches any one segment and captures
+  it as a param, and `*` matches any one segment without capturing it.
+- Routes are tried in the order they were added, and the first that matches
+  handles the request. Since a route matches the whole path, order only
+  matters when two routes match the same one, such as a fixed segment and a
+  param in the same place: add the fixed one first.
+  ```rpgle
+  RPGAPI_get(app : '/api/v1/memberships/new' : %paddr(MBR_new));
+  RPGAPI_get(app : '/api/v1/memberships/{id}' : %paddr(MBR_show));
+  RPGAPI_get(app : '/api/v1/memberships' : %paddr(MBR_index));
+  ```
+- Middleware runs first, then [static files](#rpgapi_servestatic) for GET and
+  HEAD, then the routes. A request that matches no route gets `404 Not Found`
+  (see [not found and errors](#not-found-and-errors)).
+- An app can have up to 250 routes and 100 middleware; adding one more ends
+  your program with escape message `CPF9898` saying so, instead of the route
+  never answering.
+- A `HEAD` request is answered by the `GET` route for its path (unless you add
+  a `HEAD` route), with the same status and headers, including the
+  `Content-Length` the body would have, but without the body. Your procedure
+  runs as for `GET`, and sees `request.method = 'HEAD'`. Streamed responses
+  and `RPGAPI_sendFile` send only their headers too.
+- An `OPTIONS` request for a path that has routes, but no `OPTIONS` route of
+  its own, is answered with `204` and an `Allow` header listing their
+  methods, such as `GET, HEAD, POST, OPTIONS`. It goes through middleware
+  first.
+
+### Several jobs
+By default one job handles one request at a time. Pass the number of jobs to
+serve with as a third parameter:
+```rpgle
+RPGAPI_start(app : 3000 : 4);
 ```
-RPGAPI_setCompression(app);            // bodies of 1024 bytes and more
-RPGAPI_setCompression(app : 10000);    // or from another size
+The job that calls `RPGAPI_start` opens the port and starts 3 more jobs, each
+running the program this job was started with (the first program on the call
+stack outside `QSYS`, e.g. `MYAPP` for `SBMJOB CMD(CALL MYAPP)`). Each of them
+registers its routes and serves the same port, and every connection goes to
+one of the jobs that is free. Keep in mind that:
+- the program is started again without parameters, so it must not need any,
+  and whatever it does before `RPGAPI_start` it does in every job
+- the jobs have the same name and library list as the one you started
+- to stop the server, end the job you started, or call
+  [RPGAPI_shutdown](#rpgapi_shutdown). The others end with it, each once it
+  has finished the request it is on, and the job you started waits for them
+- a job that ends while the server runs (it failed, or someone ended it) is
+  replaced by the job you started, once that job is between requests, and
+  logged at WARN. At most 5 are replaced a minute, so a job that keeps failing
+  does not keep the server busy starting it
+- each job has its own memory: data a program keeps between requests, such
+  as an array, is per job
+
+### Stopping the server
+`ENDJOB` ends a job controlled by default (`OPTION(*CNTRLD) DELAY(30)`), and
+so does `ENDSBS *CNTRLD`. RPGAPI then takes no new requests and lets the ones
+in progress finish before the job ends, within the delay. An idle kept-open
+connection is closed. `ENDJOB OPTION(*IMMED)` stops at once, cutting off
+requests in progress.
+
 ```
-A response is gzipped when:
+ENDJOB JOB(MYAPP)                        // finish the requests in progress
+ENDJOB JOB(MYAPP) OPTION(*IMMED)         // stop now
+```
+From the app itself, call [RPGAPI_shutdown](#rpgapi_shutdown).
+
+### HTTPS
+Call one of these before `RPGAPI_start` to serve HTTPS instead of HTTP:
+```rpgle
+RPGAPI_setTlsApplication(app : 'MYCO_RPGAPI_ORDERS');   // DCM application ID
+RPGAPI_setTlsKeystore(app : path : password : label);   // or a certificate store
+RPGAPI_start(app : 8443);
+```
+Everything else works the same over HTTPS. The certificate has to be set up
+in Digital Certificate Manager first; the README's HTTPS (TLS) section has
+the steps and the error messages. Each job sets up TLS when it starts, and
+`RPGAPI_start` ends with an escape message if it cannot. A client has 30
+seconds to complete its TLS handshake; one that fails it is disconnected.
+
+### Keep-alive and timeouts
+A connection stays open after a response, so the client can send its next
+request without connecting again, as browsers and HTTP client libraries do.
+Responses say `Connection: keep-alive` and `Keep-Alive: timeout=5`.
+
+- It is kept 5 seconds for the next request, for up to 100 requests;
+  [RPGAPI_setKeepAlive](#rpgapi_setkeepalive) changes that, or turns it off.
+- Each job serves one connection at a time, so a job waiting on an idle kept
+  connection closes it when a new connection is waiting: keep-alive does not
+  keep other clients waiting. A connection is only closed like this once it
+  has been quiet for 250ms after its response, so a client sending its next
+  request right away is answered, not cut off. A new client therefore waits
+  at most 250ms for an idle connection's job, and a busy connection keeps its
+  job until its request limit. Clients open a new connection when they find
+  theirs closed.
+- The connection is closed instead after a request the client sent with
+  `Connection: close` (or HTTP/1.0 without `Connection: keep-alive`), a
+  refused request (413, 431, ...), a request body your procedure did not read
+  to the end, and a streamed response to an HTTP/1.0 client.
+- Requests a client sends one after the other without waiting (pipelining)
+  are answered in order.
+
+A client has 30 seconds (the read timeout, see
+[RPGAPI_setTimeouts](#rpgapi_settimeouts)) to send its whole request. If it
+has not by then, or it closes the connection before the headers are complete,
+the connection is closed without a response and the next one is accepted.
+
+Likewise, a client that takes none of a response for 30 seconds (the write
+timeout), for example one that stopped reading a large download, is given up
+on and its connection closed. From then on `RPGAPI_write` and
+`RPGAPI_writeBytes` do nothing, so a procedure writing rows still runs to its
+end and can close what it opened.
+
+### CORS
+A page from another origin (scheme, host and port), such as a front end on
+`https://app.example.com` calling the API on `https://api.example.com`, may
+only use the API's responses when the API allows that origin. Name the
+origins with [RPGAPI_setCors](#rpgapi_setcors), and set the other fields as
+needed:
+
+| Field | Default | |
+| --- | --- | --- |
+| `cors_origins` | blank: no CORS | origins, separated by spaces or commas, or `*` for any |
+| `cors_credentials` | `*off` | send `Access-Control-Allow-Credentials: true` |
+| `cors_max_age` | 0: not sent | seconds a browser may cache a preflight answer |
+| `cors_allow_headers` | blank: the ones asked for | request headers allowed in preflight answers |
+| `cors_expose_headers` | blank | response headers scripts may read |
+
+- A request from an allowed origin gets `Access-Control-Allow-Origin` with its
+  origin (or `*` when any origin is allowed without credentials), with
+  `Vary: Origin`, on every response, errors included. Other origins get no
+  CORS headers, so the browser keeps the response from the page.
+- A preflight (an `OPTIONS` request with `Origin` and
+  `Access-Control-Request-Method`) is answered with `204` before any
+  middleware runs, since browsers never send credentials with it: an auth
+  middleware would refuse it. It lists the methods of the routes for the path
+  in `Access-Control-Allow-Methods`.
+- Headers you set yourself, such as `Access-Control-Allow-Origin`, are left as
+  you set them.
+
+### Security headers
+Browsers have protections they only turn on when a response asks for them:
+not guessing a file's type, not letting other sites show the page in a frame,
+not sending the page's address along with links, and more. After
+[RPGAPI_setSecurityHeaders](#rpgapi_setsecurityheaders), every response
+(routes, 404s, errors, static files, streamed responses) has them:
+
+| Header | Value |
+| --- | --- |
+| `Content-Security-Policy` | helmet's default, `RPGAPI_DEFAULT_CSP`: `default-src 'self'` and the rest |
+| `Cross-Origin-Opener-Policy` | `same-origin` |
+| `Cross-Origin-Resource-Policy` | `same-origin` |
+| `Origin-Agent-Cluster` | `?1` |
+| `Referrer-Policy` | `no-referrer` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains`, only with HTTPS |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-DNS-Prefetch-Control` | `off` |
+| `X-Download-Options` | `noopen` |
+| `X-Frame-Options` | `SAMEORIGIN` |
+| `X-Permitted-Cross-Domain-Policies` | `none` |
+| `X-XSS-Protection` | `0` |
+
+The Content-Security-Policy only lets a page load scripts, styles and images
+from its own site. That is right for an API and for most pages, but blocks a
+page with inline `<script>` or scripts from another site: pass your own
+policy, or `''` for none.
+
+A header a procedure sets itself is sent instead of RPGAPI's, so one route
+can have its own policy or `X-Frame-Options`. `Cross-Origin-Resource-Policy:
+same-origin` does not stop other sites from calling the API through CORS, but
+it does stop them from embedding its responses as images or scripts; a route
+that serves those to other sites sets `Cross-Origin-Resource-Policy:
+cross-origin`. The settings are the app's `security_headers` and
+`content_security_policy` fields.
+
+### Compression
+After [RPGAPI_setCompression](#rpgapi_setcompression), a response is gzipped
+when:
 - the request's `Accept-Encoding` allows gzip (`gzip`, `x-gzip` or `*`, and
   not with `q=0`). Browsers, curl with `--compressed`, and most HTTP clients
   send one
@@ -1060,15 +1555,16 @@ A response is gzipped when:
   type ending in `+json` or `+xml`. Images, PDFs and zip files are already
   compressed and are sent as they are, as is a response with no
   `Content-Type`
-- its body is at least that size. A streamed response of unknown length is
-  always gzipped
+- its body is at least the threshold. A streamed response of unknown length
+  is always gzipped
 - your procedure did not set a `Content-Encoding` of its own or
   `Cache-Control: no-transform`, and it is not a 204 or 304
 
-It then has `Content-Encoding: gzip`, and every response with a text type
-has `Vary: Accept-Encoding` so that caches keep a copy for each kind of
-client (unless your procedure sets its own `Vary`). Nothing changes in your
-procedures:
+JSON and text usually shrink to a fifth or less, which matters for large
+responses on slow connections. A gzipped response has `Content-Encoding:
+gzip`, and every response with a text type has `Vary: Accept-Encoding` so
+that caches keep a copy for each kind of client (unless your procedure sets
+its own `Vary`). Nothing changes in your procedures:
 - a body in `response.body` is gzipped in one piece, with its gzipped length
   as `Content-Length`
 - a streamed response is gzipped as it is written and sent in chunks, also
@@ -1082,6 +1578,151 @@ procedures:
 RPGAPI uses the zlib that comes with IBM i, service program `QSYS/QZIPZLIB`
 (the one behind IBM's zip APIs), so there is nothing to install. The service
 program is bound to it when it is built.
+
+### Client address
+`request.remote_ip` is the client's IP address, as Express's `req.ip`, for
+logging, limits or allowing only some addresses. `request.connection_ip` is
+the address the connection came from. Without a proxy in front of the app,
+they are the same.
+
+Behind a proxy, such as nginx, IBM HTTP Server or a load balancer, every
+connection comes from the proxy, and the proxy passes the client's address in
+the `X-Forwarded-For` header. List the proxies' addresses with
+[RPGAPI_setTrustedProxies](#rpgapi_settrustedproxies), so that RPGAPI uses
+it:
+- Only a request whose connection comes from one of them gets `remote_ip`
+  from `X-Forwarded-For`; anyone else could send the header with any address.
+- The header lists every hop (`client, proxy1, proxy2`), and a client can put
+  addresses of its own in front, so RPGAPI reads it from the right, skipping
+  the trusted proxies: the first address that is not one of them is the
+  client.
+- `'*'` trusts every connection and takes the leftmost address; use it only
+  when nothing can reach the app except through the proxy.
+- Addresses are compared exactly (no ranges such as `10.0.0.0/8`).
+
+The INFO log line for each request shows `remote_ip`, as in
+`GET /hello from 203.0.113.9 -> 200, 11 bytes, 3 ms`.
+
+### Request bodies and uploads
+`request.body` holds a body of up to 32,000 characters. Bodies can be larger:
+up to 1MB by default ([RPGAPI_setMaxRequestSize](#rpgapi_setmaxrequestsize),
+up to 16,000,000 bytes), sent with a `Content-Length` or with
+`Transfer-Encoding: chunked`, and read with
+[RPGAPI_readBody](#rpgapi_readbody) or
+[RPGAPI_readBodyBytes](#rpgapi_readbodybytes).
+
+Bodies over that limit can be allowed too, up to a second, larger limit (at
+most 2GB), with [RPGAPI_setMaxUploadSize](#rpgapi_setmaxuploadsize). Such a
+body is not read into memory before your procedure is called: it is read from
+the connection as your procedure asks for it, with the same procedures, or
+saved with [RPGAPI_saveBody](#rpgapi_savebody), so memory stays the same
+whatever its size.
+- A client that sent `Expect: 100-continue` is only asked for the body when
+  your procedure first reads it. A procedure that refuses without reading it
+  (say with 403) is never sent it.
+- `RPGAPI_bodyLength` is -1 while a chunked body's size is not known yet.
+- When the body turns out larger than the upload limit, is not valid, or
+  stops arriving for the read timeout, the read ends your procedure with an
+  escape message and the request is answered with 413, 400 or 408. Monitor
+  for it if your procedure has to clean up.
+- A body your procedure does not read is dropped.
+
+Forms with files (`multipart/form-data`) are read part by part with
+[RPGAPI_nextPart](#rpgapi_nextpart), the same way.
+
+Requests that are refused before your procedures are called:
+
+| Status | When |
+| --- | --- |
+| 413 Content Too Large | the body is larger than the limit. With `Expect: 100-continue` this is answered before the client sends it |
+| 431 Request Header Fields Too Large | the request line and headers are over 32,000 bytes |
+| 400 Bad Request | `Content-Length` is not a number, or a chunk is not valid |
+| 501 Not Implemented | a `Transfer-Encoding` other than `chunked` |
+
+A procedure that fails with an error it does not handle gets `500 Internal
+Server Error`. Your [error handler](#rpgapi_seterrorhandler) can answer all of
+these itself.
+
+### Authentication
+[RPGAPI_getBearerToken](#rpgapi_getbearertoken) and
+[RPGAPI_getBasicAuth](#rpgapi_getbasicauth) read the credentials a client
+sends in the `Authorization` header, and
+[RPGAPI_checkUserProfile](#rpgapi_checkuserprofile) checks a user and password
+against IBM i user profiles. Checking them is up to your app, usually in
+middleware, so a route never runs without them. Answer `401`; for Basic, add
+a `WWW-Authenticate` header, so a browser asks for a user and password:
+
+```rpgle
+dcl-proc needLogin;
+   dcl-pi *n ind;
+      request likeds(RPGAPI_Request) const;
+      response likeds(RPGAPI_Response);
+   end-pi;
+   dcl-s user varchar(256);
+   dcl-s password varchar(256);
+
+   if RPGAPI_getBasicAuth(request : user : password) and
+      validLogin(user : password);             // your check
+      return *on;
+   endif;
+   response.status = HTTP_UNAUTHORIZED;
+   RPGAPI_setHeader(response : 'WWW-Authenticate' : 'Basic realm="orders"');
+   return *off;
+end-proc;
+```
+
+Basic credentials are only encoded, not encrypted, and a bearer token lets
+anyone who has it in: serve them over [HTTPS](#https). RPGAPI does not write
+the `Authorization` header to the log.
+
+### Streaming responses
+`response.body` holds up to 32,000 characters. For anything larger, or to send
+rows as they are read, stream the response instead of returning it:
+[RPGAPI_beginResponse](#rpgapi_beginresponse) with the status and headers,
+[RPGAPI_write](#rpgapi_write) or [RPGAPI_writeBytes](#rpgapi_writebytes) as
+often as you like, then [RPGAPI_endResponse](#rpgapi_endresponse).
+- Writes are collected and sent in pieces of 32KB, so writing a row at a time
+  is fine.
+- The body is sent with `Transfer-Encoding: chunked`, or with a
+  `Content-Length` when you pass its size to `RPGAPI_beginResponse`.
+- A response you do not end is ended when your procedure returns. If your
+  procedure fails after beginning it, the connection is closed, and the
+  client can tell the response is incomplete.
+- [Views](#views) are streamed the same way.
+
+### Files and directories
+[RPGAPI_sendFile](#rpgapi_sendfile) sends an IFS file of any size as it is
+stored, and [RPGAPI_serveStatic](#rpgapi_servestatic) serves a whole
+directory through it.
+- The `Content-Type` comes from the extension: `html`, `css`, `js`, `json`,
+  `txt`, `csv`, `xml`, `svg`, `png`, `jpg`, `gif`, `ico`, `pdf`, `zip`,
+  otherwise `application/octet-stream`. Headers you set on the response are
+  sent too, and a `Content-Type` you set is used instead.
+- Files are sent as stored, so keep text files in UTF-8 or ASCII, and the job
+  needs authority to read them.
+- Like Express, it also sends `Last-Modified`, an `ETag`, `Accept-Ranges:
+  bytes` and `Cache-Control: public, max-age=0` (unless you set a
+  `Cache-Control`), and for a GET it answers `If-None-Match` /
+  `If-Modified-Since` with **304 Not Modified** and no body when the client's
+  copy is current, and `Range: bytes=...` (one range) with **206 Partial
+  Content** and just those bytes, or **416 Range Not Satisfiable** when the
+  range is outside the file. Several ranges get the whole file, and so does a
+  range whose `If-Range` names an older version of the file.
+
+A directory served with `RPGAPI_serveStatic(app : '/web' : '/www/myapp')`:
+- `GET /web/css/app.css` sends `/www/myapp/css/app.css`. `/web/` sends
+  `/www/myapp/index.html`, and a directory asked for without its `/` at the
+  end (`/web`, `/web/docs`) is redirected to it, so the relative links in its
+  `index.html` work. A directory without an `index.html` is not listed.
+- Only `GET` and `HEAD` are served, after the middleware (so a login check
+  covers the files too) and before the routes. A path with no file behind it
+  goes on to the routes, and then to the 404.
+- The path is decoded one segment at a time (`%20`, UTF-8 names), and a path
+  that could leave the directory is not served: a `.` or `..` segment, or one
+  that decodes to one with `/`, `\` or a NUL (`%2e%2e`, `..%2f`). Files and
+  directories whose name starts with `.` (such as `.env`) are not served
+  either.
+- A symbolic link in the directory is followed, wherever it points.
 
 ### Working with JSON
 RPGAPI hands your procedure the request body as text and sends back the text
@@ -1182,146 +1823,7 @@ ways; YAJL has to be in the library list to build and run it.
 the body with `RPGAPI_readBody`, or save it with `RPGAPI_saveBody` and parse
 the file (`DATA-INTO` with `doc=file`, or YAJL's `yajl_stmf_load_tree`). For
 large responses,
-see Large responses and streaming.
-
-### Views (HTML templates)
-A view is a page written as HTML with RPG inside tags, the way Express apps
-use EJS templates. The route fills a data structure the usual way (a fetch, a
-`CHAIN`, a loop) and passes its address to `RPGAPI_render`; the view bases
-the same data structure on that address and writes the page, which is
-streamed to the browser. It is like calling a program with a parameter.
-
-Put the data structure in a copybook next to the views, so the route and the
-view are sure to agree on it (`views/customers_t.rpgleinc`):
-```
-**free
-dcl-ds customer_t qualified template;
-   name varchar(50);
-   city varchar(50);
-   balance packed(11:2);
-end-ds;
-dcl-ds customers_t qualified template;
-   title varchar(100);
-   count int(10:0);
-   customers likeds(customer_t) dim(500);
-end-ds;
-```
-The route:
-```
-/include 'customers_t.rpgleinc'
-
-dcl-proc listCustomers;
-   dcl-pi *n likeds(RPGAPI_Response);
-      request likeds(RPGAPI_Request) const;
-   end-pi;
-   dcl-ds model likeds(customers_t) inz;
-
-   model.title = 'Customers';
-   // ...fill model.customers and model.count...
-   return RPGAPI_render('customers.erpg' : %addr(model));
-end-proc;
-```
-The view, `views/customers.erpg`:
-```
-<%! /include 'customers_t.rpgleinc'
-     dcl-ds model likeds(customers_t) based(RPGAPI_data);
-     dcl-s i int(10:0); -%>
-<h1><%= model.title %></h1>
-<ul>
-<% for i = 1 to model.count; -%>
-  <li><%= model.customers(i).name %>, <%= model.customers(i).city %>: <%= model.customers(i).balance %></li>
-<% endfor; -%>
-</ul>
-```
-`RPGAPI_data` is the pointer the route passed. The view reads the route's
-data in place, with its own types: nothing is copied or converted. The data
-stays where it is while the page is written, since the view runs inside the
-`RPGAPI_render` call. (Call it `model`, or anything but `page`, which is a
-reserved word in RPG.)
-
-RPG cannot run code it reads while it runs, so RPGAPI compiles each view into
-a program the first time it is asked for, and again whenever the template or
-a copybook it includes changes: edit a view and refresh the page. That first
-request takes a few seconds; the rest just call the program.
-
-#### Tags
-| Tag | |
-| --- | --- |
-| `<% code %>` | RPG statements: `for`, `if`, `dow`, `exec sql`, calls. Each ends with `;` as usual |
-| `<%= expr %>` | A value, HTML-escaped: `&`, `<`, `>`, `"` and `'` become entities, so a value from a user or a table cannot add tags or scripts to the page. Numbers and dates are formatted with `%char` |
-| `<%- expr %>` | A value as it is, for HTML you built and trust |
-| `<%# text %>` | A comment, left out of the page |
-| `<%! decls %>` | Declarations: `/include` of a copybook, `dcl-ds ... based(RPGAPI_data)`, `dcl-s`, `dcl-c`. They go first in the view's program wherever they are in the template |
-| `<%%` | A literal `<%` |
-| `-%>` | Ends any tag and leaves out the line break after it, so a line holding only a tag leaves no blank line in the page |
-
-Everything else is text, written as it is.
-
-#### The data, and views in views
-- `RPGAPI_render(template : %addr(ds) : response?)`: the data is any data
-  structure, variable or array element; a view that needs none leaves it out
-  (`RPGAPI_render('about.erpg')`). `response` gives the page the route's
-  status and headers, such as a 400, a cookie, or a `Content-Type` other than
-  `text/html; charset=utf-8`.
-- A pointer carries no type: if the route and the view declared the data
-  differently, the view would read the wrong bytes, as with a program called
-  with the wrong parameters. The shared copybook is what prevents it, and a
-  view is compiled again when its copybook changes. Change the route's
-  program too (recompile it) when a copybook changes.
-- `<% RPGAPI_include('pagetop.erpg'); -%>` writes another view in place,
-  with the same data. `RPGAPI_include('row.erpg' : %addr(model.customers(i)))`
-  gives it other data: part of this view's, such as the title or one row.
-- A view can run its own SQL too, `exec sql` and all; it is then compiled with
-  `CRTSQLRPGI`. Close the cursors it opens.
-- With compression on, views are gzipped like any text.
-
-#### Where views are, and where they are compiled
-```
-RPGAPI_setViews(app : '/home/me/myapp/views');            // templates
-RPGAPI_setViews(app : '/home/me/myapp/views' : 'MYVIEWS'); // and a library
-```
-A template path that does not start with `/` is relative to that directory
-(the job's current directory without it), and so are the copybooks a view
-includes. The programs go into the library named, or the library of the
-app's program, and are named `RV` and 8 hex digits, after the template's
-file name and content and its copybooks' content. The job needs the ILE RPG
-compiler (5770WDS) and authority to create programs there. Old versions are
-not deleted; any `RV...` program can be, and is compiled again when needed.
-
-For a server without the compiler, compile the views where there is one, and
-bring the library along: a view is found by its name and content, so the same
-template uses the same program.
-```
-CALL PGM(MYLIB/ERPG) PARM('/home/me/myapp/views/customers.erpg' 'MYVIEWS')
-```
-`ERPG`, which `make all` builds, compiles one view into a library, and is
-also a quick way to check a template.
-
-#### When a view is wrong
-A view that does not compile, or a template with a tag that is never closed,
-is answered with a 500 page listing the errors at their template lines, such
-as `customers.erpg:7: RNF7030 The name or indicator NMAE is not defined.`,
-and logged at ERROR. Every line of the generated program carries a comment
-naming its template line (the source is in `/tmp/RPGAPI_RV....rpgle`). A view
-that fails while it runs ends the page there, as a streamed response does.
-
-**Good to know**
-- Templates are UTF-8, with or without a byte order mark; Windows line breaks
-  are fine. Their text goes through the job's CCSID, as everything written
-  with `RPGAPI_write` does.
-- `RPGAPI_writeHtml(text)` and `RPGAPI_escapeHtml(text)`, which `<%= %>` uses,
-  work in any streamed response.
-- Not in this version: layouts, EJS's `<%_ _%>`, and passing a view the
-  request itself (pass what it needs in the data).
-
-Two complete apps show views at work:
-- [examples/html-page.sqlrpgle](examples/html-page.sqlrpgle): a library's
-  tables, fetched from the SQL catalog into the route's data structure, in a
-  view that includes another for the top of the page.
-- [examples/guestbook.rpgle](examples/guestbook.rpgle): no SQL. The notes are
-  an RPG array; the view has `if`/`else`, a form it posts back to, what
-  visitors typed escaped, and a 400 with the page when a field is missing
-  (`RPGAPI_render`'s `response`).
+see [streaming responses](#streaming-responses).
 
 ### Health checks
 Load balancers and monitoring tools poll a URL to see whether an API is up,
@@ -1366,9 +1868,9 @@ and a request that fails with a plain `500` (or `400`, `408`, `413`, `431` or
 as a JSON error body. Two procedures set that up, like a catch-all route and
 an error-handling middleware in Express:
 
-```
-RPGAPI_setNotFound(app : %paddr(notFound));
-RPGAPI_setErrorHandler(app : %paddr(failed));
+```rpgle
+RPGAPI_setNotFound(app : %paddr(notFound));          // RPGAPI_setNotFound
+RPGAPI_setErrorHandler(app : %paddr(failed));        // RPGAPI_setErrorHandler
 ```
 
 **The not-found handler** is a route procedure (request in, response out). It
@@ -1477,60 +1979,12 @@ SELECT message_timestamp, message_text
   `LOG` and job message queue settings (`QJOBMSGQMX`, `QJOBMSGQFL`). Use
   them while looking into a problem, and WARN or ERROR otherwise.
 
-### Procedure reference
-These are the procedures the service program exports, which are the ones
-`rpgapi_h.rpgle` declares. RPGAPI's internal procedures are in
-`rpgapi_int_h.rpgle`, for RPGAPI itself and its unit tests; apps do not
-include it.
-
-| Procedure | Purpose |
-| --- | --- |
-| `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
-| `RPGAPI_shutdown()` | Stop the server once the requests in progress are answered; see Stopping the server |
-| `RPGAPI_setCors(app : origins)` | Allow browsers on these origins to call the app; see CORS |
-| `RPGAPI_setSecurityHeaders(app : policy?)` | Browser protection headers on every response; see Security headers |
-| `RPGAPI_setCompression(app : minBytes?)` | gzip text and JSON responses for clients that accept it; see Compression |
-| `RPGAPI_setTrustedProxies(app : addresses)` | Proxies whose `X-Forwarded-For` gives the client's address; see Client address |
-| `RPGAPI_setNotFound(app : %paddr(proc))` | Answer requests no route matches; see Not found and errors |
-| `RPGAPI_setErrorHandler(app : %paddr(proc))` | Answer requests that fail; see Not found and errors |
-| `RPGAPI_setKeepAlive(app : seconds : maxRequests?)` | How long connections stay open between requests, 0 for not at all |
-| `RPGAPI_setLogLevel(app : level)` | How much to log; see Logging |
-| `RPGAPI_setTimeouts(app : readSeconds : writeSeconds)` | How long clients have to send a request and take a response |
-| `RPGAPI_setTlsApplication(app : application_id)` | Serve HTTPS with the certificate of a DCM application ID |
-| `RPGAPI_setTlsKeystore(app : path : password : label?)` | Serve HTTPS with a certificate from a certificate store file |
-| `RPGAPI_get` / `post` / `put` / `patch` / `delete(app : url : %paddr(proc))` | Add a route for that method |
-| `RPGAPI_setRoute(app : method : url : %paddr(proc))` | Add a route for any method |
-| `RPGAPI_setMiddleware(app : url : %paddr(proc))` | Add middleware for a path and everything below it, or `*` for all |
-| `RPGAPI_setPrefix(app : prefix)` | Put a prefix in front of the routes and middleware added next; see Groups |
-| `RPGAPI_getParam(request : name)` | A route param |
-| `RPGAPI_getQueryParam(request : name)` | A query string value |
-| `RPGAPI_getFormParam(request : name : occurrence?)` | A field of an HTML form body; see Forms |
-| `RPGAPI_getHeader(request : name)` | A request header |
-| `RPGAPI_getBearerToken(request)` | The token of `Authorization: Bearer`; see Authentication |
-| `RPGAPI_getBasicAuth(request : user : password)` | The user and password of `Authorization: Basic`; see Authentication |
-| `RPGAPI_checkUserProfile(user : password : message_id?)` | Whether the password is right for an IBM i user profile; see Checking IBM i user profiles |
-| `RPGAPI_setHeader(response : name : value)` | Add a response header |
-| `RPGAPI_setResponse(request : status)` | A response with just a status; see Status |
-| `RPGAPI_getCookie(request : name)` | A cookie the client sent |
-| `RPGAPI_setCookie(response : name : value : options?)` | Set a cookie; see Cookies under Responses |
-| `RPGAPI_clearCookie(response : name : options?)` | Delete a cookie |
-| `RPGAPI_setMaxRequestSize(app : bytes)` | The largest body read into memory (1MB) |
-| `RPGAPI_setMaxUploadSize(app : bytes)` | The largest body streamed from the connection (0, off) |
-| `RPGAPI_bodyLength(request)` | The body's size in bytes, -1 while unknown |
-| `RPGAPI_readBody(request)` | The next piece of the body as text |
-| `RPGAPI_readBodyBytes(request : buffer : size)` | The next piece of the body as bytes |
-| `RPGAPI_saveBody(request : path)` | Write the body to an IFS file |
-| `RPGAPI_nextPart(request : part)` | Move to the next part of a multipart/form-data body |
-| `RPGAPI_readPart(request)` | The next piece of the current part as text |
-| `RPGAPI_readPartBytes(request : buffer : size)` | The next piece of the current part as bytes |
-| `RPGAPI_savePart(request : path)` | Write the rest of the current part to an IFS file |
-| `RPGAPI_beginResponse(response : length?)` | Send the status and headers of a streamed response |
-| `RPGAPI_write(text)` | Add text to a streamed response |
-| `RPGAPI_render(template : %addr(data)? : response?)` | Send a view: a template of HTML with RPG in it, given the route's data structure; see Views |
-| `RPGAPI_setViews(app : directory : library?)` | Where views are, and where they are compiled; see Views |
-| `RPGAPI_writeHtml(text)` | Add text to a streamed response, HTML-escaped |
-| `RPGAPI_escapeHtml(text)` | Text with `& < > " '` as HTML entities |
-| `RPGAPI_writeBytes(buffer : length)` | Add bytes to a streamed response |
-| `RPGAPI_endResponse()` | Finish a streamed response |
-| `RPGAPI_sendFile(response : path)` | Send an IFS file |
-| `RPGAPI_serveStatic(app : url : directory)` | Serve the files of an IFS directory below a path; see Serving a directory |
+### Character sets
+RPGAPI sends and receives UTF-8, and converts it to and from the CCSID of the
+job the server runs in: requests are converted from UTF-8 to the job's CCSID
+before your procedures see them, and responses from the job's CCSID to UTF-8,
+so `Content-Length` counts UTF-8 bytes. The library is compiled with
+`TGTCCSID(*JOB)` so that its own text is in that CCSID too. Compile your
+application the same way; for SQL RPG use `CRTSQLRPGI ... CVTCCSID(*JOB)
+COMPILEOPT('TGTCCSID(*JOB)')`. The README's Character sets section explains
+what goes wrong without it.
