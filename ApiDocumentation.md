@@ -177,8 +177,9 @@ one of the jobs that is free. Keep in mind that:
 - the program is started again without parameters, so it must not need any,
   and whatever it does before `RPGAPI_start` it does in every job
 - the jobs have the same name and library list as the one you started
-- to stop the server, end the job you started; the others end within a few
-  seconds of it, each once it has finished the request it is on
+- to stop the server, end the job you started, or call `RPGAPI_shutdown()`
+  (see Stopping the server). The others end with it, each once it has
+  finished the request it is on, and the job you started waits for them
 - a job that ends while the server runs (it failed, or someone ended it) is
   replaced by the job you started, once that job is between requests, and
   logged at WARN. At most 5 are replaced a minute, so a job that keeps failing
@@ -195,6 +196,26 @@ requests in progress.
 ENDJOB JOB(MYAPP)                        // finish the requests in progress
 ENDJOB JOB(MYAPP) OPTION(*IMMED)         // stop now
 ```
+
+To stop the server from the app itself, such as from an admin route or at a
+cutoff time, call `RPGAPI_shutdown()` in a route or middleware. It works as
+the controlled `ENDJOB` does, in every job serving the app, whichever of them
+took the request: each finishes the request it is on and takes no more. The
+request that called it is answered first, with `Connection: close`. Then
+`RPGAPI_start` returns, in the job you started once all of its jobs have
+ended, and the job goes on with what follows it in your program.
+```
+dcl-proc stopServer;
+   dcl-pi *n likeds(RPGAPI_Response);
+      request likeds(RPGAPI_Request) const;
+   end-pi;
+
+   RPGAPI_shutdown();
+   return RPGAPI_setResponse(request : HTTP_ACCEPTED);
+end-proc;
+```
+Guard such a route, e.g. with middleware checking credentials (see
+Authentication): anyone who can call it can stop the server.
 
 #### HTTPS
 Call one of these before `RPGAPI_start` to serve HTTPS instead of HTTP:
@@ -1285,6 +1306,7 @@ include it.
 | Procedure | Purpose |
 | --- | --- |
 | `RPGAPI_start(app : port? : jobs?)` | Serve requests; see Kicking off the application |
+| `RPGAPI_shutdown()` | Stop the server once the requests in progress are answered; see Stopping the server |
 | `RPGAPI_setCors(app : origins)` | Allow browsers on these origins to call the app; see CORS |
 | `RPGAPI_setSecurityHeaders(app : policy?)` | Browser protection headers on every response; see Security headers |
 | `RPGAPI_setTrustedProxies(app : addresses)` | Proxies whose `X-Forwarded-For` gives the client's address; see Client address |

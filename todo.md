@@ -258,6 +258,19 @@
   Express's `res.sendStatus`, with its `request` now `const` so a route can
   pass its own. Verified on PUB400 (2026-09-27, hello suite): a route
   returning `RPGAPI_setResponse(request : 418)` answers 418 with no body
+- [x] Shut down from code: `RPGAPI_shutdown()`, from a route or middleware,
+  makes every job act as on a controlled ENDJOB. The jobs share a pipe that
+  worker jobs inherit (as descriptors 3 and 4, 1 and 2 left closed):
+  `RPGAPI_shutdown` writes a byte no job reads, so it stays readable in
+  every job, which polls it between requests and while a kept-open
+  connection is idle. The calling request gets `Connection: close`. The
+  main job, once it takes no more requests (shutdown or `%shtdn`), tells the
+  workers through the pipe and waits for them to end, so `RPGAPI_start`
+  returns after every job has ended. Verified on PUB400 (2026-09-28, jobs
+  suite): called in a worker job, in the main job of 4, and in a single job,
+  the call is answered 200 with `Connection: close`, slow requests in flight
+  finish with 200, and every job ends (ending code 0); the earlier jobs
+  checks, including a controlled ENDJOB, still pass
 - [x] Security headers: `RPGAPI_setSecurityHeaders(app : policy?)` (new
   `security_headers` and `content_security_policy` app fields) adds
   helmet's headers to every response, with helmet's default
@@ -506,12 +519,6 @@
   gives no DCM access, and GSKit there refuses a PKCS#12 file made with
   OpenSSL (GSKit 406, errno 3474), so this has not been run
 
-- [ ] Shut down from code: `RPGAPI_shutdown()`, callable from a route (an
-  admin endpoint, a cutoff time), that makes every job act as on a
-  controlled ENDJOB (`%shtdn`): each finishes and answers its current
-  request, takes no more and ends, and the main job's workers end with it.
-  Needs a flag the jobs share, since a route runs in whichever job took the
-  request. Until then, `ENDJOB OPTION(*CNTRLD)` of the main job does this
 - [ ] gzip compression of text and JSON responses when the client accepts it
 - [ ] Get the unit tests running: make the iRPGUnit library a Makefile
   variable, try installing iRPGUnit into a library we own on PUB400, and run

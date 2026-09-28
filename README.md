@@ -27,7 +27,7 @@ server, and each request is handed to your procedure as a data structure.
   pages and their assets) with caching headers and range requests
 - Several jobs serving one port, replaced when one ends, keep-alive
   connections, timeouts so one slow client cannot hold a job, and a controlled
-  `ENDJOB` that lets requests in progress finish
+  `ENDJOB` or `RPGAPI_shutdown()` that lets requests in progress finish
 - HTTPS, with a certificate from Digital Certificate Manager (DCM)
 - Logging to the job log at four levels, down to every request's headers and
   routing, to find out what happened when a problem is reported

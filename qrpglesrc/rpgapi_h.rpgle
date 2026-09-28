@@ -189,6 +189,13 @@ dcl-pr RPGAPI_start;
    workers int(10:0) options(*nopass) const;
 end-pr;
 
+   // stops the server, from a route or middleware: as a controlled ENDJOB
+   // does, every job serving the app finishes the request it is on, takes no
+   // more and ends, and RPGAPI_start returns in the job that called it. The
+   // request that called it is answered first, with Connection: close
+dcl-pr RPGAPI_shutdown;
+end-pr;
+
 dcl-pr RPGAPI_getParam varchar(1024);
    request likeds(RPGAPI_Request) const;
    param char(50) const;

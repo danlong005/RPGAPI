@@ -240,7 +240,10 @@ for suite_name in $SUITES; do
     jobs)      compile jobs && {
                  suite jobs ";;;;4" jobs "$LIB QGPL QTEMP" "$LIB QGPL QTEMP"
                  [ "$(running JOBS)" = "0" ] && pass "jobs: all 4 jobs end with the main job" || fail "jobs: jobs left running"
-                 suite jobs ";;;;1" jobs single; } ;;
+                 suite jobs ";;;;1" jobs single
+                 suite jobs ";;;;4" jobs "shutdown worker"
+                 suite jobs ";;;;4" jobs "shutdown main"
+                 suite jobs ";;;;1" jobs "shutdown single"; } ;;
     logging)   compile logging && {
                  for level in 0 1 2 3 4; do suite logging "$level;1000;;$T;" logging $level; done
                  fails_to_start logging "9;1000;;$T;" "" "is not a level"; } ;;

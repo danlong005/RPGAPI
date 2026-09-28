@@ -2,7 +2,8 @@
 --mode: spread of requests, stalled clients, library list, replacing a
 worker that ends, and a controlled end while requests are in flight.
 Mode "single", one job: a controlled end lets the request in flight
-finish."""
+finish. Modes "shutdown worker" and "shutdown main" (4 jobs) and "shutdown
+single" (1 job): RPGAPI_shutdown from a route in that job."""
 from common import *
 import os, subprocess
 
@@ -40,6 +41,35 @@ def slow_requests(count, then=None):
         then()
     in_threads(*([one] * count + ([later] if then else [])))
     return statuses
+
+if args.mode.startswith('shutdown'):
+    which = args.mode.split()[1]
+    number = MAIN.split('/')[0]
+    path = {'worker': f'/shutdown?not={number}', 'main': f'/shutdown?job={number}',
+            'single': '/shutdown'}[which]
+    answer = []
+    asked = set()
+    def shut():
+        # after the slow requests have started. 409 is another job than the
+        # one wanted: ask again, on a new connection, for up to 30s
+        time.sleep(1)
+        until = time.time() + 30
+        while time.time() < until:
+            status, headers, body = get(path)
+            if status != 409:
+                answer.append((status, headers.get('connection'), body.decode()))
+                return
+            asked.add(body.decode())
+            time.sleep(0.1)
+    # a new connection seldom goes to the main job while a worker is free:
+    # for "main", the slow requests take up 3 of the 4 jobs, most likely the
+    # workers, and until one finishes only the job left is asked
+    statuses = slow_requests({'worker': 2, 'main': 3, 'single': 1}[which], shut)
+    check(f'shutdown from the {which} job: it answers, with Connection: close',
+          len(answer) == 1 and answer[0][:2] == (200, 'close') and answer[0][2].endswith('shuts down'), (answer, asked))
+    check(f'shutdown from the {which} job: requests in flight finish', statuses == [200] * len(statuses), statuses)
+    check(f'shutdown from the {which} job: then every job ends', wait_for(lambda: not job_list(), 15), job_list())
+    done()
 
 if args.mode == 'single':
     statuses = slow_requests(1, lambda: end_job(MAIN, '*CNTRLD) DELAY(60'))
