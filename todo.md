@@ -524,6 +524,41 @@
   variable, try installing iRPGUnit into a library we own on PUB400, and run
   the tests added since (they have never been compiled)
 
+- [ ] EJS-style HTML templates, with RPG inside the tags, compiled in at build
+  time (RPG cannot run code it reads at runtime, so a template becomes an RPG
+  procedure, the way EJS turns one into a JS function). Templates are `.erpg`
+  files, UTF-8 on the IFS:
+  - `<% code %>` RPG statements (`for`, `if`, `exec sql fetch`, calls)
+  - `<%= expr %>` a value, HTML-escaped; `<%- expr %>` a value as is
+  - `<%# text %>` a comment; `<%%` a literal `<%`; `-%>` drops the line break
+    after the tag
+  - `<%! decls %>` declarations (`dcl-pi`, `dcl-s`), moved to the top of the
+    procedure, since RPG wants them before statements
+  
+  A precompiler written in RPG, program `ERPG` (`qrpglesrc/erpg.rpgle`, built
+  by `make all`, using the IFS prototypes in `socket_h.rpgle`):
+  `CALL ERPG PARM('/app/views/orders.erpg')` writes `orders.erpg.rpgle`, a
+  `**FREE` `dcl-proc orders` in the job's CCSID. Text becomes `RPGAPI_write`
+  calls (quotes doubled, long lines in pieces), `<%=` becomes
+  `RPGAPI_writeHtml(%trimr(%char(expr)))`, and every generated line carries a
+  `// orders.erpg:N` comment so compile errors point at the template. A tag
+  never closed ends `ERPG` with `CPF9898` naming `file:line`.
+  
+  The app `/include`s the generated file, and a handler sets `Content-Type`,
+  calls `RPGAPI_beginResponse` and then the view (`orders(page)`), so pages
+  stream with no 32K limit. A view includes another by calling it. RPGAPI
+  gets `RPGAPI_writeHtml` and `RPGAPI_escapeHtml` (`& < > " '`). Also: a
+  Templates section in ApiDocumentation.md, an HTML-over-SQL example, and a
+  `templates` integration suite (escaping, loops over an array and a cursor,
+  `-%>`, `<%%`, a view calling a view, a page over 32K, `ERPG` rejecting an
+  unclosed tag).
+  
+  Changing a template means running `ERPG` and recompiling the app. A runtime,
+  logic-less Mustache-style engine (edit and refresh, values registered by
+  name) was considered and left for later. Not in the first version:
+  `include()`, `<%_ _%>`, layouts, and a Jbuilder-style streaming JSON builder
+  (`RPGAPI_jsonBeginObject` and so on), which would be its own feature
+
 ## Cleanup
 - [ ] The unit tests in `qtestsrc` have never been compiled or run: check they
   still match the code (e.g. `RPGAPI_urlDecode` now takes 32,000 characters)
