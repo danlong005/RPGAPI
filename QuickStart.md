@@ -60,7 +60,11 @@ expects (see Character sets in the README).
 ```
 SBMJOB CMD(CALL PGM(MYLIB/HELLO)) JOB(HELLO)
 ```
-and try it:
+If your jobs are CCSID 65535 (`DSPJOB OPTION(*DFNA)` shows it), add
+`CCSID(37)`, or another CCSID, to the `SBMJOB`: RPGAPI converts nothing in a
+65535 job (see Character sets in the README).
+
+Then try it:
 ```bash
 curl http://your-ibm-i:3017/hello           # hello world
 curl http://your-ibm-i:3017/hello/Dan       # hello Dan

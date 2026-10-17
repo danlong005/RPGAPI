@@ -198,6 +198,19 @@ whatever the job's CCSID is. In a job that is not CCSID 37 (for example 273),
 characters such as `[ ] { } @ \ |` and accented letters in those literals are
 then sent wrong, and `{name}` route params do not match.
 
+The server's job must not be CCSID 65535, which means "do not convert": text
+then goes between UTF-8 and the job untranslated, and SQL in the app (JSON
+built or read by SQL, job log and catalog queries) gets text it cannot
+compare or convert. A job gets 65535 when the user profile's CCSID is
+`*SYSVAL` and the system value `QCCSID` is 65535, as it is on many systems;
+`SBMJOB` passes the CCSID of the job that submits it on. `DSPJOB
+OPTION(*DFNA)` shows a job's CCSID. Give the user profile a CCSID of its own,
+or submit the server with one:
+```
+CHGUSRPRF USRPRF(MYUSER) CCSID(37)
+SBMJOB CMD(CALL PGM(MYLIB/MYAPP)) JOB(MYAPP) CCSID(37)
+```
+
 ## HTTPS (TLS)
 RPGAPI serves HTTPS through the IBM i Global Security Kit (GSKit), with a
 certificate kept in Digital Certificate Manager (DCM). Without the setup below

@@ -2057,4 +2057,6 @@ so `Content-Length` counts UTF-8 bytes. The library is compiled with
 `TGTCCSID(*JOB)` so that its own text is in that CCSID too. Compile your
 application the same way; for SQL RPG use `CRTSQLRPGI ... CVTCCSID(*JOB)
 COMPILEOPT('TGTCCSID(*JOB)')`. The README's Character sets section explains
-what goes wrong without it.
+what goes wrong without it. The job must not be CCSID 65535, which converts
+nothing: give the user profile a CCSID or submit the server with one
+(`SBMJOB ... CCSID(37)`), as that section shows.
