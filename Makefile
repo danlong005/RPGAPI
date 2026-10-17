@@ -39,17 +39,21 @@ all:
 # RUCRTTST is run from qtestsrc so that the /include '../qrpglesrc/...' in the
 # test source resolves: RPGAPI is precompiled into a QTEMP member, so relative
 # includes are resolved against the job's current directory, not the source file.
+# liblist fails (CPF2103) when RPGUNIT is already in the library list, so its
+# result is ignored: a missing RPGUNIT still stops RUCRTTST.
 test:
 	system "CHGATR OBJ('$(IFS_PATH)/qtestsrc/*.sqlrpgle') ATR(*CCSID) VALUE(1252)"
 	cd $(IFS_PATH)/qtestsrc && \
-	liblist -a RPGUNIT && \
+	{ liblist -a RPGUNIT >/dev/null 2>&1 || true; } && \
 	system "RPGUNIT/RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) BNDSRVPGM((RUTESTCASE) ($(ZLIB))) TGTCCSID(*JOB)" && \
 	system "RPGUNIT/RUCALLTST TSTPGM($(LIB)/RPGAPITEST)"
 
 # Runs the integration tests in tests/integration against a build in LIB: see
-# tests/integration/README.md. SUITES picks some of them.
+# tests/integration/README.md. SUITES picks some of them. The PASE shell is
+# named in full: SHELL is qsh, where sh is qsh too, and run.sh under qsh writes
+# its files in EBCDIC.
 integration:
-	sh $(IFS_PATH)/tests/integration/run.sh $(SUITES)
+	/QOpenSys/usr/bin/sh $(IFS_PATH)/tests/integration/run.sh $(SUITES)
 
 # Removes what `all` and `test` create. The library is never deleted: this
 # Makefile does not create it, so it does not own it.

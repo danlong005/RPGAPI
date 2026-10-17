@@ -12,6 +12,8 @@
 #   TIMEOUT  read/write timeout for the apps, seconds (default 5)
 #   PYTHON   Python 3 (default /QOpenSys/pkgs/bin/python3)
 #   MAKE     GNU make (default /QOpenSys/pkgs/bin/make)
+#   CCSID    CCSID the apps run in (default 37); not 65535, which converts
+#            nothing, as a job started with the system's QCCSID may have
 # The library is not cleared. Exits with 1 when a check fails.
 
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
@@ -22,6 +24,7 @@ WORK=${WORK:-$TESTS/work}
 TIMEOUT=${TIMEOUT:-5}
 PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
+CCSID=${CCSID:-37}
 QSH=/QOpenSys/usr/bin/qsh
 ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers static secure compress templates examples sqljson yajl"
 SUITES=${*:-$ALL}
@@ -121,7 +124,7 @@ configure() {
 # submits an app and waits for it to listen; library list in $2
 start_app() {
   upper=$(echo "$1" | tr a-z A-Z)
-  out=$(cl "SBMJOB CMD(CALL PGM($LIB/$upper)) JOB($upper) INLLIBL(${2:-*CURRENT}) INQMSGRPY(*DFT)")
+  out=$(cl "SBMJOB CMD(CALL PGM($LIB/$upper)) JOB($upper) INLLIBL(${2:-*CURRENT}) INQMSGRPY(*DFT) CCSID($CCSID)")
   JOB=$(echo "$out" | sed -n 's/.*Job \([^ ]*\) submitted.*/\1/p')
   user=$(echo "$JOB" | cut -d/ -f2)
   i=0

@@ -34,8 +34,10 @@ check('responses', statuses == [200, 200, 404, 500, 200, 413, 501, 0, 0], status
 def messages():
     job = subprocess.run(['/QOpenSys/usr/bin/qsh', '-c', "db2 \"select job_name from table(qsys2.active_job_info("
                           "job_name_filter => 'LOGGING')) x\""], capture_output=True, text=True).stdout.split('\n')[3].strip()
+    # every message, kept to RPGAPI's below: a LIKE on the text fails with
+    # SQL0332 in a job whose CCSID is 65535
     out = subprocess.run(['/QOpenSys/usr/bin/qsh', '-c', f"db2 \"select varchar(message_text, 300) from table("
-                          f"qsys2.joblog_info('{job}')) x where message_text like 'RPGAPI %'\""],
+                          f"qsys2.joblog_info('{job}')) x\""],
                          capture_output=True, text=True).stdout
     return [line.strip() for line in out.split('\n') if line.strip().startswith('RPGAPI ')]
 

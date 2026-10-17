@@ -30,6 +30,7 @@ about 15 minutes, mostly uploads of 50MB and waits for timeouts.
 | `TIMEOUT` | `5` | Read and write timeout the apps are started with, in seconds |
 | `PYTHON` | `/QOpenSys/pkgs/bin/python3` | Python 3 |
 | `MAKE` | `/QOpenSys/pkgs/bin/make` | GNU make |
+| `CCSID` | `37` | CCSID the apps are submitted with. Not 65535: it converts nothing, so SQL text in the apps is not converted |
 
 It needs Python 3 and curl (`yum install python3 curl`), and SQL services
 (`QSYS2`, `SYSTOOLS`) to watch jobs, ports and job logs. The apps are
