@@ -61,7 +61,7 @@ dcl-pr qcmdexc extpgm('QCMDEXC');
    length packed(15:5) const;
 end-pr;
 
-   // zlib's, in QSYS/QZIPZLIB: names a compiled view after its template
+   // zlib's (see ZLIB in the Makefile): names a compiled view after its template
 dcl-pr crc32 uns(10:0) extproc('crc32');
    crc uns(10:0) value;
    buffer pointer value;

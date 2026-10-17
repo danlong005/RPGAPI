@@ -1645,9 +1645,9 @@ its own `Vary`). Nothing changes in your procedures:
   `Accept-Ranges` and without answering a `Range`: the whole file is sent.
   `304`s work as before
 
-RPGAPI uses the zlib that comes with IBM i, service program `QSYS/QZIPZLIB`
-(the one behind IBM's zip APIs), so there is nothing to install. The service
-program is bound to it when it is built.
+RPGAPI uses zlib, built as an ILE service program from zlib's `os400` port
+(`ZLIB/ZLIB` by default; see Installing zlib in the README). IBM i does not
+come with one. The service program is bound to it when it is built.
 
 ### Client address
 `request.remote_ip` is the client's IP address, as Express's `req.ip`, for

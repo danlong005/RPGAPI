@@ -892,7 +892,7 @@ RPGAPI_start(app : 8443);</code></pre>
 <li>a streamed response is gzipped as it is written and sent in chunks, also when <code>RPGAPI_beginResponse</code> was given its length (HTTP/1.0 clients get it up to the connection's close). The pieces come out as zlib fills them, not after each <code>RPGAPI_write</code></li>
 <li><code>RPGAPI_sendFile</code> and <code>RPGAPI_serveStatic</code> gzip text files, without <code>Accept-Ranges</code> and without answering a <code>Range</code>: the whole file is sent. <code>304</code>s work as before</li>
 </ul>
-<p>RPGAPI uses the zlib that comes with IBM i, service program <code>QSYS/QZIPZLIB</code> (the one behind IBM's zip APIs), so there is nothing to install. The service program is bound to it when it is built.</p>
+<p>RPGAPI uses zlib, built as an ILE service program from zlib's <code>os400</code> port (<code>ZLIB/ZLIB</code> by default; see Installing zlib in the README). IBM i does not come with one. The service program is bound to it when it is built.</p>
 <h3 id="client-address">Client address</h3>
 <p><code>request.remote_ip</code> is the client's IP address, as Express's <code>req.ip</code>, for logging, limits or allowing only some addresses. <code>request.connection_ip</code> is the address the connection came from. Without a proxy in front of the app, they are the same.</p>
 <p>Behind a proxy, such as nginx, IBM HTTP Server or a load balancer, every connection comes from the proxy, and the proxy passes the client's address in the <code>X-Forwarded-For</code> header. List the proxies' addresses with <a href="#rpgapi_settrustedproxies">RPGAPI_setTrustedProxies</a>, so that RPGAPI uses it:</p>

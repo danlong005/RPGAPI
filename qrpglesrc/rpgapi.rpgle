@@ -267,7 +267,7 @@ dcl-pr retrieve_call_stack extpgm('QWVRCSTK');
    error_code char(8);
 end-pr;
 
-   // gzip through the zlib that comes with IBM i, QSYS/QZIPZLIB. z_stream
+   // gzip through zlib's ILE service program (see ZLIB in the Makefile). z_stream
    // as ILE C lays it out: 16-byte pointers, 4-byte uInt and uLong
 dcl-ds RPGAPI_z_stream_t qualified template;
    next_in pointer pos(1);

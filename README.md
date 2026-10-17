@@ -47,10 +47,15 @@ page with a sidebar, [docs/index.html](docs/index.html), built from it by
   `%UPPER` and `%LOWER`, which came with those Technology Refreshes (the ILE
   RPG compiler and runtime PTFs for them: 7.3 SI76100 / SI76098, 7.4 SI76101 /
   SI76099). It is developed and tested on 7.5.
-- The ILE RPG compiler, and `make` from the IBM i open source packages
-  (`yum install make`) to build it
-- For gzip compression, the service program binds to `QSYS/QZIPZLIB`, the
-  zlib that comes with IBM i (behind IBM's zip APIs); nothing to install
+- The ILE RPG compiler, and GNU make from the IBM i open source packages
+  (`yum install make-gnu`) to build it. IBM i also has an AIX make in
+  `/QOpenSys/usr/bin`, which cannot read the Makefile: `make --version` must
+  say GNU Make
+- zlib, built as an ILE service program, for gzip compression and for naming
+  compiled views. IBM i does not come with one you can bind to (QZIPUTIL
+  keeps its zlib to itself), and `yum install zlib` is for PASE, not ILE.
+  Build it from the `os400` directory of zlib's source, which needs the ILE C
+  compiler (5770WDS); see Installing zlib below
 - For views, the ILE RPG compiler on the system that compiles them (usually
   where the app runs)
 
@@ -122,6 +127,20 @@ with `DLTLIB` if you really mean to.
 | `LIB` | `RPGAPI` | Existing library the module, service program and binding directory are built into |
 | `BNDDIR` | `RPGAPI` | Binding directory name. Kept separate from `LIB` so building into a shared library does not create a binding directory named after it |
 | `IFS_PATH` | `/home/longdm/builds/RPGAPI` | Absolute IFS path of your clone |
+| `ZLIB` | `ZLIB/ZLIB` | zlib's ILE service program, as library/name |
+
+### Installing zlib
+zlib's source has an IBM i port in its `os400` directory, which builds a
+service program `ZLIB` in library `ZLIB`. In a shell on the IBM i:
+```bash
+cd /home/[youruser]
+curl -fLO https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+tar xzf zlib-1.3.1.tar.gz
+```
+then follow `zlib-1.3.1/os400/README400`. Check whether the C compiler is
+installed with `system "CHKOBJ OBJ(QSYS/CRTCMOD) OBJTYPE(*CMD)"`. If the
+service program ends up somewhere else, build RPGAPI with
+`make all ZLIB=MYLIB/ZLIB`.
 
 ## Building and running an app
 Include `rpgapi_h.rpgle` from the clone's `qrpglesrc` directory, bind to the

@@ -10,6 +10,10 @@ BNDDIR ?= RPGAPI
 # Absolute IFS path of this checkout.
 IFS_PATH ?= /home/longdm/builds/RPGAPI
 
+# zlib, as an ILE service program, for gzip and for naming compiled views.
+# IBM i does not come with one: build it from zlib's os400 port (see README).
+ZLIB ?= ZLIB/ZLIB
+
 SHELL=/QOpenSys/usr/bin/qsh
 
 .PHONY: all test clean integration
@@ -28,7 +32,7 @@ all:
 	-cat $(IFS_PATH)/RPGAPI.evfevent
 	system "CRTRPGMOD MODULE($(LIB)/VIEWS) SRCSTMF('$(IFS_PATH)/qrpglesrc/views.rpgle') REPLACE(*YES) DBGVIEW(*SOURCE) OPTION(*EVENTF) TGTCCSID(*JOB) INCDIR('$(IFS_PATH)/qrpglesrc')"
 	-system "CPYTOSTMF FROMMBR('/QSYS.LIB/$(LIB).LIB/EVFEVENT.FILE/VIEWS.MBR') TOSTMF('$(IFS_PATH)/VIEWS.evfevent') STMFOPT(*REPLACE)"
-	system "CRTSRVPGM SRVPGM($(LIB)/RPGAPI) MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) SRCSTMF('$(IFS_PATH)/qbndsrc/RPGAPI_B.bnd') BNDSRVPGM((QSYS/QZIPZLIB))"
+	system "CRTSRVPGM SRVPGM($(LIB)/RPGAPI) MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) SRCSTMF('$(IFS_PATH)/qbndsrc/RPGAPI_B.bnd') BNDSRVPGM(($(ZLIB)))"
 	-system "ADDBNDDIRE BNDDIR($(LIB)/$(BNDDIR)) OBJ(($(LIB)/RPGAPI))"
 	system "CRTBNDRPG PGM($(LIB)/ERPG) SRCSTMF('$(IFS_PATH)/qrpglesrc/erpg.rpgle') REPLACE(*YES) DBGVIEW(*SOURCE) TGTCCSID(*JOB) INCDIR('$(IFS_PATH)/qrpglesrc') DFTACTGRP(*NO) BNDDIR($(LIB)/$(BNDDIR))"
 
@@ -39,7 +43,7 @@ test:
 	system "CHGATR OBJ('$(IFS_PATH)/qtestsrc/*.sqlrpgle') ATR(*CCSID) VALUE(1252)"
 	cd $(IFS_PATH)/qtestsrc && \
 	liblist -a RPGUNIT && \
-	system "RPGUNIT/RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) BNDSRVPGM((RUTESTCASE) (QSYS/QZIPZLIB))" && \
+	system "RPGUNIT/RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) BNDSRVPGM((RUTESTCASE) ($(ZLIB)))" && \
 	system "RPGUNIT/RUCALLTST TSTPGM($(LIB)/RPGAPITEST)"
 
 # Runs the integration tests in tests/integration against a build in LIB: see
