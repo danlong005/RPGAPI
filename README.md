@@ -67,8 +67,9 @@ cd /home/[youruser]
 git clone https://github.com/danlong005/RPGAPI.git
 ```
 
-2. Point `IFS_PATH` at your clone. Either edit the Makefile, or pass it on the
-command line of the build in step 4, which overrides the value in the file:
+2. Run `make` from your clone: `IFS_PATH`, where the build finds the source,
+defaults to the directory it runs in. To build from somewhere else, pass it on
+the command line:
 ```bash
 make all IFS_PATH=/home/[youruser]/RPGAPI
 ```
@@ -81,7 +82,7 @@ system "CRTLIB LIB(RPGAPI)"
 Or skip this and build into a library you already own, which is what you want on
 a shared system such as PUB400 where `CRTLIB` is not authorized:
 ```bash
-make all LIB=MYLIB IFS_PATH=/home/[youruser]/RPGAPI
+make all LIB=MYLIB
 ```
 
 4. Build the project:
@@ -126,7 +127,7 @@ with `DLTLIB` if you really mean to.
 | --- | --- | --- |
 | `LIB` | `RPGAPI` | Existing library the module, service program and binding directory are built into |
 | `BNDDIR` | `RPGAPI` | Binding directory name. Kept separate from `LIB` so building into a shared library does not create a binding directory named after it |
-| `IFS_PATH` | `/home/longdm/builds/RPGAPI` | Absolute IFS path of your clone |
+| `IFS_PATH` | the directory `make` runs in | Absolute IFS path of your clone |
 | `ZLIB` | `ZLIB/ZLIB` | zlib's ILE service program, as library/name |
 
 ### Installing zlib
@@ -138,8 +139,25 @@ curl -fLO https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar
 tar xzf zlib-1.3.1.tar.gz
 ```
 then follow `zlib-1.3.1/os400/README400`. Check whether the C compiler is
-installed with `system "CHKOBJ OBJ(QSYS/CRTCMOD) OBJTYPE(*CMD)"`. If the
-service program ends up somewhere else, build RPGAPI with
+installed with `system "CHKOBJ OBJ(QSYS/CRTCMOD) OBJTYPE(*CMD)"`.
+
+On recent releases the port needs two fixes:
+- Its scripts compile for `TGTRLS(V6R1M0)`, which 7.5 and later reject (every
+  C compile fails with `CZM0613`, then `CPD0084`). Before building, replace it
+  with `*CURRENT` in the script that sets it (`grep -n V6R1M0 os400/*.sh`).
+- Its `CRTSRVPGM` can fail with `CPF5D05` and no reason given, because its
+  binder source does not take effect. Once the modules are compiled, create the
+  service program from them directly:
+  ```bash
+  system "CRTSRVPGM SRVPGM(ZLIB/ZLIB) MODULE(ZLIB/*ALL) EXPORT(*ALL) TGTRLS(*CURRENT) TEXT('zlib')"
+  ```
+
+Check that it exports what RPGAPI calls (`deflateInit2_`, `deflate`,
+`deflateEnd`, `zlibVersion` and `crc32`):
+```bash
+system "DSPSRVPGM SRVPGM(ZLIB/ZLIB) DETAIL(*PROCEXP)"
+```
+If the service program ends up somewhere else, build RPGAPI with
 `make all ZLIB=MYLIB/ZLIB`.
 
 ## Building and running an app

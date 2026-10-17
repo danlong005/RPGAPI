@@ -2,7 +2,7 @@
 
 ctl-opt nomain option(*nodebugio:*srcstmt);
 
-/copy RPGUNIT1,TESTCASE
+/copy QINCLUDE,TESTCASE
 /include '../qrpglesrc/rpgapi_h.rpgle'
 /include '../qrpglesrc/rpgapi_int_h.rpgle'
 

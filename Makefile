@@ -7,8 +7,8 @@ LIB ?= RPGAPI
 # that library. Applications bind against it with ctl-opt bnddir('RPGAPI').
 BNDDIR ?= RPGAPI
 
-# Absolute IFS path of this checkout.
-IFS_PATH ?= /home/longdm/builds/RPGAPI
+# Absolute IFS path of this checkout: by default the directory make runs in.
+IFS_PATH ?= $(CURDIR)
 
 # zlib, as an ILE service program, for gzip and for naming compiled views.
 # IBM i does not come with one: build it from zlib's os400 port (see README).
