@@ -43,7 +43,7 @@ test:
 	system "CHGATR OBJ('$(IFS_PATH)/qtestsrc/*.sqlrpgle') ATR(*CCSID) VALUE(1252)"
 	cd $(IFS_PATH)/qtestsrc && \
 	liblist -a RPGUNIT && \
-	system "RPGUNIT/RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) BNDSRVPGM((RUTESTCASE) ($(ZLIB)))" && \
+	system "RPGUNIT/RUCRTTST TSTPGM($(LIB)/RPGAPITEST) SRCSTMF('$(IFS_PATH)/qtestsrc/rpgapi.test.sqlrpgle') MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) BNDSRVPGM((RUTESTCASE) ($(ZLIB))) TGTCCSID(*JOB)" && \
 	system "RPGUNIT/RUCALLTST TSTPGM($(LIB)/RPGAPITEST)"
 
 # Runs the integration tests in tests/integration against a build in LIB: see
