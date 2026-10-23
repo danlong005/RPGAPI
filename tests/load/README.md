@@ -36,8 +36,11 @@ server's own times:
 | 8 clients, kept-open | 480 | 0 | 361 | 1.8 ms | 7.0 ms | 488 ms | 1,153 ms |
 | 8 clients, new connection each | 480 | 0 | 275 | 27 ms | 42 ms | 53 ms | 59 ms |
 
-A job serves one connection at a time, and a client that keeps sending on
-its connection keeps the job until the connection's request limit (100 by
-default). With more busy clients than jobs, the others wait: that is the
-slow tail of the kept-open steps. Start more jobs
+A job serves one connection at a time, and in these results a client that
+kept sending on its connection kept the job until the connection's request
+limit (100 by default). With more busy clients than jobs, the others
+waited: that is the slow tail of the kept-open steps. A busy connection now
+gives its job up when a new client is waiting (see keep-alive in
+ApiDocumentation.md), so the clients take turns and the tail should be much
+shorter; these numbers are from before that change. Start more jobs
 (`RPGAPI_start(app : port : 4)`) for more clients at once.

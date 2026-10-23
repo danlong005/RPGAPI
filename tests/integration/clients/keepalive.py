@@ -78,6 +78,20 @@ check('a new client is served at once, not after the idle one', status == 200 an
 check('the idle connection was closed for it', closed(idle, 1))
 idle.close()
 
+# a client sending its requests back to back gives its job up to a new
+# client waiting, instead of keeping it until its request limit
+busy, p = open_connection()
+ask(busy, p, GET)
+waiting = connect(30)
+waiting.sendall(GET)
+status, headers, body = ask(busy, p, GET)
+check('a busy connection is closed for a new client waiting',
+      status == 200 and headers.get('connection') == 'close' and closed(busy), headers)
+status, headers, body = split(read_response(waiting, b'GET', []))
+check('the waiting client is answered next', (status, body) == (200, b'hello world'), (status, body))
+busy.close()
+waiting.close()
+
 # several clients reusing their connections, one job: a new connection
 # waiting must not cost a client the request it is sending on its kept one
 import http.client

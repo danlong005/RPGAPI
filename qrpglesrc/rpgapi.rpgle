@@ -156,6 +156,8 @@ dcl-c RPGAPI_MAX_BODY_LIMIT 16000000;
    // the connection being answered, for the procedures that stream a
    // response, and the protocol of its request (HTTP/1.0 has no chunking)
 dcl-s RPGAPI_connection int(10:0) inz(-1);
+   // the socket new clients connect to, for seeing whether one is waiting
+dcl-s RPGAPI_listen_socket int(10:0) inz(-1);
    // set once writing to the connection failed or timed out: later writes
    // do nothing, so a procedure writing rows can still finish normally
 dcl-s RPGAPI_connection_failed ind inz(*off);
@@ -510,6 +512,7 @@ dcl-proc RPGAPI_start export;
          RPGAPI_startWorkers(config : worker_count - 1);
       endif;
    endif;
+   RPGAPI_listen_socket = config.socket_descriptor;
 
    if RPGAPI_logging(RPGAPI_LOG_INFO);
       if worker_env <> *null;
@@ -696,6 +699,7 @@ dcl-proc RPGAPI_stop export;
 
    close_port( config.return_socket_descriptor );
    close_port( config.socket_descriptor );
+   RPGAPI_listen_socket = -1;
    if RPGAPI_shutdown_pipe(1) >= 0;
       close_port( RPGAPI_shutdown_pipe(1) );
       close_port( RPGAPI_shutdown_pipe(2) );
@@ -3068,10 +3072,44 @@ dcl-proc RPGAPI_keepOpen;
    if %scan('close' : connection) > 0;
       return *off;
    endif;
-   if %trim(RPGAPI_request_protocol) = 'HTTP/1.0';
-      return %scan('keep-alive' : connection) > 0;
+   if %trim(RPGAPI_request_protocol) = 'HTTP/1.0' and
+      %scan('keep-alive' : connection) = 0;
+      return *off;
+   endif;
+   if RPGAPI_clientWaiting();
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'a new client is waiting: the ' +
+                 'connection is closed after this response, for it');
+      return *off;
    endif;
    return *on;
+end-proc;
+
+
+   // whether a new client is waiting for this job, and the client of the
+   // connection it serves has sent nothing more yet. That connection is then
+   // closed after its response, and its client connects again behind the
+   // one waiting: a client sending requests back to back would otherwise
+   // keep the job until its request limit, and the others waiting for that
+   // long. With something more sent (pipelined), it is kept, so as not to
+   // cut that off
+dcl-proc RPGAPI_clientWaiting;
+   dcl-pi *n ind;
+   end-pi;
+   dcl-ds poll_fds likeds(PollFd) dim(2);
+
+   if RPGAPI_listen_socket < 0 or RPGAPI_input_start <= RPGAPI_input_end;
+      return *off;
+   endif;
+   poll_fds(1).fd = RPGAPI_listen_socket;
+   poll_fds(1).events = POLLIN;
+   poll_fds(1).revents = 0;
+   poll_fds(2).fd = RPGAPI_connection;
+   poll_fds(2).events = POLLIN;
+   poll_fds(2).revents = 0;
+   if poll(poll_fds : 2 : 0) <= 0;
+      return *off;
+   endif;
+   return poll_fds(1).revents <> 0 and poll_fds(2).revents = 0;
 end-proc;
 
 

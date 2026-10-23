@@ -1532,9 +1532,14 @@ Responses say `Connection: keep-alive` and `Keep-Alive: timeout=5`.
   keep other clients waiting. A connection is only closed like this once it
   has been quiet for 250ms after its response, so a client sending its next
   request right away is answered, not cut off. A new client therefore waits
-  at most 250ms for an idle connection's job, and a busy connection keeps its
-  job until its request limit. Clients open a new connection when they find
-  theirs closed.
+  at most 250ms for an idle connection's job.
+- A busy connection, whose client sends its next request as soon as it has
+  the response, gives its job up too: while a new connection is waiting, the
+  response says `Connection: close`, and the client connects again behind
+  it. So the clients take turns, a request each, instead of one keeping the
+  job until its request limit. Requests the client has already sent
+  (pipelined) are answered first. Clients open a new connection when they
+  find theirs closed.
 - The connection is closed instead after a request the client sent with
   `Connection: close` (or HTTP/1.0 without `Connection: keep-alive`), a
   refused request (413, 431, ...), a request body your procedure did not read
