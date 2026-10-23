@@ -68,16 +68,21 @@ curl -i http://your-ibm-i:3017/nothing      # 404 Not Found
 ```
 
 ## 4. Stop it
+`SBMJOB` said which job it submitted, such as
+`Job 123456/MYUSER/HELLO submitted`. End that one; the jobs it started for
+the load end with it:
 ```
-ENDJOB JOB(HELLO)
+ENDJOB JOB(123456/MYUSER/HELLO)
 ```
+They all share the name `HELLO`, so `ENDJOB JOB(HELLO)` alone finds several
+and asks which one. In `WRKACTJOB`, it is the `HELLO` job of type `BCH`.
 
 ## Where to go from here
 Things to try next in your app, all of them already in RPGAPI:
-- Serve several requests at once: `RPGAPI_start(app : 3017 : 4)` runs 4 jobs.
-  One job serves one client at a time, so start about as many as clients
-  you expect at once (see "How many jobs" in the
-  [API documentation](ApiDocumentation.md#how-many-jobs))
+- Serve more clients at once: one job serves one client at a time, and
+  RPGAPI starts jobs as clients wait, up to 20.
+  `RPGAPI_setJobs(app : 4 : 40)` keeps 4 running and allows 40 (see "How many
+  jobs" in the [API documentation](ApiDocumentation.md#how-many-jobs))
 - Read a JSON body with `request.body`, or stream large ones with
   `RPGAPI_readBody`
 - Send large results with `RPGAPI_beginResponse` / `RPGAPI_write`, and files

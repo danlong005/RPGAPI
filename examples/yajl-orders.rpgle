@@ -52,6 +52,9 @@ dcl-s started timestamp;
 dcl-ds app likeds(RPGAPI_App);
 
 clear app;
+   // one job: the orders taken are counted in this program, and another job
+   // would count its own
+RPGAPI_setJobs(app : 1 : 1);
 started = %timestamp();
 RPGAPI_post(app : '/orders' : %paddr(addOrder));
 RPGAPI_get(app : '/status' : %paddr(status));

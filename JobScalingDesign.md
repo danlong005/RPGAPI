@@ -1,6 +1,6 @@
 # Design: starting and stopping jobs with the load
 
-Status: proposal, 2026-10-23. Follows [LoadTestFindings.md](LoadTestFindings.md).
+Status: implemented on branch `design/job-scaling`, 2026-10-23. Follows [LoadTestFindings.md](LoadTestFindings.md).
 
 ## Why
 
@@ -114,10 +114,12 @@ pipe (3 and 4). They also get:
   2-byte message on each change: its state and its slot number (from a new
   environment variable, `RPGAPI_WORKER_SLOT`). Writes this small are atomic,
   so messages from different workers never mix. The states:
-  - `R` ready: serving, idle
+  - `I` idle: waiting for a connection (also its first report, when it is
+    ready)
   - `B` busy: it accepted a connection
-  - `I` idle: the connection was closed
-  - `S` stopping: it was asked to stop and is ending
+
+  The supervisor marks a slot `P`, starting, when it spawns the worker, until
+  its first report.
 - **a control pipe of its own**, read end at descriptor 6. The supervisor
   writes `Q` to it to ask that one worker to stop. The worker polls it with
   the listening socket and the shutdown pipe, where it waits for connections
@@ -136,7 +138,7 @@ more worker when all three hold:
 2. a client has been waiting: the listening socket stayed readable, checked
    every 10 ms, for 50 ms (about one job's start-up time), and
 3. fewer than `max` workers are running, and no worker it started is still
-   starting (not yet `R`).
+   starting (no report yet, for up to 10 s).
 
 Condition 3 keeps it from starting 20 jobs for a burst that one more job
 would have served; while a burst lasts, it starts one about every 60 ms
@@ -163,11 +165,11 @@ response, also while a new job is starting.
 
 ### Stopping a job
 
-When more than `min` workers run, and one has been idle (`R` or `I`, no
-connection) for `idleSeconds`, the supervisor writes `Q` to that worker's
+When more than `min` workers run, and one has been idle (`I`, no connection)
+for `idleSeconds`, the supervisor writes `Q` to that worker's
 control pipe, the one idle longest, and stops one at a time. The worker:
 
-- idle: answers `S` and ends at once,
+- idle: ends at once,
 - holding a connection it accepted just before `Q` arrived: answers that
   request, closes the connection with `Connection: close`, then ends.
 

@@ -15,6 +15,7 @@ dcl-proc testSettings;
    dcl-s fields varchar(500) dim(11);
    dcl-s keepalive varchar(500) dim(2);
    dcl-s tls varchar(500) dim(4);
+   dcl-s jobs varchar(500) dim(3);
    dcl-s index int(10:0);
    dcl-s text char(500);
 
@@ -47,9 +48,23 @@ dcl-proc testSettings;
    if fields(5) <> '';
       RPGAPI_setTimeouts(app : %int(fields(5)) : %int(fields(5)));
    endif;
-   if fields(6) <> '';
+      // jobs: empty for 1, fixed, as before jobs scaled by default; n for
+      // n, fixed; min,max or min,max,idle for RPGAPI_setJobs; default to
+      // leave it to RPGAPI
+   select;
+   when fields(6) = '';
+      app.jobs = 1;
+   when fields(6) = 'default';
+   when %scan(',' : fields(6)) > 0;
+      jobs = %split(fields(6) : ',');
+      if %elem(jobs) >= 3 and jobs(3) <> '';
+         RPGAPI_setJobs(app : %int(jobs(1)) : %int(jobs(2)) : %int(jobs(3)));
+      else;
+         RPGAPI_setJobs(app : %int(jobs(1)) : %int(jobs(2)));
+      endif;
+   other;
       app.jobs = %int(fields(6));
-   endif;
+   endsl;
    testWorkDir = fields(7);
    testCorsOrigins = fields(9);
    if fields(10) <> '';

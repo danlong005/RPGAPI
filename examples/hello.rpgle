@@ -9,7 +9,8 @@
    //   SBMJOB CMD(CALL PGM(MYLIB/HELLO)) JOB(HELLO)
    //   curl http://your-ibm-i:8080/hello          -> hello world
    //   curl http://your-ibm-i:8080/hello/Anna     -> hello Anna
-   //   ENDJOB JOB(HELLO)
+   //   ENDJOB JOB(123456/MYUSER/HELLO)   the job SBMJOB named; the others end
+   //                                     with it
 
 ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI') dftactgrp(*no);
 

@@ -7,9 +7,10 @@
    //   CRTBNDRPG PGM(MYLIB/MYAPI) SRCSTMF('<clone>/examples/production.rpgle')
    //             INCDIR('<clone>/qrpglesrc') TGTCCSID(*JOB)
    // Run: every job serving the port runs this program, so start one and it
-   // starts the rest; end that one and they all end.
+   // starts the rest; end that one, by the number SBMJOB gives, and they all
+   // end.
    //   SBMJOB CMD(CALL PGM(MYLIB/MYAPI)) JOB(MYAPI)
-   //   ENDJOB JOB(MYAPI)
+   //   ENDJOB JOB(123456/MYUSER/MYAPI)
 
 ctl-opt option(*nodebugio:*srcstmt) bnddir('RPGAPI') dftactgrp(*no);
 
@@ -19,7 +20,7 @@ dcl-ds app likeds(RPGAPI_App);
 
 clear app;
 app.port = 8443;                                // 3000
-app.jobs = 4;                                   // 1: one request at a time
+RPGAPI_setJobs(app : 4 : 40);                   // 1 to 20, started as needed
 RPGAPI_setLogLevel(app : RPGAPI_LOG_WARN);      // off; INFO or DEBUG to look into a problem
 RPGAPI_setMaxRequestSize(app : 2000000);        // 1MB of body read into memory
 RPGAPI_setMaxUploadSize(app : 0);               // 0: no larger uploads
