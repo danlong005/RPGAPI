@@ -74,7 +74,10 @@ ENDJOB JOB(HELLO)
 
 ## Where to go from here
 Things to try next in your app, all of them already in RPGAPI:
-- Serve several requests at once: `RPGAPI_start(app : 3017 : 4)` runs 4 jobs
+- Serve several requests at once: `RPGAPI_start(app : 3017 : 4)` runs 4 jobs.
+  One job serves one client at a time, so start about as many as clients
+  you expect at once (see "How many jobs" in the
+  [API documentation](ApiDocumentation.md#how-many-jobs))
 - Read a JSON body with `request.body`, or stream large ones with
   `RPGAPI_readBody`
 - Send large results with `RPGAPI_beginResponse` / `RPGAPI_write`, and files

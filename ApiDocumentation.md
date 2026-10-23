@@ -97,6 +97,7 @@ The same reference is a web page with a sidebar in
 **[Guides](#guides)**:
 [routing rules](#routing-rules) ·
 [several jobs](#several-jobs) ·
+[how many jobs](#how-many-jobs) ·
 [stopping the server](#stopping-the-server) ·
 [HTTPS](#https) ·
 [keep-alive and timeouts](#keep-alive-and-timeouts) ·
@@ -192,7 +193,7 @@ the values, before `RPGAPI_start`.
 | Field | Set with | Default |
 | --- | --- | --- |
 | `port` | `app.port = 8080`, or [RPGAPI_start](#rpgapi_start)`(app : 8080)` | 3000 |
-| `jobs` | `app.jobs = 4`, or `RPGAPI_start(app : 8080 : 4)` | 1 |
+| `jobs` | `app.jobs = 4`, or `RPGAPI_start(app : 8080 : 4)`; see [how many jobs](#how-many-jobs) | 1 |
 | `log_level` | [RPGAPI_setLogLevel](#rpgapi_setloglevel) | off |
 | `max_request_size` | [RPGAPI_setMaxRequestSize](#rpgapi_setmaxrequestsize) | 1MB |
 | `max_upload_size` | [RPGAPI_setMaxUploadSize](#rpgapi_setmaxuploadsize) | 0, off |
@@ -1493,6 +1494,36 @@ one of the jobs that is free. Keep in mind that:
   does not keep the server busy starting it
 - each job has its own memory: data a program keeps between requests, such
   as an array, is per job
+
+### How many jobs
+A job answers one connection at a time, and a client that keeps sending on
+its connection keeps the job while it does. So start as many jobs as clients
+you expect to send requests at the same time, at your busiest:
+- programs or servers calling your API: one job for each connection they
+  use at once. A caller with a pool of 10 connections needs 10 jobs
+- browsers: a browser opens up to 6 connections to a server, so for pages
+  that load several files from it, count up to 6 for each user loading one
+- procedures that wait, on SQL or another system, keep their job that long.
+  The jobs needed are about the requests a second times the seconds each
+  takes: 50 requests a second taking 0.2 seconds each keep 10 jobs busy
+- leave room for peaks. A job waiting for a connection uses no CPU to speak
+  of, and each took about 29MB of temporary storage in the test below
+- at most 65: the job you start and 64 more. A larger number is taken as 65
+
+With fewer jobs than busy clients nothing fails, but the clients take turns:
+while a new client waits, a busy connection is closed after its response
+(see [keep-alive and timeouts](#keep-alive-and-timeouts)), and each client
+waits for the others. 20 clients sending requests back to back for 2 minutes
+to `examples/hello.rpgle` over HTTPS, from a PC over the internet:
+
+| Jobs | Requests a second | Average | 99% within | Slowest |
+| --- | --- | --- | --- | --- |
+| 1 | 54 | 360 ms | 643 ms | 1.4 s |
+| 20 | 641 | 21 ms | 72 ms | 0.4 s |
+
+With 1 job, the time is the 20 clients' turns, and a new connection (and TLS
+handshake) for almost every request. With 20, every client has a job and
+keeps its connection.
 
 ### Stopping the server
 `ENDJOB` ends a job controlled by default (`OPTION(*CNTRLD) DELAY(30)`), and
