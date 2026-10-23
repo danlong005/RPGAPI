@@ -119,13 +119,50 @@ check('requests go on while idle jobs stop: none cut off',
       answered and set(answered) == {200} and not failed, (len(answered), set(answered), failed[:3]))
 check('the jobs stopped meanwhile', wait_for(lambda: len(workers()) == 1, 8), workers())
 
+# short requests: 4 clients sending them back to back on kept connections.
+# A waiting client is served after the next response, so none waits long,
+# but jobs giving way to them start more, as fast as with long requests
+quick, quick_failed, reached = [], [], []
+def quick_client():
+    conn = http.client.HTTPConnection('127.0.0.1', args.port, timeout=15)
+    until = time.time() + 4
+    while time.time() < until:
+        try:
+            conn.request('GET', '/libl')
+            response = conn.getresponse()
+            response.read()
+            quick.append(response.status)
+            if response.getheader('Connection', '').lower() == 'close':
+                conn.close()
+                conn = http.client.HTTPConnection('127.0.0.1', args.port, timeout=15)
+        except Exception as e:
+            quick_failed.append(repr(e)[:60])
+            conn.close()
+            conn = http.client.HTTPConnection('127.0.0.1', args.port, timeout=15)
+    conn.close()
+def watch():
+    start = time.time()
+    while time.time() - start < 4:
+        if len(workers()) == 4:
+            reached.append(round(time.time() - start, 1))
+            return
+        time.sleep(0.1)
+in_threads(*([quick_client] * 4 + [watch]))
+check('4 clients sending short requests: 4 jobs within 2 s', reached and reached[0] <= 2, reached)
+check('short requests: all answered', quick and set(quick) == {200} and not quick_failed,
+      (len(quick), set(quick), quick_failed[:3]))
+check('starts for jobs giving way logged', len(log('gave way to a waiting client')) >= 1, log('gave way'))
+check('back to the least after', wait_for(lambda: len(workers()) == 1, 12), workers())
+
 # a worker that fails, at the least, is replaced
 before = workers()
 end_job(before[0], '*IMMED')
 check('a failed worker at the least is replaced',
       wait_for(lambda: len(workers()) == 1 and workers() != before, 10), (before, workers()))
-check('the failure logged', len(log('ended, status')) == 1 and len(log('again (process')) == 1,
-      log('ended, status') + log('again'))
+# the replacement can be seen running a moment before its message is logged
+check('the failure logged',
+      wait_for(lambda: len(log('ended, status')) == 1 and len(log('again (process')) == 1, 5),
+      log('ended, status') + log('again (process'))
 
 # above the least, one that fails is not replaced
 slow(2)

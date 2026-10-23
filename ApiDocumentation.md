@@ -1496,11 +1496,11 @@ for RPGAPI itself and its unit tests; apps do not include it.
 A job answers one connection at a time, so RPGAPI serves the port with
 several jobs, and by default starts them as the load needs: from 1 up to 20.
 The job you start opens the port, starts one job to serve it, and then
-watches: when every job holds a connection and a client has waited 50 ms, it
-starts one more (a job serves about 50 ms after it is started); when a job
-above the least has had no client for 60 seconds, it stops it. A request is
-never cut off. Set another range with [RPGAPI_setJobs](#rpgapi_setjobs), or a
-fixed number:
+watches: when every job holds a connection and a client waits (50 ms, or a
+job gives its connection up for it), it starts one more (a job serves about
+50 ms after it is started); when a job above the least has had no client for
+60 seconds, it stops it. A request is never cut off. Set another range with
+[RPGAPI_setJobs](#rpgapi_setjobs), or a fixed number:
 ```rpgle
 RPGAPI_setJobs(app : 4 : 40);       // 4 to 40 jobs
 RPGAPI_start(app : 3000 : 4);       // 4 jobs, fixed

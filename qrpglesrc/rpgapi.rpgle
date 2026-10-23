@@ -235,10 +235,15 @@ dcl-c RPGAPI_MAX_WORKERS 64;
 dcl-c RPGAPI_SCALE_WAIT_MS 50;
 dcl-c RPGAPI_SCALE_CHECK_MS 10;
    // states in the status pipe: holding a connection, or not. A slot whose
-   // worker has not reported yet is starting
+   // worker has not reported yet is starting. Gave way is not a state but
+   // an event: the worker closes its connection for a waiting client (see
+   // RPGAPI_keepOpen), which happens when there are too few jobs
 dcl-c RPGAPI_STATE_BUSY 'B';
 dcl-c RPGAPI_STATE_IDLE 'I';
 dcl-c RPGAPI_STATE_STARTING 'P';
+dcl-c RPGAPI_STATE_GAVE_WAY 'Y';
+   // in the supervisor: how often workers gave way since it last looked
+dcl-s RPGAPI_gave_way int(10:0) inz(0);
    // in a worker: where it reports and is told to stop (-1: not scaling),
    // its slot, and the state it last reported
 dcl-s RPGAPI_status_fd int(10:0) inz(-1);
@@ -1463,7 +1468,9 @@ dcl-proc RPGAPI_readStatus;
       for offset = 0 to length - %size(message) by %size(message);
          message_ptr = %addr(buffer) + offset;
          slot = message.slot;
-         if slot >= 1 and slot <= RPGAPI_worker_total and
+         if message.state = RPGAPI_STATE_GAVE_WAY;
+            RPGAPI_gave_way += 1;
+         elseif slot >= 1 and slot <= RPGAPI_worker_total and
             RPGAPI_worker_pids(slot) > 0;
             RPGAPI_worker_states(slot) = message.state;
             RPGAPI_worker_since(slot) = %timestamp();
@@ -1595,38 +1602,50 @@ dcl-proc RPGAPI_supervise;
          iter;
       endif;
 
-         // a client waiting while every job is busy
+         // every job busy, and a client waiting: one has waited
+         // RPGAPI_SCALE_WAIT_MS, or a job gave its connection up for one.
+         // The second is how short requests show it: a waiting client is
+         // served after the next response, so none waits long
       listening(1).fd = config.socket_descriptor;
       listening(1).events = POLLIN;
       listening(1).revents = 0;
+      waited_ms = 0;
       if poll(listening : 1 : 0) <= 0;
          waiting_since = *loval;
       elseif waiting_since = *loval;
          waiting_since = now;
       else;
          waited_ms = %div(%diff(now : waiting_since : *mseconds) : 1000);
-         if waited_ms >= RPGAPI_SCALE_WAIT_MS and starting = 0 and
-            busy >= serving and now >= no_start_until;
-            if serving < max_jobs;
+      endif;
+      if (waited_ms >= RPGAPI_SCALE_WAIT_MS or RPGAPI_gave_way > 0) and
+         starting = 0 and busy >= serving and now >= no_start_until;
+         if serving < max_jobs;
+            if waited_ms >= RPGAPI_SCALE_WAIT_MS;
                RPGAPI_log(RPGAPI_LOG_INFO : 'all ' + %char(serving) +
                           ' jobs busy and a client waited ' +
                           %char(waited_ms) + ' ms: starting job ' +
                           %char(serving + 1));
-               if RPGAPI_startWorker(config) = 0;
-                  no_start_until = now + %seconds(5);
-               endif;
-               waiting_since = now;
-            elseif warned = *loval or
-                   %diff(now : warned : *seconds) >= 60;
-                  // logged even with logging off: the apps that need it are
-                  // the ones that left the settings alone
-               RPGAPI_sendLog(RPGAPI_LOG_WARN : 'all ' + %char(serving) +
-                              ' jobs (the most) are busy and clients are ' +
-                              'waiting: raise the most with RPGAPI_setJobs');
-               warned = now;
+            else;
+               RPGAPI_log(RPGAPI_LOG_INFO : 'all ' + %char(serving) +
+                          ' jobs busy and one gave way to a waiting ' +
+                          'client: starting job ' + %char(serving + 1));
             endif;
+            if RPGAPI_startWorker(config) = 0;
+               no_start_until = now + %seconds(5);
+            endif;
+            if waiting_since <> *loval;
+               waiting_since = now;
+            endif;
+         elseif warned = *loval or %diff(now : warned : *seconds) >= 60;
+               // logged even with logging off: the apps that need it are
+               // the ones that left the settings alone
+            RPGAPI_sendLog(RPGAPI_LOG_WARN : 'all ' + %char(serving) +
+                           ' jobs (the most) are busy and clients are ' +
+                           'waiting: raise the most with RPGAPI_setJobs');
+            warned = now;
          endif;
       endif;
+      RPGAPI_gave_way = 0;
 
          // once a second: stop the job idle longest, above the least, one at
          // a time
@@ -3597,6 +3616,8 @@ dcl-proc RPGAPI_keepOpen;
    if RPGAPI_clientWaiting();
       RPGAPI_log(RPGAPI_LOG_DEBUG : 'a new client is waiting: the ' +
                  'connection is closed after this response, for it');
+         // with jobs started with the load: a sign that one more is needed
+      RPGAPI_reportState(RPGAPI_STATE_GAVE_WAY);
       return *off;
    endif;
    return *on;

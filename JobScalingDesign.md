@@ -119,7 +119,9 @@ pipe (3 and 4). They also get:
   - `B` busy: it accepted a connection
 
   The supervisor marks a slot `P`, starting, when it spawns the worker, until
-  its first report.
+  its first report. One more message is an event, not a state:
+  - `Y` gave way: the worker closed its connection for a waiting client
+    (the fairness rule), which only happens when there are too few jobs
 - **a control pipe of its own**, read end at descriptor 6. The supervisor
   writes `Q` to it to ask that one worker to stop. The worker polls it with
   the listening socket and the shutdown pipe, where it waits for connections
@@ -135,15 +137,23 @@ The supervisor knows each slot's state from the status pipe. It starts one
 more worker when all three hold:
 
 1. every running worker is busy,
-2. a client has been waiting: the listening socket stayed readable, checked
-   every 10 ms, for 50 ms (about one job's start-up time), and
+2. a client is waiting: one has waited 50 ms (the listening socket stayed
+   readable, checked every 10 ms; about one job's start-up time), or a
+   worker gave way (`Y`) since the supervisor last looked, and
 3. fewer than `max` workers are running, and no worker it started is still
    starting (no report yet, for up to 10 s).
 
 Condition 3 keeps it from starting 20 jobs for a burst that one more job
 would have served; while a burst lasts, it starts one about every 60 ms
 (start-up plus the wait), so 20 jobs in a little over a second. Each start is
-logged at INFO: `all 8 jobs busy and a client waited 50 ms: starting job 9`.
+logged at INFO: `all 8 jobs busy and a client waited 50 ms: starting job 9`,
+or `all 8 jobs busy and one gave way to a waiting client: starting job 9`.
+
+**Why both.** The first Postman ramp (20 users, short requests) showed the
+50 ms wait alone is not enough: the fairness rule serves a waiting client
+after the next response, 20 to 40 ms later, so none waited 50 ms in one go,
+and jobs were started about one every 5 seconds instead of one every 60 ms.
+Giving way is the same shortage, seen where it happens.
 
 **At the most.** When conditions 1 and 2 hold but `max` workers are running,
 no job is started, and the supervisor logs a WARN in its job log, at most
