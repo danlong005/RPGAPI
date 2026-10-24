@@ -205,10 +205,12 @@ directory, or the member as above, which needs no `INCDIR`:
 CRTBNDRPG PGM(MYLIB/MYAPP) SRCSTMF('/home/[youruser]/myapp.rpgle')
           INCDIR('/home/[youruser]/RPGAPI/qrpglesrc') TGTCCSID(*JOB)
 ```
-Views stay in the IFS either way: templates, and the copybooks they include,
-are files in the directory given to
-[RPGAPI_setViews](ApiDocumentation.md#rpgapi_setviews), which RPGAPI compiles
-as they are used.
+View templates stay in the IFS either way: they are files in the directory
+given to [RPGAPI_setViews](ApiDocumentation.md#rpgapi_setviews), which
+RPGAPI compiles as they are used. The copybooks they include, such as the
+data structure a route shares with its view, can be files there or source
+members (`<%! /include MYLIB/QRPGLESRC,CUST_T %>`): a view is compiled again
+when either changes.
 The library holding the binding directory has to be in the library list while
 you compile, or name it in the program: `ctl-opt bnddir('MYLIB/RPGAPI')`.
 

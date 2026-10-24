@@ -1332,9 +1332,13 @@ view that is not in a layout, it does nothing.
 [RPGAPI_setViews](#rpgapi_setviews) names the directory and the library. A
 template path that does not start with `/` is relative to that directory (the
 job's current directory without it), and so are the copybooks a view
-includes. The programs go into the library named, or the library of the app's
-program, and are named `RV` and 8 hex digits, after the template's file name
-and content and its copybooks' content. The job needs the ILE RPG compiler
+includes. A copybook can also be a source member, for an app kept in source
+members: `<%! /include MYLIB/QRPGLESRC,CUST_T %>`, or `QRPGLESRC,CUST_T` for
+the library list as the compile job has it. The templates themselves are
+always files. The programs go into the library named, or the library of the
+app's program, and are named `RV` and 8 hex digits, after the template's file
+name and content, its copybooks' content (members' too), and the RPGAPI
+service program they were compiled for. The job needs the ILE RPG compiler
 (5770WDS) and authority to create programs there. When a view is compiled
 again, its older versions in the library are deleted (a program's text names
 its template); one another job is running at that moment stays until the next

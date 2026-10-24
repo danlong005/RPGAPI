@@ -110,6 +110,16 @@ dcl-pr object_description extpgm('QUSROBJD');
    error_code char(8);
 end-pr;
 
+dcl-pr member_description extpgm('QUSRMBRD');
+   receiver char(135);
+   receiver_length int(10:0) const;
+   format char(8) const;
+   file char(20) const;
+   member char(10) const;
+   overrides char(1) const;
+   error_code char(8);
+end-pr;
+
 dcl-pr getcwd pointer extproc('getcwd');
    buffer pointer value;
    size int(10:0) value;
@@ -877,7 +887,8 @@ end-proc;
 
    // the files the template in source includes with /include or /copy, in
    // includes: a path in quotes or up to a blank, relative to directory
-   // unless it starts with /. Members (QRPGLESRC,NAME) are left out
+   // unless it starts with /. A member (LIB/FILE,NAME or FILE,NAME) is its
+   // path in the QSYS.LIB file system, so that a change to it is seen too
 dcl-proc findIncludes;
    dcl-pi *n;
       directory varchar(1024) const;
@@ -939,10 +950,15 @@ dcl-proc findIncludes;
             // the name as written, not upper-cased
          name = %trim(%xlate(CR : ' ' : %subst(source : position + start - 1 :
                                                stop - start)));
-         if name = '' or %scan(',' : name) > 0;
+         if name = '';
             iter;
          endif;
-         if %subst(name : 1 : 1) <> '/';
+         if %scan(',' : name) > 0;
+            name = memberPath(name);
+            if name = '';
+               iter;
+            endif;
+         elseif %subst(name : 1 : 1) <> '/';
             name = directory + name;
          endif;
          include_count += 1;
@@ -950,6 +966,44 @@ dcl-proc findIncludes;
       enddo;
       position += piece;
    enddo;
+end-proc;
+
+
+   // the path of a source member as /include names it, LIB/FILE,MEMBER or
+   // FILE,MEMBER (the library list, as the compiler looks), in the QSYS.LIB
+   // file system: /QSYS.LIB/LIB.LIB/FILE.FILE/MEMBER.MBR. '' when there is
+   // no such member; the compiler then says so
+dcl-proc memberPath;
+   dcl-pi *n varchar(1024);
+      include varchar(1024) const;
+   end-pi;
+   dcl-s spec varchar(1024);
+   dcl-s library char(10) inz('*LIBL');
+   dcl-s file char(10);
+   dcl-s member char(10);
+   dcl-s comma int(10:0);
+   dcl-s slash int(10:0);
+   dcl-s receiver char(135);
+      // bytes provided 0: a member that is not there is an exception
+   dcl-s error_code char(8) inz(*allx'00');
+
+   spec = %upper(%trim(include));
+   comma = %scan(',' : spec);
+   slash = %scan('/' : spec);
+   if slash > 0 and slash < comma;
+      library = %subst(spec : 1 : slash - 1);
+   endif;
+   file = %subst(spec : slash + 1 : comma - slash - 1);
+   member = %subst(spec : comma + 1);
+   monitor;
+         // MBRD0100 has the library the file was found in, at 19
+      member_description(receiver : %size(receiver) : 'MBRD0100' :
+                         file + library : member : '0' : error_code);
+   on-error;
+      return '';
+   endmon;
+   return '/QSYS.LIB/' + %trim(%subst(receiver : 19 : 10)) + '.LIB/' +
+          %trim(file) + '.FILE/' + %trim(member) + '.MBR';
 end-proc;
 
 

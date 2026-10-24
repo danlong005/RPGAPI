@@ -105,6 +105,47 @@ member_example() {
   fi
 }
 
+# the guestbook example kept in source members: the app and the copybooks
+# its views include (layout_t, guestbook_t) copied into LIB/QTESTSRC as
+# EXGUESTM, LAYOUT_T and GUEST_T, and only the templates in the IFS, in
+# WORK/memberviews, including the members. Compiled from the member and
+# checked by client memberviews
+member_guestbook() {
+  dir=$WORK/memberviews
+  rm -rf "$dir" && mkdir -p "$dir"
+  for template in layout guestbook; do
+    sed -e "s|/include 'layout_t.rpgleinc'|/include $LIB/QTESTSRC,LAYOUT_T|" \
+        -e "s|/include 'guestbook_t.rpgleinc'|/include $LIB/QTESTSRC,GUEST_T|" \
+        "$REPO/examples/views/$template.erpg" > "$dir/$template.erpg"
+  done
+  sed -e "s|/include 'rpgapi_h.rpgle'|/include $LIB/QRPGLESRC,RPGAPI_H|" \
+      -e "s|/include 'layout_t.rpgleinc'|/include $LIB/QTESTSRC,LAYOUT_T|" \
+      -e "s|/include 'guestbook_t.rpgleinc'|/include $LIB/QTESTSRC,GUEST_T|" \
+      -e "s|'/home/myuser/RPGAPI/examples/views'|'$dir'|" \
+      -e "s/RPGAPI_start(app : 8080)/RPGAPI_start(app : $PORT)/" "$REPO/examples/guestbook.rpgle" > "$WORK/EXGUESTM.rpgle"
+  cp "$REPO/examples/views/layout_t.rpgleinc" "$REPO/examples/views/guestbook_t.rpgleinc" "$WORK/"
+  cl "CHGATR OBJ('$dir/*') ATR(*CCSID) VALUE(1252)" >/dev/null
+  for file in EXGUESTM.rpgle layout_t.rpgleinc guestbook_t.rpgleinc; do
+    cl "CHGATR OBJ('$WORK/$file') ATR(*CCSID) VALUE(1252)" >/dev/null
+  done
+  cl "CRTSRCPF FILE($LIB/QTESTSRC) RCDLEN(240) CCSID($CCSID) TEXT('RPGAPI integration tests')" >/dev/null
+  cl "CPYFRMSTMF FROMSTMF('$WORK/layout_t.rpgleinc') TOMBR('/QSYS.LIB/$LIB.LIB/QTESTSRC.FILE/LAYOUT_T.MBR') MBROPT(*REPLACE)" >/dev/null
+  cl "CPYFRMSTMF FROMSTMF('$WORK/guestbook_t.rpgleinc') TOMBR('/QSYS.LIB/$LIB.LIB/QTESTSRC.FILE/GUEST_T.MBR') MBROPT(*REPLACE)" >/dev/null
+  cl "CPYFRMSTMF FROMSTMF('$WORK/EXGUESTM.rpgle') TOMBR('/QSYS.LIB/$LIB.LIB/QTESTSRC.FILE/EXGUESTM.MBR') MBROPT(*REPLACE)" >/dev/null
+  cl "DLTOBJ OBJ($LIB/EXGUESTM) OBJTYPE(*PGM)" >/dev/null
+  $QSH -c "liblist -a $LIB >/dev/null 2>&1; system \"CRTBNDRPG PGM($LIB/EXGUESTM) SRCFILE($LIB/QTESTSRC) SRCMBR(EXGUESTM) TGTCCSID(*JOB)\"" </dev/null > "$WORK/compile-EXGUESTM.log" 2>&1
+  if ! cl "CHKOBJ OBJ($LIB/EXGUESTM) OBJTYPE(*PGM)" >/dev/null; then
+    fail "the guestbook kept in source members does not compile (see $WORK/compile-EXGUESTM.log)"
+    return
+  fi
+  if start_app EXGUESTM "$LIB QGPL QTEMP"; then
+    client memberviews
+  else
+    fail "the guestbook kept in source members did not start listening on port $PORT"
+  fi
+  stop_app EXGUESTM || fail "the guestbook kept in source members did not end"
+}
+
 # compiles an example from examples/ as $2, only to check that it builds
 compile_example() {
   file=$1 object=$2
@@ -330,7 +371,8 @@ for suite_name in $SUITES; do
                CORS="layout" suite templates ";;;$T;" templates layout
                CORS=""
                EXAMPLE_VIEWS="$REPO/examples/views" example_suite html-page.sqlrpgle EXHTML htmlpage
-               EXAMPLE_VIEWS="$REPO/examples/views" example_suite guestbook.rpgle EXGUEST guestbook ;;
+               EXAMPLE_VIEWS="$REPO/examples/views" example_suite guestbook.rpgle EXGUEST guestbook
+               member_guestbook ;;
     examples)  compile_example hello.rpgle EXHELLO
                member_example hello.rpgle EXHELLOM /hello/Dan 'hello Dan'
                compile_example notes-api.sqlrpgle EXNOTES
