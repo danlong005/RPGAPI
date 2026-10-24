@@ -64,8 +64,8 @@ def slow(count, then=None):
 check('starts with the least, 1 worker job', wait_for(lambda: len(workers()) == 1, 10), workers())
 
 if args.mode == 'quiet':
-    statuses, jobs, took = slow(3)
-    check('logging off, 1 to 2 jobs, 3 clients: all answered', statuses == [200] * 3, statuses)
+    statuses, jobs, took = slow(6)
+    check('logging off, 1 to 2 jobs, 6 clients: all answered', statuses == [200] * 6, statuses)
     every = log('')
     check('the WARN at the most is the one message logged',
           len(every) == 1 and '(the most) are busy' in every[0], every)
@@ -86,12 +86,13 @@ check('4 clients at once: jobs start for them, each answered by its own',
 check('4 worker jobs running', len(workers()) == 4, workers())
 check('each start logged', len(log('jobs busy and a client waited')) == 3, log('jobs busy'))
 
-# the count is taken a second in, while all 4 are busy: jobs idle after the
-# first 3 s are stopped again 2 s later
+# 12 clients on 4 jobs: three rounds of 3 s, clients waiting in the first
+# 6 s, long enough for the WARN (waiting in 5 of 10 seconds). The count is
+# taken a second in, while all 4 are busy
 during = []
-statuses, jobs, took = slow(6, lambda: during.append(len(workers())))
-check('6 clients, at most 4 jobs: all answered, 2 after waiting',
-      statuses == [200] * 6 and 5.5 < took < 9 and during == [4], (statuses, round(took, 1), during))
+statuses, jobs, took = slow(12, lambda: during.append(len(workers())))
+check('12 clients, at most 4 jobs: all answered, 8 after waiting',
+      statuses == [200] * 12 and 8.5 < took < 13 and during == [4], (statuses, round(took, 1), during))
 check('at the most, a WARN, once', len(log('(the most) are busy')) == 1, log('the most'))
 
 check('idle jobs stop, down to the least', wait_for(lambda: len(workers()) == 1, 12), workers())

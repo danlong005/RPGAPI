@@ -234,6 +234,10 @@ dcl-c RPGAPI_MAX_WORKERS 64;
    // one waits, the supervisor looks every RPGAPI_SCALE_CHECK_MS
 dcl-c RPGAPI_SCALE_WAIT_MS 50;
 dcl-c RPGAPI_SCALE_CHECK_MS 10;
+   // at the most, clients kept waiting in this many of the last 10 seconds
+   // is a shortage worth a WARN; a moment now and then, as a client
+   // reconnects, is not
+dcl-c RPGAPI_SHORT_SECONDS 5;
    // states in the status pipe: holding a connection, or not. A slot whose
    // worker has not reported yet is starting. Gave way is not a state but
    // an event: the worker closes its connection for a waiting client (see
@@ -1538,8 +1542,16 @@ dcl-proc RPGAPI_supervise;
    dcl-s idlest int(10:0);
    dcl-s waited_ms int(20:0);
    dcl-s stop_byte char(1) inz('Q');
+      // the last 10 seconds: in which clients waited at the most
+   dcl-s began timestamp;
+   dcl-s short_in ind dim(10) inz(*off);
+   dcl-s second int(20:0);
+   dcl-s last_second int(20:0) inz(0);
+   dcl-s index int(10:0);
+   dcl-s short_count int(10:0);
 
    idle_checked = %timestamp();
+   began = idle_checked;
    dow not RPGAPI_ending();
          // a client waiting: look again shortly. Otherwise until one comes,
          // a worker reports, or a second has passed
@@ -1568,6 +1580,12 @@ dcl-proc RPGAPI_supervise;
          leave;
       endif;
       now = %timestamp();
+         // a new second: the seconds since the last one had no waiting
+      second = %diff(now : began : *seconds);
+      for index = 1 to %min(second - last_second : 10);
+         short_in(%rem(last_second + index : 10) + 1) = *off;
+      endfor;
+      last_second = second;
       serving = 0;
       busy = 0;
       starting = 0;
@@ -1636,13 +1654,25 @@ dcl-proc RPGAPI_supervise;
             if waiting_since <> *loval;
                waiting_since = now;
             endif;
-         elseif warned = *loval or %diff(now : warned : *seconds) >= 60;
+         else;
+            short_in(%rem(second : 10) + 1) = *on;
+            short_count = 0;
+            for index = 1 to %elem(short_in);
+               if short_in(index);
+                  short_count += 1;
+               endif;
+            endfor;
                // logged even with logging off: the apps that need it are
                // the ones that left the settings alone
-            RPGAPI_sendLog(RPGAPI_LOG_WARN : 'all ' + %char(serving) +
-                           ' jobs (the most) are busy and clients are ' +
-                           'waiting: raise the most with RPGAPI_setJobs');
-            warned = now;
+            if short_count >= RPGAPI_SHORT_SECONDS and
+               (warned = *loval or %diff(now : warned : *seconds) >= 60);
+               RPGAPI_sendLog(RPGAPI_LOG_WARN : 'all ' + %char(serving) +
+                              ' jobs (the most) are busy and clients ' +
+                              'waited in ' + %char(short_count) + ' of the ' +
+                              'last 10 seconds: raise the most with ' +
+                              'RPGAPI_setJobs');
+               warned = now;
+            endif;
          endif;
       endif;
       RPGAPI_gave_way = 0;

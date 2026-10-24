@@ -156,14 +156,17 @@ and jobs were started about one every 5 seconds instead of one every 60 ms.
 Giving way is the same shortage, seen where it happens.
 
 **At the most.** When conditions 1 and 2 hold but `max` workers are running,
-no job is started, and the supervisor logs a WARN in its job log, at most
-once a minute. It is logged even with logging off (the default), the one
+no job is started. If that happened in at least 5 of the last 10 seconds,
+the supervisor logs a WARN in its job log, at most once a minute.
+A moment now and then, such as a client reconnecting while every job is
+busy, is not a shortage: in the 10-minute Postman run, 20 users on 20 jobs
+logged a WARN about once a minute while every user had a job. It is logged even with logging off (the default), the one
 message that is: the apps that need it are the ones that left the settings
 alone, and once a minute cannot fill a job log.
 
 ```
-RPGAPI WARN: all 20 jobs (the most) are busy and clients are waiting: raise
-the most with RPGAPI_setJobs
+RPGAPI WARN: all 20 jobs (the most) are busy and clients waited in 7 of the
+last 10 seconds: raise the most with RPGAPI_setJobs
 ```
 
 A default only works if people find out when it is too low for them; this
@@ -285,5 +288,6 @@ while jobs are below 40, and the job count following the users up and down.
 4. **64 workers is the most**, as today.
 5. **Scaling is on by default**, 1 to 20 jobs with 60 s idle, so no line is
    needed. An app that sets a number of jobs keeps exactly that many.
-6. **A WARN at the most**, at most once a minute, naming `RPGAPI_setJobs`,
+6. **A WARN at the most**, when clients waited in 5 of the last 10 seconds,
+   at most once a minute, naming `RPGAPI_setJobs`,
    logged even with logging off.

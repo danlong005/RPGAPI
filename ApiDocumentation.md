@@ -1526,10 +1526,11 @@ Keep in mind that:
 - each job has its own memory: data a program keeps between requests, such
   as an array, is per job. Keep shared data in a file or table, or use
   `RPGAPI_setJobs(app : 1 : 1)`
-- when every job is busy at the most and clients wait, the job you started
-  logs `RPGAPI WARN: all 20 jobs (the most) are busy and clients are
-  waiting`, at most once a minute and even with logging off: raise the most
-  with [RPGAPI_setJobs](#rpgapi_setjobs)
+- when every job is busy at the most and clients keep waiting (in 5 of 10
+  seconds), the job you started logs `RPGAPI WARN: all 20 jobs (the most)
+  are busy and clients waited in 7 of the last 10 seconds`, at most once a
+  minute and even with logging off: raise the most with
+  [RPGAPI_setJobs](#rpgapi_setjobs)
 
 ### How many jobs
 A job answers one connection at a time, and a client that keeps sending on
