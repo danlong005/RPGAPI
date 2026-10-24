@@ -113,6 +113,10 @@ This will:
 - Add it to the binding directory
 - Compile `ERPG`, which compiles a view ahead of time (see
   [ERPG](ApiDocumentation.md#erpg) in the API reference)
+- Copy the copybooks into source file `QRPGLESRC` in `LIB`, creating it if it
+  is not there: `RPGAPI_H`, everything an app includes, and `SOCKET_H` and
+  `RPGAPI_INT`, RPGAPI's own. So an app can be kept in source members as well
+  as in the IFS (see Building and running an app)
 
 If `LIB` does not exist the build stops immediately and tells you so, rather than
 failing later with a confusing compile error.
@@ -129,7 +133,8 @@ This needs [iRPGUnit](https://github.com/tools-400/irpgunit) installed in librar
    curl: `make integration`.
 
 6. (Optional) Remove the objects the build created (the module, service program,
-binding directory, `ERPG` and test program):
+binding directory, `ERPG`, test program and the copybook members in
+`QRPGLESRC`; not the file, which may hold your own source):
 ```bash
 make clean
 ```
@@ -144,6 +149,7 @@ with `DLTLIB` if you really mean to.
 | `BNDDIR` | `RPGAPI` | Binding directory name. Kept separate from `LIB` so building into a shared library does not create a binding directory named after it |
 | `IFS_PATH` | the directory `make` runs in | Absolute IFS path of your clone |
 | `ZLIB` | `ZLIB/ZLIB` | zlib's ILE service program, as library/name |
+| `SRC_CCSID` | `37` | CCSID of `LIB/QRPGLESRC` when the build creates it. Not `*JOB`: in a job of CCSID 65535 the copybooks would be copied unconverted |
 
 ### Installing zlib
 zlib's source has an IBM i port in its `os400` directory, which builds a
@@ -176,13 +182,33 @@ If the service program ends up somewhere else, build RPGAPI with
 `make all ZLIB=MYLIB/ZLIB`.
 
 ## Building and running an app
-Include `rpgapi_h.rpgle` from the clone's `qrpglesrc` directory, bind to the
-`RPGAPI` binding directory, and compile with `TGTCCSID(*JOB)` (see Character
-sets below):
+Include RPGAPI's copybook, bind to the `RPGAPI` binding directory, and
+compile with `TGTCCSID(*JOB)` (see Character sets below). Keep the app in
+source members or in the IFS, as you prefer: `make all` puts the copybook in
+both places.
+
+In a source member, include member `RPGAPI_H` from `QRPGLESRC` in the library
+you built into:
+```
+/include RPGAPI/QRPGLESRC,RPGAPI_H
+```
+```
+CRTBNDRPG PGM(MYLIB/MYAPP) SRCFILE(MYLIB/QRPGLESRC) SRCMBR(MYAPP)
+          TGTCCSID(*JOB)
+```
+In a stream file, include `rpgapi_h.rpgle` from the clone's `qrpglesrc`
+directory, or the member as above, which needs no `INCDIR`:
+```
+/include 'rpgapi_h.rpgle'
+```
 ```
 CRTBNDRPG PGM(MYLIB/MYAPP) SRCSTMF('/home/[youruser]/myapp.rpgle')
           INCDIR('/home/[youruser]/RPGAPI/qrpglesrc') TGTCCSID(*JOB)
 ```
+Views stay in the IFS either way: templates, and the copybooks they include,
+are files in the directory given to
+[RPGAPI_setViews](ApiDocumentation.md#rpgapi_setviews), which RPGAPI compiles
+as they are used.
 The library holding the binding directory has to be in the library list while
 you compile, or name it in the program: `ctl-opt bnddir('MYLIB/RPGAPI')`.
 
@@ -327,6 +353,11 @@ HTTPS port, is disconnected without an answer; the server carries on. With
 logged with GSKit's reason.
 
 ### Upgrading
+**`http_h.rpgle` is part of `rpgapi_h.rpgle`.** The HTTP constants
+(`HTTP_GET`, `HTTP_OK`, ...) are in `rpgapi_h.rpgle` itself, so that it
+includes nothing and works as a source member too. A program that included
+`http_h.rpgle` on its own includes `rpgapi_h.rpgle` instead.
+
 **Apps start jobs as the load needs.** An app that does not set a number of
 jobs now runs 1 to 20 of them, and one more job watching them. `RPGAPI_App`
 gained `max_jobs` and `job_idle_seconds`, so recompile your programs; they

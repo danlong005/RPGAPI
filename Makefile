@@ -14,6 +14,14 @@ IFS_PATH ?= $(CURDIR)
 # IBM i does not come with one: build it from zlib's os400 port (see README).
 ZLIB ?= ZLIB/ZLIB
 
+# CCSID of LIB/QRPGLESRC when the build creates it, for the copybooks it puts
+# there. Not *JOB: a job of CCSID 65535 would copy them unconverted.
+SRC_CCSID ?= 37
+
+# the copybooks copied into LIB/QRPGLESRC, as file:member, so that apps can
+# include them from source members as well as from the IFS
+COPYBOOKS = rpgapi_h:RPGAPI_H socket_h:SOCKET_H rpgapi_int_h:RPGAPI_INT
+
 SHELL=/QOpenSys/usr/bin/qsh
 
 .PHONY: all test clean integration
@@ -35,6 +43,13 @@ all:
 	system "CRTSRVPGM SRVPGM($(LIB)/RPGAPI) MODULE($(LIB)/RPGAPI $(LIB)/VIEWS) SRCSTMF('$(IFS_PATH)/qbndsrc/RPGAPI_B.bnd') BNDSRVPGM(($(ZLIB)))"
 	-system "ADDBNDDIRE BNDDIR($(LIB)/$(BNDDIR)) OBJ(($(LIB)/RPGAPI))"
 	system "CRTBNDRPG PGM($(LIB)/ERPG) SRCSTMF('$(IFS_PATH)/qrpglesrc/erpg.rpgle') REPLACE(*YES) DBGVIEW(*SOURCE) TGTCCSID(*JOB) INCDIR('$(IFS_PATH)/qrpglesrc') DFTACTGRP(*NO) BNDDIR($(LIB)/$(BNDDIR))"
+	@system "CHKOBJ OBJ($(LIB)/QRPGLESRC) OBJTYPE(*FILE)" >/dev/null 2>&1 || \
+	  system "CRTSRCPF FILE($(LIB)/QRPGLESRC) RCDLEN(112) CCSID($(SRC_CCSID)) TEXT('RPG source, and RPGAPI copybooks')"
+	for copybook in $(COPYBOOKS); do \
+	  member=$${copybook#*:}; \
+	  system "CPYFRMSTMF FROMSTMF('$(IFS_PATH)/qrpglesrc/$${copybook%%:*}.rpgle') TOMBR('/QSYS.LIB/$(LIB).LIB/QRPGLESRC.FILE/$$member.MBR') MBROPT(*REPLACE)" && \
+	  system "CHGPFM FILE($(LIB)/QRPGLESRC) MBR($$member) SRCTYPE(RPGLE) TEXT('RPGAPI copybook, from $${copybook%%:*}.rpgle')" || exit 1; \
+	done
 
 # RUCRTTST is run from qtestsrc so that the /include '../qrpglesrc/...' in the
 # test source resolves: RPGAPI is precompiled into a QTEMP member, so relative
@@ -56,7 +71,8 @@ integration:
 	/QOpenSys/usr/bin/sh $(IFS_PATH)/tests/integration/run.sh $(SUITES)
 
 # Removes what `all` and `test` create. The library is never deleted: this
-# Makefile does not create it, so it does not own it.
+# Makefile does not create it, so it does not own it. Nor is QRPGLESRC, which
+# may hold your own source: only the copybook members are removed.
 clean:
 	-system "DLTOBJ OBJ($(LIB)/RPGAPITEST) OBJTYPE(*PGM)"
 	-system "DLTOBJ OBJ($(LIB)/ERPG) OBJTYPE(*PGM)"
@@ -65,3 +81,6 @@ clean:
 	-system "DLTOBJ OBJ($(LIB)/RPGAPI) OBJTYPE(*MODULE)"
 	-system "DLTOBJ OBJ($(LIB)/VIEWS) OBJTYPE(*MODULE)"
 	-system "DLTOBJ OBJ($(LIB)/$(BNDDIR)) OBJTYPE(*BNDDIR)"
+	-for copybook in $(COPYBOOKS); do \
+	  system "RMVM FILE($(LIB)/QRPGLESRC) MBR($${copybook#*:})"; \
+	done

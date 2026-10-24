@@ -53,6 +53,10 @@ From a 5250 command line, or with `system "..."` in QShell:
 CRTBNDRPG PGM(MYLIB/HELLO) SRCSTMF('/home/[youruser]/hello.rpgle')
           INCDIR('/home/[youruser]/RPGAPI/qrpglesrc') TGTCCSID(*JOB)
 ```
+To keep it in a source member instead, put it in `MYLIB/QRPGLESRC,HELLO`
+with `/include RPGAPI/QRPGLESRC,RPGAPI_H` in place of
+`/include 'rpgapi_h.rpgle'`, and compile it with
+`CRTBNDRPG PGM(MYLIB/HELLO) SRCFILE(MYLIB/QRPGLESRC) SRCMBR(HELLO) TGTCCSID(*JOB)`.
 `TGTCCSID(*JOB)` keeps the program's text in the job's CCSID, which RPGAPI
 expects (see Character sets in the README).
 

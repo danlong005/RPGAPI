@@ -70,6 +70,41 @@ views() {
   rm -rf "$WORK/views" && mkdir -p "$WORK/views" && cp "$TESTS"/apps/views/*.erpg "$TESTS"/apps/views/*.rpgleinc "$WORK/views/"
 }
 
+# an app kept in source members: example $1, with its port changed to PORT
+# and its /include to LIB/QRPGLESRC,RPGAPI_H (the copybook make all puts
+# there), copied into member $2 of LIB/QTESTSRC, compiled from it, started,
+# and asked for $3, which must answer $4. Then the same source compiled from
+# the IFS with no INCDIR: the member include works from there too
+member_example() {
+  file=$1 object=$2 path=$3 expect=$4
+  sed -e "s|/include 'rpgapi_h.rpgle'|/include $LIB/QRPGLESRC,RPGAPI_H|" \
+      -e "s/RPGAPI_start(app : 8080)/RPGAPI_start(app : $PORT)/" "$REPO/examples/$file" > "$WORK/$object.rpgle"
+  cl "CHGATR OBJ('$WORK/$object.rpgle') ATR(*CCSID) VALUE(1252)" >/dev/null
+  cl "CRTSRCPF FILE($LIB/QTESTSRC) RCDLEN(240) CCSID($CCSID) TEXT('RPGAPI integration tests')" >/dev/null
+  cl "CPYFRMSTMF FROMSTMF('$WORK/$object.rpgle') TOMBR('/QSYS.LIB/$LIB.LIB/QTESTSRC.FILE/$object.MBR') MBROPT(*REPLACE)" >/dev/null
+  cl "DLTOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null
+  $QSH -c "liblist -a $LIB >/dev/null 2>&1; system \"CRTBNDRPG PGM($LIB/$object) SRCFILE($LIB/QTESTSRC) SRCMBR($object) TGTCCSID(*JOB)\"" </dev/null > "$WORK/compile-$object.log" 2>&1
+  if ! cl "CHKOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null; then
+    fail "example $file does not compile from a source member (see $WORK/compile-$object.log)"
+    return
+  fi
+  pass "example $file compiles from a source member, including $LIB/QRPGLESRC,RPGAPI_H"
+  if start_app "$object"; then
+    got=$("$PYTHON" -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:$PORT$path').read().decode())")
+    if [ "$got" = "$expect" ]; then pass "example $file from a source member answers $path"; else fail "example $file from a source member answered '$got' to $path"; fi
+  else
+    fail "example $file from a source member did not start listening on port $PORT"
+  fi
+  stop_app "$object" || fail "example $file from a source member did not end"
+  cl "DLTOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null
+  $QSH -c "liblist -a $LIB >/dev/null 2>&1; system \"CRTBNDRPG PGM($LIB/$object) SRCSTMF('$WORK/$object.rpgle') TGTCCSID(*JOB)\"" </dev/null > "$WORK/compile-$object.log" 2>&1
+  if cl "CHKOBJ OBJ($LIB/$object) OBJTYPE(*PGM)" >/dev/null; then
+    pass "example $file compiles from the IFS with no INCDIR, including $LIB/QRPGLESRC,RPGAPI_H"
+  else
+    fail "example $file does not compile from the IFS with the member include (see $WORK/compile-$object.log)"
+  fi
+}
+
 # compiles an example from examples/ as $2, only to check that it builds
 compile_example() {
   file=$1 object=$2
@@ -297,6 +332,7 @@ for suite_name in $SUITES; do
                EXAMPLE_VIEWS="$REPO/examples/views" example_suite html-page.sqlrpgle EXHTML htmlpage
                EXAMPLE_VIEWS="$REPO/examples/views" example_suite guestbook.rpgle EXGUEST guestbook ;;
     examples)  compile_example hello.rpgle EXHELLO
+               member_example hello.rpgle EXHELLOM /hello/Dan 'hello Dan'
                compile_example notes-api.sqlrpgle EXNOTES
                compile_example table-export.sqlrpgle EXEXPORT
                compile_example api-key.rpgle EXAPIKEY
