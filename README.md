@@ -61,11 +61,17 @@ scripts to load your own server, are in [tests/load](tests/load/README.md).
 - IBM i 7.3 with TR10, or 7.4 with TR4, or later. RPGAPI uses `%SPLIT`,
   `%UPPER` and `%LOWER`, which came with those Technology Refreshes (the ILE
   RPG compiler and runtime PTFs for them: 7.3 SI76100 / SI76098, 7.4 SI76101 /
-  SI76099). It is developed and tested on 7.5.
+  SI76099). It is developed and tested on 7.5 and 7.6.
 - The ILE RPG compiler, and GNU make from the IBM i open source packages
   (`yum install make-gnu`) to build it. IBM i also has an AIX make in
-  `/QOpenSys/usr/bin`, which cannot read the Makefile: `make --version` must
-  say GNU Make
+  `/QOpenSys/usr/bin`, which cannot read the Makefile (its `make --version`
+  answers `make: illegal option -- -`), and a shell's default `PATH` finds
+  that one first. Put the open source packages first, in the shell or for good in
+  your `.profile`:
+  ```bash
+  export PATH=/QOpenSys/pkgs/bin:$PATH
+  make --version      # GNU Make 4.x
+  ```
 - zlib, built as an ILE service program, for gzip compression and for naming
   compiled views. IBM i does not come with one you can bind to (QZIPUTIL
   keeps its zlib to itself), and `yum install zlib` is for PASE, not ILE.
@@ -75,6 +81,14 @@ scripts to load your own server, are in [tests/load](tests/load/README.md).
   where the app runs)
 
 ## Installation
+
+Before you start, check that your jobs are not CCSID 65535, which systems with
+`QCCSID` 65535 give a user profile left at `*SYSVAL`: `DSPJOB OPTION(*DFNA)`
+shows the job's CCSID. Apps and the tests need a CCSID that converts (see
+Character sets below), so give your profile one:
+```
+CHGUSRPRF USRPRF([youruser]) CCSID(37)
+```
 
 1. Clone the repository in a shell on the IBM i (QShell or SSH):
 ```bash
