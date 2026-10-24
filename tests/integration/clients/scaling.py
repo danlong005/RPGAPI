@@ -5,7 +5,7 @@ request off, and a failed one is replaced below the least only; ending the
 main job ends them all. Mode "default": nothing set, 1 to 20 jobs. Mode
 "quiet": logging off, 1 to 2 jobs: the WARN at the most is logged anyway."""
 from common import *
-import http.client, os, subprocess
+import http.client, os, random, subprocess
 
 args = setup(__doc__)
 MAIN = os.environ.get('RPGAPI_TEST_JOB', '')
@@ -76,6 +76,31 @@ if args.mode == 'default':
     statuses, jobs, took = slow(3)
     check('3 clients at once: a job each, as jobs start', statuses == [200] * 3 and len(set(jobs)) == 3 and took < 5,
           (statuses, sorted(set(jobs)), round(took, 1)))
+
+    # clients pausing between requests on kept connections: a kept connection
+    # quiet for a while must not be closed for a new client while a job can
+    # be started for it instead. Its client's next request would fail (it
+    # did for about a quarter of the requests), and that client, connecting
+    # again, would take the next one's
+    answered, failed = [], []
+    def pausing():
+        conn = http.client.HTTPConnection('127.0.0.1', args.port, timeout=15)
+        until = time.time() + 6
+        while time.time() < until:
+            try:
+                conn.request('GET', '/libl')
+                response = conn.getresponse()
+                response.read()
+                answered.append(response.status)
+            except Exception as e:
+                failed.append(repr(e)[:60])
+                conn.close()
+                conn = http.client.HTTPConnection('127.0.0.1', args.port, timeout=15)
+            time.sleep(random.uniform(0, 0.4))
+        conn.close()
+    in_threads(*[pausing] * 10)
+    check('10 clients pausing between requests: kept connections are not closed under them',
+          answered and set(answered) == {200} and not failed, (len(answered), len(failed), failed[:3]))
     done()
 
 check('logs the range 1 to 4', len(log('in 1 to 4 job(s)')) == 1, log('serving port'))

@@ -176,6 +176,20 @@ Meanwhile the waiting client is served by the fairness rule
 (`fix/keepalive-fairness`): a busy connection gives its job up after its next
 response, also while a new job is starting.
 
+### Idle kept connections
+
+Before scaling, a job waiting on an idle kept connection closed it for a new
+client once it had been quiet 250 ms. The client's next request then fails
+on the closed connection (`ECONNRESET`), and that client, connecting again,
+is the next new client: with 20 clients pausing up to 400 ms between
+requests, 28% of the requests failed this way, and no job was started, since
+no client waited 50 ms. With jobs started for the load, an idle connection
+is given up only when the new client has waited 500 ms (time for a job to be
+started for it) and is still waiting; that happens only at the most, and
+reports giving way. The same 20 clients then had 3 failures in 5,069
+requests. With a fixed number of jobs, the 250 ms rule stays: there is no
+other way to serve the new client.
+
 ### Stopping a job
 
 When more than `min` workers run, and one has been idle (`I`, no connection)

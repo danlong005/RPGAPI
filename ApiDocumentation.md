@@ -1603,12 +1603,15 @@ Responses say `Connection: keep-alive` and `Keep-Alive: timeout=5`.
 
 - It is kept 5 seconds for the next request, for up to 100 requests;
   [RPGAPI_setKeepAlive](#rpgapi_setkeepalive) changes that, or turns it off.
-- Each job serves one connection at a time, so a job waiting on an idle kept
-  connection closes it when a new connection is waiting: keep-alive does not
-  keep other clients waiting. A connection is only closed like this once it
-  has been quiet for 250ms after its response, so a client sending its next
-  request right away is answered, not cut off. A new client therefore waits
-  at most 250ms for an idle connection's job.
+- Each job serves one connection at a time. When jobs are started with the
+  load, a new client waiting while every job holds a connection gets a new
+  job, and kept connections stay open. Only at the most, or with a fixed
+  number of jobs, is an idle kept connection closed for a new client: once
+  it has been quiet for 250ms after its response (500ms of the new client
+  waiting, when jobs are started with the load), so that keep-alive does not
+  keep other clients waiting. Its client's next request then fails if it was
+  already on its way, or if the client does not notice the close (browsers
+  and most HTTP libraries do, and connect again).
 - A busy connection, whose client sends its next request as soon as it has
   the response, gives its job up too: while a new connection is waiting, the
   response says `Connection: close`, and the client connects again behind
@@ -2128,7 +2131,11 @@ SELECT message_timestamp, message_text
 - DEBUG and INFO add messages to the job log for every request: a job log that
   fills up wraps or spills to a spooled file depending on the job's
   `LOG` and job message queue settings (`QJOBMSGQMX`, `QJOBMSGQFL`). Use
-  them while looking into a problem, and WARN or ERROR otherwise.
+  them while looking into a problem, and WARN or ERROR otherwise. With
+  `JOBMSGQFL(*NOWRAP)`, which `QDFTJOBD` has, a full job message queue ends
+  the job (`CPF2526`): at DEBUG, a job answering a thousand requests a
+  second filled the 16MB of `JOBMSGQMX(16)` in about 10 seconds. Submit the
+  server with `JOBMSGQFL(*WRAP)` to log a lot.
 
 ### Character sets
 RPGAPI sends and receives UTF-8, and converts it to and from the CCSID of the

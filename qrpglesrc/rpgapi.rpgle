@@ -87,6 +87,10 @@ dcl-s RPGAPI_keepalive_requests int(10:0) inz(100);
    // ms after a response during which a kept-open connection is not given up
    // for a new client: about a round trip, for its next request to arrive
 dcl-c RPGAPI_REUSE_GRACE_MS 250;
+   // with jobs started for the load: how long a new client waits before an
+   // idle kept-open connection is given up for it, rather than a job being
+   // started (one serves about 50 ms after the client waited 50 ms)
+dcl-c RPGAPI_GIVE_WAY_MS 500;
 dcl-s RPGAPI_connection_requests int(10:0) inz(0);
 dcl-s RPGAPI_keep_connection ind inz(*off);
 dcl-s RPGAPI_connection_open ind inz(*off);
@@ -1029,6 +1033,10 @@ dcl-proc RPGAPI_waitForNextRequest;
    dcl-s ready int(10:0);
    dcl-s answered timestamp;
    dcl-s grace_ms int(20:0);
+   dcl-s give_at timestamp;
+      // since when a new client has been waiting; *loval: none
+   dcl-s newcomer_since timestamp inz(*loval);
+   dcl-ds listening likeds(PollFd) dim(1);
 
       // pipelined: the client sent it along with the one before
    if RPGAPI_input_start <= RPGAPI_input_end;
@@ -1070,20 +1078,45 @@ dcl-proc RPGAPI_waitForNextRequest;
       elseif ready = 0;
          iter;
       endif;
-         // a new client is waiting. This one may be sending its next request
-         // right now: closing would cut that request off (a reset). Only a
-         // connection quiet for RPGAPI_REUSE_GRACE_MS since its response is
-         // given up for the new one
+         // a new client is waiting. Closing this connection for it fails the
+         // request its client sends next, which may be on its way already
+         // (a reset), so it is given up only when it must be: quiet for
+         // RPGAPI_REUSE_GRACE_MS since its response and, with jobs started
+         // for the load, the new client waiting RPGAPI_GIVE_WAY_MS, time for
+         // the main job to start one for it. And only when the new client
+         // is still waiting then: another job may have taken it
+      if poll_fds(2).revents = 0;
+         newcomer_since = *loval;
+      endif;
       if poll_fds(1).revents = 0 and poll_fds(2).revents <> 0;
-         grace_ms = RPGAPI_REUSE_GRACE_MS -
-                    %div(%diff(%timestamp() : answered : *mseconds) : 1000);
+         if newcomer_since = *loval;
+            newcomer_since = %timestamp();
+         endif;
+         give_at = answered + %mseconds(RPGAPI_REUSE_GRACE_MS * 1000);
+         if RPGAPI_status_fd >= 0 and
+            newcomer_since + %mseconds(RPGAPI_GIVE_WAY_MS * 1000) > give_at;
+            give_at = newcomer_since + %mseconds(RPGAPI_GIVE_WAY_MS * 1000);
+         endif;
+         grace_ms = %min(%div(%diff(give_at : %timestamp() : *mseconds) :
+                              1000) : wait_ms);
          ready = 0;
          if grace_ms > 0;
             ready = poll(poll_fds : 1 : grace_ms);
          endif;
          if ready <= 0;
+            if %timestamp() < give_at;
+               iter;
+            endif;
+            listening(1).fd = config.socket_descriptor;
+            listening(1).events = POLLIN;
+            listening(1).revents = 0;
+            if poll(listening : 1 : 0) <= 0;
+               newcomer_since = *loval;
+               iter;
+            endif;
             RPGAPI_log(RPGAPI_LOG_DEBUG : 'closing an idle kept-open ' +
                        'connection for a new one');
+            RPGAPI_reportState(RPGAPI_STATE_GAVE_WAY);
             leave;
          endif;
       endif;
