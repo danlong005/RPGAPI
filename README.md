@@ -43,6 +43,20 @@ See the [Quick Start](QuickStart.md) to write and run a first app, and the
 page with a sidebar, [docs/index.html](docs/index.html), built from it by
 `python3 docs/build.py`).
 
+## Performance
+With its defaults, RPGAPI served 20 users sending HTTPS requests one after
+the other, from a PC over the internet, for 10 minutes: 362,917 requests,
+604 a second, 22 ms on average, 99% within 77 ms, and none failed. It
+started jobs as the users came (1 to 20 in 5 seconds) and stopped them
+again a minute after they left.
+
+That was `examples/hello.rpgle` on one IBM i 7.6 partition in IBM Power
+Virtual Server, measured with Postman's performance runner, 2026-10-23. A
+procedure that runs SQL or calls another system takes longer for each
+request, and the jobs are what lets several clients be answered at once:
+see [how many jobs](ApiDocumentation.md#how-many-jobs). The runs, and
+scripts to load your own server, are in [tests/load](tests/load/README.md).
+
 ## Requirements
 - IBM i 7.3 with TR10, or 7.4 with TR4, or later. RPGAPI uses `%SPLIT`,
   `%UPPER` and `%LOWER`, which came with those Technology Refreshes (the ILE

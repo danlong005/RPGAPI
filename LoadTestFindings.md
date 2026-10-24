@@ -1,7 +1,8 @@
 # Load Test Findings — 2026-10-23
 
 A long-tail latency problem found while load testing `examples/hello.rpgle`
-(`GET /hello`) with Postman: its cause, the fix, and how many jobs to run.
+(`GET /hello`) with Postman: its cause, the fix, how many jobs to run, and
+starting jobs with the load (runs 8 to 11).
 
 **Summary:** about 1% of requests waited 30–45 seconds. The cause was the
 server's keep-alive handling with one job, not a lock, leak or timeout: a
@@ -10,6 +11,13 @@ while the others waited to be accepted. Branch `fix/keepalive-fairness`
 makes a busy connection give its job up to a waiting client, which brought
 the slowest request from 45.6 s to 1.4 s on one job. With 20 jobs for 20
 clients, every target below is met.
+
+Branch `design/job-scaling` then starts jobs as the load needs, 1 to 20 by
+default. Its Postman runs found three more problems, each fixed: jobs
+started too slowly for short requests, the WARN at the most fired while
+every user had a job, and idle kept connections closed for new clients
+failed their clients' next requests. The last 10-minute run, with the
+defaults: 604 requests a second, 22 ms average, 77 ms p99, no failures.
 
 ## Test setup
 
@@ -126,17 +134,72 @@ without errors; its cause was not looked into.
    ApiDocumentation.md as "How many jobs", with these runs as the example.
 3. **Add assertions** to the Postman request: status 200 and
    `responseTime < 500`.
-4. **Consider starting and stopping jobs with the load** instead of a fixed
-   number. A worker job was measured serving HTTPS 49 ms after it was
-   spawned, fast enough to help during a burst: see
-   [JobScalingDesign.md](JobScalingDesign.md).
+4. **Start and stop jobs with the load** instead of a fixed number: done on
+   `design/job-scaling`, the default there (runs 8 to 11 below). A worker
+   job was measured serving HTTPS 49 ms after it was spawned.
+5. **Log at WARN or less under load.** A test server at DEBUG filled its
+   16MB job message queue in about 10 seconds and ended (`CPF2526`), as
+   `QDFTJOBD`'s `JOBMSGQFL(*NOWRAP)` has it.
+
+## Runs 8 to 11: jobs started with the load
+
+Branch `design/job-scaling` (see [JobScalingDesign.md](JobScalingDesign.md)),
+`examples/hello.rpgle` with no job settings, so 1 to 20 jobs, over HTTPS
+from the internet as runs 2 and 3. A recorder on the IBM i logged the
+number of worker jobs every second.
+
+| | Run 8 | Run 9 | Run 10 | Run 11 |
+|---|---|---|---|---|
+| Code | first version | + jobs giving way start jobs | same | + WARN rule, idle connections kept |
+| Profile | 30 s ramp to 20, 2 min | 30 s ramp to 20, 2 min | 20 users, 10 min | 20 users, 10 min |
+| Requests | 38,893 | 45,650 | 331,568 | 362,917 |
+| Requests/second | 323 | 379 | 552 | 604 |
+| Average | 30 ms | 23 ms | 23 ms | 22 ms |
+| P95 / P99 | 78 / 102 ms | 43 / 82 ms | 42 / 78 ms | 40 / 77 ms |
+| Max | 1,656 ms | 1,132 ms | 1,116 ms | 1,178 ms |
+| Failed | 0.01% | < 0.01% | 33 (`ECONNRESET`) | 0 |
+| WARNs at the most | 0 | 1 | 8 | 0 |
+
+**Run 8: jobs started too slowly.** About one job every 5 seconds, 17 at
+most; the average rose to about 70 ms while they lagged. A job was started
+when a client had waited 50 ms, but the fairness rule serves a waiting
+client after the next response, 20 to 40 ms later, so none waited that
+long. Fix: a worker giving its connection up for a waiting client reports
+it, and the supervisor starts a job on that too.
+
+**Run 9: jobs kept up.** 1 to 20 within 28 s, one about every 2 s as users
+were added; the average stayed at 20 to 27 ms. They stopped one a second,
+66 s after the run (5 s keep-alive and 60 s idle).
+
+**Run 10: false WARNs and resets.** 20 users on 20 jobs logged the WARN 8
+times: a client reconnecting while every job was busy counted as a
+shortage. Fix: the WARN needs clients waiting at the most in 5 of the last
+10 seconds. The 33 `ECONNRESET` came at the moments every job was busy.
+Reproduced on the IBM i: a job closed an idle kept connection (quiet
+250 ms) for a new client, and its client's next request failed; that client,
+connecting again, was the next new client. With 20 clients pausing up to
+400 ms, 28% of the requests failed, and no job was started, since no client
+waited 50 ms. Fix: with jobs started for the load, an idle connection is
+given up only when the new client has waited 500 ms and still waits, which
+happens at the most; the same clients then had 3 failures in 5,069
+requests. With fixed jobs, the 250 ms rule stays (there is no other way to
+serve the new client).
+
+**Run 11: everything in place.** All 20 jobs 5 s after the start and for
+the whole run (459 of 459 samples), no WARN, no failures, response times
+flat for 10 minutes, and within 6% of 20 fixed jobs (run 3).
+
+| Target | Run 11 |
+|---|---|
+| P95 < 100 ms | pass (40) |
+| P99 < 500 ms | pass (77) |
+| Errors < 1% | pass (0) |
+| Max under a few seconds | pass (1.2 s) |
 
 ## Still to run
 
-- The same profile for **10 minutes** with 20 jobs, to confirm the times
-  stay flat.
-- A **ramp-up** (5 → 50 users) against a fixed number of jobs, to see the
-  times rise once clients outnumber jobs.
+- A **ramp past the most** (5 → 50 users with 1 to 20 jobs), to see the
+  times rise once users outnumber jobs, and the WARN.
 
 ## Found along the way
 
