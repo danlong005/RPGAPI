@@ -30,7 +30,8 @@ server, and each request is handed to your procedure as a data structure.
 - HTML pages from views: EJS-style templates with RPG in the tags (`<% %>`,
   `<%= %>` escaped), given the route's data structure by its address, and
   compiled by RPGAPI when they are first used or have changed
-- Several jobs serving one port, replaced when one ends, keep-alive
+- Several jobs serving one port, started as the load needs (1 to 20 by
+  default) and stopped when idle, replaced when one fails, keep-alive
   connections, timeouts so one slow client cannot hold a job, and a controlled
   `ENDJOB` or `RPGAPI_shutdown()` that lets requests in progress finish
 - HTTPS, with a certificate from Digital Certificate Manager (DCM)
@@ -41,6 +42,20 @@ See the [Quick Start](QuickStart.md) to write and run a first app, and the
 [API Documentation](ApiDocumentation.md) for everything else (also as a web
 page with a sidebar, [docs/index.html](docs/index.html), built from it by
 `python3 docs/build.py`).
+
+## Performance
+With its defaults, RPGAPI served 20 users sending HTTPS requests one after
+the other, from a PC over the internet, for 10 minutes: 362,917 requests,
+604 a second, 22 ms on average, 99% within 77 ms, and none failed. It
+started jobs as the users came (1 to 20 in 5 seconds) and stopped them
+again a minute after they left.
+
+That was `examples/hello.rpgle` on one IBM i 7.6 partition in IBM Power
+Virtual Server, measured with Postman's performance runner, 2026-10-23. A
+procedure that runs SQL or calls another system takes longer for each
+request, and the jobs are what lets several clients be answered at once:
+see [how many jobs](ApiDocumentation.md#how-many-jobs). The runs, and
+scripts to load your own server, are in [tests/load](tests/load/README.md).
 
 ## Requirements
 - IBM i 7.3 with TR10, or 7.4 with TR4, or later. RPGAPI uses `%SPLIT`,
@@ -176,8 +191,10 @@ job and end that job to stop it; a plain `ENDJOB` lets the requests in
 progress finish:
 ```
 SBMJOB CMD(CALL PGM(MYLIB/MYAPP)) JOB(MYAPP)
-ENDJOB JOB(MYAPP)
+ENDJOB JOB(123456/MYUSER/MYAPP)
 ```
+The jobs serving the app share its name, so end the one `SBMJOB` named (in
+`WRKACTJOB`, the one of type `BCH`); the others end with it.
 The app can also stop itself: `RPGAPI_shutdown()`, called from a route or
 middleware, does what the controlled `ENDJOB` does (see
 [RPGAPI_shutdown](ApiDocumentation.md#rpgapi_shutdown) in the API reference).
@@ -310,6 +327,21 @@ HTTPS port, is disconnected without an answer; the server carries on. With
 logged with GSKit's reason.
 
 ### Upgrading
+**Apps start jobs as the load needs.** An app that does not set a number of
+jobs now runs 1 to 20 of them, and one more job watching them. `RPGAPI_App`
+gained `max_jobs` and `job_idle_seconds`, so recompile your programs; they
+fail to start with a signature error until you do. Then check two things,
+and if either applies, keep one job with `RPGAPI_setJobs(app : 1 : 1)`:
+- data your program keeps between requests, such as a counter, a cache or an
+  array, is per job: requests answered by different jobs see different copies
+- code before `RPGAPI_start` runs again in every job, also whenever one is
+  started for the load: it must be safe to repeat (not clearing a work file,
+  not sending a notice), and the program must need no parameters
+
+An app that sets its number of jobs (`app.jobs`, or `RPGAPI_start`'s third
+parameter) runs that many, as before. See
+[several jobs](ApiDocumentation.md#several-jobs).
+
 **The settings moved into `RPGAPI_App`.** Programs compiled against an
 earlier `rpgapi_h.rpgle` have to be recompiled; they fail to start with a
 signature error until they are. The setters now take the app first:

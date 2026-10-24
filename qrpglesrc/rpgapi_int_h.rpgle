@@ -47,6 +47,17 @@ dcl-pr RPGAPI_buildHead varchar(32766);
    body_length int(10:0) const;
 end-pr;
 
+   // the jobs an app runs: the least and the most (equal: fixed), and the
+   // seconds a job above the least is kept idle. given is RPGAPI_start's
+   // third parameter, or -1 without one
+dcl-pr RPGAPI_jobRange;
+   config likeds(RPGAPI_App) const;
+   given int(10:0) const;
+   min_jobs int(10:0);
+   max_jobs int(10:0);
+   idle_seconds int(10:0);
+end-pr;
+
    // opens the listening socket on the app's port
 dcl-pr RPGAPI_setup;
    config likeds(RPGAPI_App);

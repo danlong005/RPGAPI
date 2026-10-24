@@ -87,6 +87,10 @@ dcl-s RPGAPI_keepalive_requests int(10:0) inz(100);
    // ms after a response during which a kept-open connection is not given up
    // for a new client: about a round trip, for its next request to arrive
 dcl-c RPGAPI_REUSE_GRACE_MS 250;
+   // with jobs started for the load: how long a new client waits before an
+   // idle kept-open connection is given up for it, rather than a job being
+   // started (one serves about 50 ms after the client waited 50 ms)
+dcl-c RPGAPI_GIVE_WAY_MS 500;
 dcl-s RPGAPI_connection_requests int(10:0) inz(0);
 dcl-s RPGAPI_keep_connection ind inz(*off);
 dcl-s RPGAPI_connection_open ind inz(*off);
@@ -156,6 +160,8 @@ dcl-c RPGAPI_MAX_BODY_LIMIT 16000000;
    // the connection being answered, for the procedures that stream a
    // response, and the protocol of its request (HTTP/1.0 has no chunking)
 dcl-s RPGAPI_connection int(10:0) inz(-1);
+   // the socket new clients connect to, for seeing whether one is waiting
+dcl-s RPGAPI_listen_socket int(10:0) inz(-1);
    // set once writing to the connection failed or timed out: later writes
    // do nothing, so a procedure writing rows can still finish normally
 dcl-s RPGAPI_connection_failed ind inz(*off);
@@ -218,6 +224,54 @@ dcl-c RPGAPI_WORKER_PIPE_WRITE 4;
    // a descriptor spawn does not give the worker job
 dcl-c SPAWN_FDCLOSED -1;
 
+   // jobs started and stopped with the load. The main job then serves no
+   // requests: it supervises. Each worker has a slot, found in
+   // RPGAPI_SLOT_VAR, reports in the status pipe whether it holds a
+   // connection, and stops when its control pipe becomes readable
+dcl-c RPGAPI_SLOT_VAR 'RPGAPI_WORKER_SLOT';
+dcl-c RPGAPI_WORKER_STATUS 5;
+dcl-c RPGAPI_WORKER_CONTROL 6;
+dcl-c RPGAPI_DEFAULT_MAX_JOBS 20;
+dcl-c RPGAPI_DEFAULT_IDLE_SECONDS 60;
+dcl-c RPGAPI_MAX_WORKERS 64;
+   // a client waiting this long while every job is busy starts a job; while
+   // one waits, the supervisor looks every RPGAPI_SCALE_CHECK_MS
+dcl-c RPGAPI_SCALE_WAIT_MS 50;
+dcl-c RPGAPI_SCALE_CHECK_MS 10;
+   // at the most, clients kept waiting in this many of the last 10 seconds
+   // is a shortage worth a WARN; a moment now and then, as a client
+   // reconnects, is not
+dcl-c RPGAPI_SHORT_SECONDS 5;
+   // states in the status pipe: holding a connection, or not. A slot whose
+   // worker has not reported yet is starting. Gave way is not a state but
+   // an event: the worker closes its connection for a waiting client (see
+   // RPGAPI_keepOpen), which happens when there are too few jobs
+dcl-c RPGAPI_STATE_BUSY 'B';
+dcl-c RPGAPI_STATE_IDLE 'I';
+dcl-c RPGAPI_STATE_STARTING 'P';
+dcl-c RPGAPI_STATE_GAVE_WAY 'Y';
+   // in the supervisor: how often workers gave way since it last looked
+dcl-s RPGAPI_gave_way int(10:0) inz(0);
+   // in a worker: where it reports and is told to stop (-1: not scaling),
+   // its slot, and the state it last reported
+dcl-s RPGAPI_status_fd int(10:0) inz(-1);
+dcl-s RPGAPI_control_fd int(10:0) inz(-1);
+dcl-s RPGAPI_worker_slot int(10:0) inz(0);
+dcl-s RPGAPI_reported_state char(1) inz(' ');
+dcl-s RPGAPI_stop_asked ind inz(*off);
+   // in the supervisor: the status pipe ((1) read, (2) write), and for each
+   // slot the write end of the worker's control pipe, its state, since
+   // when, and whether it was asked to stop
+dcl-s RPGAPI_status_pipe int(10:0) dim(2) inz(-1);
+dcl-s RPGAPI_worker_controls int(10:0) dim(64) inz(-1);
+dcl-s RPGAPI_worker_states char(1) dim(64) inz(' ');
+dcl-s RPGAPI_worker_since timestamp dim(64);
+dcl-s RPGAPI_worker_stopping ind dim(64) inz(*off);
+dcl-ds RPGAPI_status_message qualified template;
+   state char(1);
+   slot uns(3);
+end-ds;
+
 dcl-pr pipe int(10:0) extproc('pipe');
    descriptors int(10:0) dim(2);
 end-pr;
@@ -234,16 +288,16 @@ dcl-ds RPGAPI_inheritance_t qualified template inz;
    signal_mask char(8) inz(*allx'00');
    signal_default char(8) inz(*allx'00');
 end-ds;
-   // workers get the main job's name, so ENDJOB can find them by it
+   // workers get the main job's name, so WRKACTJOB shows them together
 dcl-c SPAWN_SETJOBNAMEPARENT_NP 128;
 
 dcl-pr spawn int(10:0) extproc('spawn');
    path pointer value options(*string);
    fd_count int(10:0) value;
-   fd_map int(10:0) dim(5) const;
+   fd_map int(10:0) dim(7) const;
    inherit likeds(RPGAPI_inheritance_t) const;
    argv pointer dim(2) const;
-   envp pointer dim(2) const;
+   envp pointer dim(3) const;
 end-pr;
 
 dcl-pr getenv pointer extproc('getenv');
@@ -472,8 +526,13 @@ dcl-proc RPGAPI_start export;
    dcl-s index int(10:0) inz;
    dcl-s index2 int(10:0) inz;
    dcl-s worker_count int(10:0) inz(1);
+   dcl-s max_jobs int(10:0) inz(1);
+   dcl-s idle_seconds int(10:0);
+   dcl-s given int(10:0) inz(-1);
+   dcl-s jobs_text varchar(30);
    dcl-s main_job_pid int(10:0) inz(0);
    dcl-s worker_env pointer;
+   dcl-s slot_env pointer;
    dcl-s route_found ind inz;
    dcl-ds response likeds(RPGAPI_Response) inz;
    dcl-ds request likeds(RPGAPI_Request) inz;
@@ -486,44 +545,68 @@ dcl-proc RPGAPI_start export;
    elseif config.port = 0;
       config.port = 3000;
    endif;
-   if %parms >= 3 and workers > 1;
-      worker_count = workers;
-   elseif %parms < 3 and config.jobs > 1;
-      worker_count = config.jobs;
+   if %parms >= 3;
+      given = workers;
    endif;
+   RPGAPI_jobRange(config : given : worker_count : max_jobs : idle_seconds);
    RPGAPI_applySettings(config);
    RPGAPI_shutting_down = *off;
 
       // a worker job was started by RPGAPI_startWorkers from the main job, and
-      // serves the socket the main job opened
+      // serves the socket the main job opened. With a slot, the main job
+      // starts and stops it with the load
    worker_env = getenv(RPGAPI_WORKER_VAR);
+   slot_env = getenv(RPGAPI_SLOT_VAR);
    RPGAPI_tlsSetup();
    if worker_env <> *null;
       config.socket_descriptor = %int(%str(worker_env));
       RPGAPI_shutdown_pipe(1) = RPGAPI_WORKER_PIPE_READ;
       RPGAPI_shutdown_pipe(2) = RPGAPI_WORKER_PIPE_WRITE;
+      if slot_env <> *null;
+         RPGAPI_worker_slot = %int(%str(slot_env));
+         RPGAPI_status_fd = RPGAPI_WORKER_STATUS;
+         RPGAPI_control_fd = RPGAPI_WORKER_CONTROL;
+            // a report that cannot be written is dropped, never waited for
+         callp fcntl(RPGAPI_status_fd : F_SETFL :
+                     %bitor(fcntl(RPGAPI_status_fd : F_GETFL) : O_NONBLOCK));
+      endif;
       main_job_pid = getppid();
       RPGAPI_initHttp();
    else;
       RPGAPI_setup(config);
-      if worker_count > 1;
+      if max_jobs > worker_count;
+         RPGAPI_startSupervised(config : worker_count : max_jobs);
+      elseif worker_count > 1;
          RPGAPI_startWorkers(config : worker_count - 1);
       endif;
    endif;
+   RPGAPI_listen_socket = config.socket_descriptor;
 
    if RPGAPI_logging(RPGAPI_LOG_INFO);
       if worker_env <> *null;
          RPGAPI_log(RPGAPI_LOG_INFO : 'worker job serving port ' +
                     %char(config.port));
       else;
+         jobs_text = %char(worker_count);
+         if max_jobs > worker_count;
+            jobs_text += ' to ' + %char(max_jobs);
+         endif;
          RPGAPI_log(RPGAPI_LOG_INFO : 'serving port ' + %char(config.port) +
-                    ' in ' + %char(worker_count) + ' job(s), ' +
+                    ' in ' + jobs_text + ' job(s), ' +
                     RPGAPI_tlsDescription() +
                     ', request limit ' + %char(RPGAPI_max_request_size) +
                     ' bytes, upload limit ' + %char(RPGAPI_max_upload_size) +
                     ' bytes, timeouts ' + %char(RPGAPI_READ_TIMEOUT) + 's read ' +
                     %char(RPGAPI_WRITE_TIMEOUT) + 's write');
       endif;
+   endif;
+
+      // jobs started and stopped with the load: this job only supervises
+   if worker_env = *null and max_jobs > worker_count;
+      RPGAPI_supervise(config : worker_count : max_jobs : idle_seconds);
+      RPGAPI_endWorkers();
+      RPGAPI_stop(config);
+      return;
    endif;
 
    dow RPGAPI_acceptConnection(config : main_job_pid);
@@ -696,10 +779,16 @@ dcl-proc RPGAPI_stop export;
 
    close_port( config.return_socket_descriptor );
    close_port( config.socket_descriptor );
+   RPGAPI_listen_socket = -1;
    if RPGAPI_shutdown_pipe(1) >= 0;
       close_port( RPGAPI_shutdown_pipe(1) );
       close_port( RPGAPI_shutdown_pipe(2) );
       RPGAPI_shutdown_pipe = -1;
+   endif;
+   if RPGAPI_status_pipe(1) >= 0;
+      close_port( RPGAPI_status_pipe(1) );
+      close_port( RPGAPI_status_pipe(2) );
+      RPGAPI_status_pipe = -1;
    endif;
 end-proc;
 
@@ -770,6 +859,10 @@ dcl-proc RPGAPI_endWorkers;
          callp waitpid(RPGAPI_worker_pids(index) : status : 0);
          RPGAPI_worker_pids(index) = 0;
       endif;
+      if RPGAPI_worker_controls(index) >= 0;
+         close_port(RPGAPI_worker_controls(index));
+         RPGAPI_worker_controls(index) = -1;
+      endif;
    endfor;
    RPGAPI_worker_total = 0;
    RPGAPI_log(RPGAPI_LOG_INFO : 'every job has ended');
@@ -786,8 +879,9 @@ dcl-proc RPGAPI_acceptConnection;
       config likeds(RPGAPI_App);
       main_job_pid int(10:0) const;
    end-pi;
-   dcl-ds poll_fds likeds(PollFd) dim(2);
+   dcl-ds poll_fds likeds(PollFd) dim(3);
    dcl-s poll_count int(10:0) inz(1);
+   dcl-s index int(10:0);
    dcl-s descriptor int(10:0);
    dcl-s no_delay int(10:0) inz(1);
 
@@ -798,12 +892,19 @@ dcl-proc RPGAPI_acceptConnection;
                  ' on a connection kept open');
       return *on;
    endif;
+   RPGAPI_reportState(RPGAPI_STATE_IDLE);
 
-      // the shutdown pipe wakes the job as soon as RPGAPI_shutdown is called
+      // the shutdown pipe wakes the job as soon as RPGAPI_shutdown is called,
+      // and the control pipe a worker the main job stops
    if RPGAPI_shutdown_pipe(1) >= 0;
-      poll_count = 2;
-      poll_fds(2).fd = RPGAPI_shutdown_pipe(1);
-      poll_fds(2).events = POLLIN;
+      poll_count += 1;
+      poll_fds(poll_count).fd = RPGAPI_shutdown_pipe(1);
+      poll_fds(poll_count).events = POLLIN;
+   endif;
+   if RPGAPI_control_fd >= 0;
+      poll_count += 1;
+      poll_fds(poll_count).fd = RPGAPI_control_fd;
+      poll_fds(poll_count).events = POLLIN;
    endif;
    dow *on;
       if main_job_pid > 0 and kill(main_job_pid : 0) < 0;
@@ -822,14 +923,20 @@ dcl-proc RPGAPI_acceptConnection;
          endif;
          return *off;
       endif;
+      if RPGAPI_stopAsked();
+         RPGAPI_log(RPGAPI_LOG_INFO : 'the main job stops this worker job, ' +
+                    'idle: no more requests are taken');
+         return *off;
+      endif;
       if main_job_pid = 0;
          RPGAPI_checkWorkers(config);
       endif;
 
       poll_fds(1).fd = config.socket_descriptor;
       poll_fds(1).events = POLLIN;
-      poll_fds(1).revents = 0;
-      poll_fds(2).revents = 0;
+      for index = 1 to poll_count;
+         poll_fds(index).revents = 0;
+      endfor;
       if poll(poll_fds : poll_count : RPGAPI_WORKER_CHECK_MS) <= 0 or
          poll_fds(1).revents = 0;
          iter;
@@ -840,6 +947,7 @@ dcl-proc RPGAPI_acceptConnection;
       if descriptor < 0;
          iter;
       endif;
+      RPGAPI_reportState(RPGAPI_STATE_BUSY);
 
       RPGAPI_connection_ip = RPGAPI_peerAddress(descriptor);
 
@@ -856,6 +964,7 @@ dcl-proc RPGAPI_acceptConnection;
          // one sending plain HTTP, is closed and not answered
       if RPGAPI_tls <> RPGAPI_TLS_OFF and not RPGAPI_tlsHandshake(descriptor);
          close_port(descriptor);
+         RPGAPI_reportState(RPGAPI_STATE_IDLE);
          iter;
       endif;
 
@@ -915,31 +1024,42 @@ dcl-proc RPGAPI_waitForNextRequest;
    dcl-pi *n ind;
       config likeds(RPGAPI_App);
    end-pi;
-   dcl-ds poll_fds likeds(PollFd) dim(3);
+   dcl-ds poll_fds likeds(PollFd) dim(4);
    dcl-s poll_count int(10:0) inz(2);
+   dcl-s index int(10:0);
    dcl-s until timestamp;
    dcl-s wait_ms int(20:0);
    dcl-s peeked char(1);
    dcl-s ready int(10:0);
    dcl-s answered timestamp;
    dcl-s grace_ms int(20:0);
+   dcl-s give_at timestamp;
+      // since when a new client has been waiting; *loval: none
+   dcl-s newcomer_since timestamp inz(*loval);
+   dcl-ds listening likeds(PollFd) dim(1);
 
       // pipelined: the client sent it along with the one before
    if RPGAPI_input_start <= RPGAPI_input_end;
       return *on;
    endif;
 
-      // the shutdown pipe wakes the job as soon as RPGAPI_shutdown is called
+      // the shutdown pipe wakes the job as soon as RPGAPI_shutdown is called,
+      // and the control pipe a worker the main job stops
    if RPGAPI_shutdown_pipe(1) >= 0;
-      poll_count = 3;
-      poll_fds(3).fd = RPGAPI_shutdown_pipe(1);
-      poll_fds(3).events = POLLIN;
+      poll_count += 1;
+      poll_fds(poll_count).fd = RPGAPI_shutdown_pipe(1);
+      poll_fds(poll_count).events = POLLIN;
+   endif;
+   if RPGAPI_control_fd >= 0;
+      poll_count += 1;
+      poll_fds(poll_count).fd = RPGAPI_control_fd;
+      poll_fds(poll_count).events = POLLIN;
    endif;
    answered = %timestamp();
    until = answered + %seconds(RPGAPI_keepalive_timeout);
    dow *on;
       wait_ms = %div(%diff(until : %timestamp() : *mseconds) : 1000);
-      if wait_ms <= 0 or RPGAPI_ending();
+      if wait_ms <= 0 or RPGAPI_ending() or RPGAPI_stopAsked();
          leave;
       endif;
          // in slices, to notice the job being ended
@@ -949,28 +1069,54 @@ dcl-proc RPGAPI_waitForNextRequest;
       poll_fds(1).revents = 0;
       poll_fds(2).fd = config.socket_descriptor;
       poll_fds(2).events = POLLIN;
-      poll_fds(2).revents = 0;
-      poll_fds(3).revents = 0;
+      for index = 2 to poll_count;
+         poll_fds(index).revents = 0;
+      endfor;
       ready = poll(poll_fds : poll_count : wait_ms);
       if ready < 0;
          leave;
       elseif ready = 0;
          iter;
       endif;
-         // a new client is waiting. This one may be sending its next request
-         // right now: closing would cut that request off (a reset). Only a
-         // connection quiet for RPGAPI_REUSE_GRACE_MS since its response is
-         // given up for the new one
+         // a new client is waiting. Closing this connection for it fails the
+         // request its client sends next, which may be on its way already
+         // (a reset), so it is given up only when it must be: quiet for
+         // RPGAPI_REUSE_GRACE_MS since its response and, with jobs started
+         // for the load, the new client waiting RPGAPI_GIVE_WAY_MS, time for
+         // the main job to start one for it. And only when the new client
+         // is still waiting then: another job may have taken it
+      if poll_fds(2).revents = 0;
+         newcomer_since = *loval;
+      endif;
       if poll_fds(1).revents = 0 and poll_fds(2).revents <> 0;
-         grace_ms = RPGAPI_REUSE_GRACE_MS -
-                    %div(%diff(%timestamp() : answered : *mseconds) : 1000);
+         if newcomer_since = *loval;
+            newcomer_since = %timestamp();
+         endif;
+         give_at = answered + %mseconds(RPGAPI_REUSE_GRACE_MS * 1000);
+         if RPGAPI_status_fd >= 0 and
+            newcomer_since + %mseconds(RPGAPI_GIVE_WAY_MS * 1000) > give_at;
+            give_at = newcomer_since + %mseconds(RPGAPI_GIVE_WAY_MS * 1000);
+         endif;
+         grace_ms = %min(%div(%diff(give_at : %timestamp() : *mseconds) :
+                              1000) : wait_ms);
          ready = 0;
          if grace_ms > 0;
             ready = poll(poll_fds : 1 : grace_ms);
          endif;
          if ready <= 0;
+            if %timestamp() < give_at;
+               iter;
+            endif;
+            listening(1).fd = config.socket_descriptor;
+            listening(1).events = POLLIN;
+            listening(1).revents = 0;
+            if poll(listening : 1 : 0) <= 0;
+               newcomer_since = *loval;
+               iter;
+            endif;
             RPGAPI_log(RPGAPI_LOG_DEBUG : 'closing an idle kept-open ' +
                        'connection for a new one');
+            RPGAPI_reportState(RPGAPI_STATE_GAVE_WAY);
             leave;
          endif;
       endif;
@@ -1018,7 +1164,7 @@ dcl-proc RPGAPI_startWorkers;
               ' worker job(s) running ' + RPGAPI_jobProgram());
    RPGAPI_worker_total = %min(count : %elem(RPGAPI_worker_pids));
    for index = 1 to RPGAPI_worker_total;
-      pid = RPGAPI_spawnWorker(config : error_text);
+      pid = RPGAPI_spawnWorker(config : error_text : 0);
       if pid < 0;
          error_text = 'Starting worker job ' + %char(index) + ' of ' +
                       %char(count) + ' failed: ' + error_text;
@@ -1042,14 +1188,20 @@ dcl-proc RPGAPI_spawnWorker;
    dcl-pi *n int(10:0);
       config likeds(RPGAPI_App);
       problem varchar(512);
+         // 0, or the slot of a worker started and stopped with the load: it
+         // also gets the status pipe and a control pipe of its own
+      slot int(10:0) const;
    end-pi;
    dcl-s path varchar(64);
    dcl-s path_z char(65);
    dcl-s variable_z char(32);
-   dcl-s fd_map int(10:0) dim(5);
+   dcl-s slot_z char(32);
+   dcl-s fd_map int(10:0) dim(7);
+   dcl-s fd_count int(10:0) inz(5);
+   dcl-s control int(10:0) dim(2) inz(-1);
    dcl-ds inherit likeds(RPGAPI_inheritance_t) inz(*likeds);
    dcl-s argv pointer dim(2);
-   dcl-s envp pointer dim(2);
+   dcl-s envp pointer dim(3);
    dcl-s pid int(10:0);
    dcl-s error_number int(10:0) based(error_number_ptr);
 
@@ -1066,12 +1218,35 @@ dcl-proc RPGAPI_spawnWorker;
    argv(2) = *null;
    envp(1) = %addr(variable_z);
    envp(2) = *null;
+   envp(3) = *null;
+   if slot > 0;
+      if pipe(control) < 0;
+         error_number_ptr = get_errno();
+         problem = 'pipe: ' + %str(strerror(error_number)) +
+                   ' (errno ' + %char(error_number) + ')';
+         return -1;
+      endif;
+      fd_count = 7;
+      fd_map(RPGAPI_WORKER_STATUS + 1) = RPGAPI_status_pipe(2);
+      fd_map(RPGAPI_WORKER_CONTROL + 1) = control(1);
+      slot_z = RPGAPI_SLOT_VAR + '=' + %char(slot) + x'00';
+      envp(2) = %addr(slot_z);
+   endif;
 
-   pid = spawn(%addr(path_z) : %elem(fd_map) : fd_map : inherit : argv : envp);
+   pid = spawn(%addr(path_z) : fd_count : fd_map : inherit : argv : envp);
    if pid < 0;
       error_number_ptr = get_errno();
       problem = path + ': ' + %str(strerror(error_number)) +
                 ' (errno ' + %char(error_number) + ')';
+   endif;
+      // the worker has the read end; this job keeps the write end to stop it
+   if slot > 0;
+      close_port(control(1));
+      if pid < 0;
+         close_port(control(2));
+      else;
+         RPGAPI_worker_controls(slot) = control(2);
+      endif;
    endif;
    return pid;
 end-proc;
@@ -1106,23 +1281,10 @@ dcl-proc RPGAPI_checkWorkers;
       if RPGAPI_worker_pids(index) <> 0;
          iter;
       endif;
-         // at most RPGAPI_MAX_RESTARTS a minute
-      if %diff(%timestamp() : RPGAPI_restart_window : *seconds) >= 60;
-         RPGAPI_restart_window = %timestamp();
-         RPGAPI_restarts = 0;
-         RPGAPI_restarts_held = *off;
-      endif;
-      if RPGAPI_restarts >= RPGAPI_MAX_RESTARTS;
-         if not RPGAPI_restarts_held;
-            RPGAPI_log(RPGAPI_LOG_ERROR : 'worker jobs keep ending: ' +
-                       %char(RPGAPI_MAX_RESTARTS) + ' started in the last ' +
-                       'minute; no more until the minute is over');
-            RPGAPI_restarts_held = *on;
-         endif;
+      if not RPGAPI_restartAllowed();
          return;
       endif;
-      RPGAPI_restarts += 1;
-      pid = RPGAPI_spawnWorker(config : problem);
+      pid = RPGAPI_spawnWorker(config : problem : 0);
       if pid < 0;
          RPGAPI_log(RPGAPI_LOG_ERROR : 'starting a worker job in place of ' +
                     'one that ended failed: ' + problem);
@@ -1132,6 +1294,448 @@ dcl-proc RPGAPI_checkWorkers;
       RPGAPI_log(RPGAPI_LOG_WARN : 'started worker job ' + %char(index) +
                  ' again (process ' + %char(pid) + ')');
    endfor;
+end-proc;
+
+
+   // whether a worker job that ended may be replaced now: at most
+   // RPGAPI_MAX_RESTARTS a minute, so a worker that keeps failing does not
+   // keep the main job busy starting it. Counts the one it allows
+dcl-proc RPGAPI_restartAllowed;
+   dcl-pi *n ind;
+   end-pi;
+
+   if %diff(%timestamp() : RPGAPI_restart_window : *seconds) >= 60;
+      RPGAPI_restart_window = %timestamp();
+      RPGAPI_restarts = 0;
+      RPGAPI_restarts_held = *off;
+   endif;
+   if RPGAPI_restarts >= RPGAPI_MAX_RESTARTS;
+      if not RPGAPI_restarts_held;
+         RPGAPI_log(RPGAPI_LOG_ERROR : 'worker jobs keep ending: ' +
+                    %char(RPGAPI_MAX_RESTARTS) + ' started in the last ' +
+                    'minute; no more until the minute is over');
+         RPGAPI_restarts_held = *on;
+      endif;
+      return *off;
+   endif;
+   RPGAPI_restarts += 1;
+   return *on;
+end-proc;
+
+
+   // the jobs an app runs, when RPGAPI_start begins: RPGAPI_start's third
+   // parameter (given, -1 without one) for that many, fixed; else
+   // RPGAPI_setJobs's range; else app.jobs, fixed; else 1 to 20. The least
+   // and the most are equal for a fixed number
+dcl-proc RPGAPI_jobRange export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App) const;
+      given int(10:0) const;
+      min_jobs int(10:0);
+      max_jobs int(10:0);
+      idle_seconds int(10:0);
+   end-pi;
+
+   idle_seconds = RPGAPI_DEFAULT_IDLE_SECONDS;
+   if config.job_idle_seconds > 0;
+      idle_seconds = config.job_idle_seconds;
+   endif;
+   select;
+   when given >= 0;
+      min_jobs = %max(given : 1);
+      max_jobs = min_jobs;
+   when config.max_jobs > 0;
+      min_jobs = %max(config.jobs : 1);
+      max_jobs = %min(%max(config.max_jobs : min_jobs) : RPGAPI_MAX_WORKERS);
+   when config.jobs > 0;
+      min_jobs = config.jobs;
+      max_jobs = min_jobs;
+   other;
+      min_jobs = 1;
+      max_jobs = RPGAPI_DEFAULT_MAX_JOBS;
+   endsl;
+end-proc;
+
+
+dcl-proc RPGAPI_setJobs export;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      min_jobs int(10:0) const;
+      max_jobs int(10:0) const;
+      idle_seconds int(10:0) const options(*nopass);
+   end-pi;
+
+   if min_jobs < 1;
+      RPGAPI_settingFailed('RPGAPI_setJobs: at least 1 job has to run, not ' +
+                           %char(min_jobs));
+   endif;
+   if max_jobs < min_jobs;
+      RPGAPI_settingFailed('RPGAPI_setJobs: the most, ' + %char(max_jobs) +
+                           ', is less than the least, ' + %char(min_jobs));
+   endif;
+   if max_jobs > RPGAPI_MAX_WORKERS;
+      RPGAPI_settingFailed('RPGAPI_setJobs: ' + %char(max_jobs) + ' jobs are ' +
+                           'more than the ' + %char(RPGAPI_MAX_WORKERS) +
+                           ' there can be');
+   endif;
+   if %parms >= 4;
+      if idle_seconds < 1;
+         RPGAPI_settingFailed('RPGAPI_setJobs: idle jobs have to be kept at ' +
+                              'least 1 second');
+      endif;
+      config.job_idle_seconds = idle_seconds;
+   endif;
+   config.jobs = min_jobs;
+   config.max_jobs = max_jobs;
+end-proc;
+
+
+   // in a worker job started and stopped with the load: tells the main job
+   // whether it holds a connection, when that changes
+dcl-proc RPGAPI_reportState;
+   dcl-pi *n;
+      state char(1) const;
+   end-pi;
+   dcl-ds message likeds(RPGAPI_status_message);
+
+   if RPGAPI_status_fd < 0 or state = RPGAPI_reported_state;
+      return;
+   endif;
+   message.state = state;
+   message.slot = RPGAPI_worker_slot;
+   callp write(RPGAPI_status_fd : %addr(message) : %size(message));
+   RPGAPI_reported_state = state;
+end-proc;
+
+
+   // in a worker job started and stopped with the load: whether the main job
+   // asked it to stop, or ended (both make its control pipe readable)
+dcl-proc RPGAPI_stopAsked;
+   dcl-pi *n ind;
+   end-pi;
+   dcl-ds poll_fds likeds(PollFd) dim(1);
+
+   if RPGAPI_control_fd < 0 or RPGAPI_stop_asked;
+      return RPGAPI_stop_asked;
+   endif;
+   poll_fds(1).fd = RPGAPI_control_fd;
+   poll_fds(1).events = POLLIN;
+   poll_fds(1).revents = 0;
+   RPGAPI_stop_asked = poll(poll_fds : 1 : 0) > 0;
+   return RPGAPI_stop_asked;
+end-proc;
+
+
+   // in the main job, for jobs started and stopped with the load: makes the
+   // shutdown and status pipes and starts the least number of workers
+dcl-proc RPGAPI_startSupervised;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      min_jobs int(10:0) const;
+      max_jobs int(10:0) const;
+   end-pi;
+   dcl-s index int(10:0);
+
+   if pipe(RPGAPI_shutdown_pipe) < 0;
+      RPGAPI_shutdown_pipe = -1;
+      RPGAPI_socketFailed(config : 'pipe');
+   endif;
+   if pipe(RPGAPI_status_pipe) < 0;
+      RPGAPI_status_pipe = -1;
+      RPGAPI_socketFailed(config : 'pipe');
+   endif;
+      // reports are read as they come, never waited for
+   callp fcntl(RPGAPI_status_pipe(1) : F_SETFL :
+               %bitor(fcntl(RPGAPI_status_pipe(1) : F_GETFL) : O_NONBLOCK));
+   RPGAPI_worker_total = max_jobs;
+   for index = 1 to min_jobs;
+      if RPGAPI_startWorker(config) = 0;
+         RPGAPI_socketFailed(config : 'spawn');
+      endif;
+   endfor;
+end-proc;
+
+
+   // in the main job, for jobs started and stopped with the load: starts a
+   // worker in the first free slot. Returns the slot, or 0 when it failed
+dcl-proc RPGAPI_startWorker;
+   dcl-pi *n int(10:0);
+      config likeds(RPGAPI_App);
+   end-pi;
+   dcl-s slot int(10:0);
+   dcl-s pid int(10:0);
+   dcl-s problem varchar(512);
+
+   for slot = 1 to RPGAPI_worker_total;
+      if RPGAPI_worker_pids(slot) = 0;
+         leave;
+      endif;
+   endfor;
+   if slot > RPGAPI_worker_total;
+      return 0;
+   endif;
+   pid = RPGAPI_spawnWorker(config : problem : slot);
+   if pid < 0;
+      RPGAPI_log(RPGAPI_LOG_ERROR : 'starting a worker job failed: ' + problem);
+      return 0;
+   endif;
+   RPGAPI_worker_pids(slot) = pid;
+   RPGAPI_worker_states(slot) = RPGAPI_STATE_STARTING;
+   RPGAPI_worker_since(slot) = %timestamp();
+   RPGAPI_worker_stopping(slot) = *off;
+   return slot;
+end-proc;
+
+
+   // in the main job, for jobs started and stopped with the load: reads what
+   // the workers reported, whether each holds a connection
+dcl-proc RPGAPI_readStatus;
+   dcl-s buffer char(512);
+   dcl-ds message likeds(RPGAPI_status_message) based(message_ptr);
+   dcl-s length int(10:0);
+   dcl-s offset int(10:0);
+   dcl-s slot int(10:0);
+
+   dow *on;
+      length = read(RPGAPI_status_pipe(1) : %addr(buffer) : %size(buffer));
+      if length <= 0;
+         leave;
+      endif;
+         // the reports are 2 bytes, written whole, so they are read whole
+      for offset = 0 to length - %size(message) by %size(message);
+         message_ptr = %addr(buffer) + offset;
+         slot = message.slot;
+         if message.state = RPGAPI_STATE_GAVE_WAY;
+            RPGAPI_gave_way += 1;
+         elseif slot >= 1 and slot <= RPGAPI_worker_total and
+            RPGAPI_worker_pids(slot) > 0;
+            RPGAPI_worker_states(slot) = message.state;
+            RPGAPI_worker_since(slot) = %timestamp();
+         endif;
+      endfor;
+   enddo;
+end-proc;
+
+
+   // in the main job, for jobs started and stopped with the load: notices
+   // workers that ended, those it stopped and those that failed
+dcl-proc RPGAPI_reapWorkers;
+   dcl-s slot int(10:0);
+   dcl-s status int(10:0);
+
+   for slot = 1 to RPGAPI_worker_total;
+      if RPGAPI_worker_pids(slot) <= 0 or
+         waitpid(RPGAPI_worker_pids(slot) : status : WNOHANG) <>
+         RPGAPI_worker_pids(slot);
+         iter;
+      endif;
+      if not RPGAPI_worker_stopping(slot);
+         RPGAPI_log(RPGAPI_LOG_WARN : 'worker job ' + %char(slot) +
+                    ' (process ' + %char(RPGAPI_worker_pids(slot)) +
+                    ') ended, status ' + %char(status));
+      endif;
+      RPGAPI_worker_pids(slot) = 0;
+      RPGAPI_worker_states(slot) = ' ';
+      RPGAPI_worker_stopping(slot) = *off;
+      if RPGAPI_worker_controls(slot) >= 0;
+         close_port(RPGAPI_worker_controls(slot));
+         RPGAPI_worker_controls(slot) = -1;
+      endif;
+   endfor;
+end-proc;
+
+
+   // the main job, for jobs started and stopped with the load, until the
+   // server ends: starts a worker when every one holds a connection and a
+   // client has waited RPGAPI_SCALE_WAIT_MS, up to the most; stops one that
+   // was idle idle_seconds, down to the least; and replaces failed ones
+   // below the least
+dcl-proc RPGAPI_supervise;
+   dcl-pi *n;
+      config likeds(RPGAPI_App);
+      min_jobs int(10:0) const;
+      max_jobs int(10:0) const;
+      idle_seconds int(10:0) const;
+   end-pi;
+   dcl-ds poll_fds likeds(PollFd) dim(3);
+   dcl-ds listening likeds(PollFd) dim(1);
+   dcl-s poll_count int(10:0);
+   dcl-s wait_ms int(10:0);
+      // *loval: none
+   dcl-s waiting_since timestamp inz(*loval);
+   dcl-s warned timestamp inz(*loval);
+   dcl-s idle_checked timestamp;
+   dcl-s no_start_until timestamp inz(*loval);
+   dcl-s now timestamp;
+   dcl-s slot int(10:0);
+   dcl-s serving int(10:0);
+   dcl-s busy int(10:0);
+   dcl-s starting int(10:0);
+   dcl-s stopping int(10:0);
+   dcl-s idlest int(10:0);
+   dcl-s waited_ms int(20:0);
+   dcl-s stop_byte char(1) inz('Q');
+      // the last 10 seconds: in which clients waited at the most
+   dcl-s began timestamp;
+   dcl-s short_in ind dim(10) inz(*off);
+   dcl-s second int(20:0);
+   dcl-s last_second int(20:0) inz(0);
+   dcl-s index int(10:0);
+   dcl-s short_count int(10:0);
+
+   idle_checked = %timestamp();
+   began = idle_checked;
+   dow not RPGAPI_ending();
+         // a client waiting: look again shortly. Otherwise until one comes,
+         // a worker reports, or a second has passed
+      poll_count = 0;
+      wait_ms = RPGAPI_SCALE_CHECK_MS;
+      if waiting_since = *loval;
+         poll_count += 1;
+         poll_fds(poll_count).fd = config.socket_descriptor;
+         poll_fds(poll_count).events = POLLIN;
+         wait_ms = RPGAPI_WORKER_CHECK_MS;
+      endif;
+      poll_count += 1;
+      poll_fds(poll_count).fd = RPGAPI_status_pipe(1);
+      poll_fds(poll_count).events = POLLIN;
+      poll_count += 1;
+      poll_fds(poll_count).fd = RPGAPI_shutdown_pipe(1);
+      poll_fds(poll_count).events = POLLIN;
+      for slot = 1 to poll_count;
+         poll_fds(slot).revents = 0;
+      endfor;
+      callp poll(poll_fds : poll_count : wait_ms);
+
+      RPGAPI_readStatus();
+      RPGAPI_reapWorkers();
+      if RPGAPI_ending();
+         leave;
+      endif;
+      now = %timestamp();
+         // a new second: the seconds since the last one had no waiting
+      second = %diff(now : began : *seconds);
+      for index = 1 to %min(second - last_second : 10);
+         short_in(%rem(last_second + index : 10) + 1) = *off;
+      endfor;
+      last_second = second;
+      serving = 0;
+      busy = 0;
+      starting = 0;
+      stopping = 0;
+      for slot = 1 to RPGAPI_worker_total;
+         if RPGAPI_worker_pids(slot) <= 0;
+            iter;
+         endif;
+         if RPGAPI_worker_stopping(slot);
+            stopping += 1;
+            iter;
+         endif;
+         serving += 1;
+            // one that has not reported in 10 seconds no longer holds up
+            // starting others
+         if RPGAPI_worker_states(slot) = RPGAPI_STATE_BUSY;
+            busy += 1;
+         elseif RPGAPI_worker_states(slot) = RPGAPI_STATE_STARTING and
+                %diff(now : RPGAPI_worker_since(slot) : *seconds) < 10;
+            starting += 1;
+         endif;
+      endfor;
+
+         // fewer than the least: one failed. Replaced, at most 5 a minute
+      if serving < min_jobs and RPGAPI_restartAllowed();
+         slot = RPGAPI_startWorker(config);
+         if slot > 0;
+            RPGAPI_log(RPGAPI_LOG_WARN : 'started worker job ' + %char(slot) +
+                       ' again (process ' + %char(RPGAPI_worker_pids(slot)) +
+                       ')');
+         endif;
+         iter;
+      endif;
+
+         // every job busy, and a client waiting: one has waited
+         // RPGAPI_SCALE_WAIT_MS, or a job gave its connection up for one.
+         // The second is how short requests show it: a waiting client is
+         // served after the next response, so none waits long
+      listening(1).fd = config.socket_descriptor;
+      listening(1).events = POLLIN;
+      listening(1).revents = 0;
+      waited_ms = 0;
+      if poll(listening : 1 : 0) <= 0;
+         waiting_since = *loval;
+      elseif waiting_since = *loval;
+         waiting_since = now;
+      else;
+         waited_ms = %div(%diff(now : waiting_since : *mseconds) : 1000);
+      endif;
+      if (waited_ms >= RPGAPI_SCALE_WAIT_MS or RPGAPI_gave_way > 0) and
+         starting = 0 and busy >= serving and now >= no_start_until;
+         if serving < max_jobs;
+            if waited_ms >= RPGAPI_SCALE_WAIT_MS;
+               RPGAPI_log(RPGAPI_LOG_INFO : 'all ' + %char(serving) +
+                          ' jobs busy and a client waited ' +
+                          %char(waited_ms) + ' ms: starting job ' +
+                          %char(serving + 1));
+            else;
+               RPGAPI_log(RPGAPI_LOG_INFO : 'all ' + %char(serving) +
+                          ' jobs busy and one gave way to a waiting ' +
+                          'client: starting job ' + %char(serving + 1));
+            endif;
+            if RPGAPI_startWorker(config) = 0;
+               no_start_until = now + %seconds(5);
+            endif;
+            if waiting_since <> *loval;
+               waiting_since = now;
+            endif;
+         else;
+            short_in(%rem(second : 10) + 1) = *on;
+            short_count = 0;
+            for index = 1 to %elem(short_in);
+               if short_in(index);
+                  short_count += 1;
+               endif;
+            endfor;
+               // logged even with logging off: the apps that need it are
+               // the ones that left the settings alone
+            if short_count >= RPGAPI_SHORT_SECONDS and
+               (warned = *loval or %diff(now : warned : *seconds) >= 60);
+               RPGAPI_sendLog(RPGAPI_LOG_WARN : 'all ' + %char(serving) +
+                              ' jobs (the most) are busy and clients ' +
+                              'waited in ' + %char(short_count) + ' of the ' +
+                              'last 10 seconds: raise the most with ' +
+                              'RPGAPI_setJobs');
+               warned = now;
+            endif;
+         endif;
+      endif;
+      RPGAPI_gave_way = 0;
+
+         // once a second: stop the job idle longest, above the least, one at
+         // a time
+      if %diff(now : idle_checked : *seconds) < 1 or serving <= min_jobs or
+         stopping > 0;
+         iter;
+      endif;
+      idle_checked = now;
+      idlest = 0;
+      for slot = 1 to RPGAPI_worker_total;
+         if RPGAPI_worker_pids(slot) > 0 and
+            not RPGAPI_worker_stopping(slot) and
+            RPGAPI_worker_states(slot) = RPGAPI_STATE_IDLE and
+            (idlest = 0 or
+             RPGAPI_worker_since(slot) < RPGAPI_worker_since(idlest));
+            idlest = slot;
+         endif;
+      endfor;
+      if idlest > 0 and
+         %diff(now : RPGAPI_worker_since(idlest) : *seconds) >= idle_seconds;
+         callp write(RPGAPI_worker_controls(idlest) : %addr(stop_byte) : 1);
+         RPGAPI_worker_stopping(idlest) = *on;
+         RPGAPI_log(RPGAPI_LOG_INFO : 'job ' + %char(idlest) + ' idle for ' +
+                    %char(%diff(now : RPGAPI_worker_since(idlest) : *seconds)) +
+                    ' s: stopping it (' + %char(serving - 1) + ' jobs)');
+      endif;
+   enddo;
 end-proc;
 
 
@@ -3061,17 +3665,53 @@ dcl-proc RPGAPI_keepOpen;
       RPGAPI_reject_status > 0 or RPGAPI_linger or
       (RPGAPI_body_streamed and not RPGAPI_body_done) or
       body_length = RPGAPI_UNTIL_CLOSE or RPGAPI_request_method = '' or
-      RPGAPI_ending();
+      RPGAPI_ending() or RPGAPI_stopAsked();
       return *off;
    endif;
    connection = %lower(RPGAPI_requestHeader('Connection'));
    if %scan('close' : connection) > 0;
       return *off;
    endif;
-   if %trim(RPGAPI_request_protocol) = 'HTTP/1.0';
-      return %scan('keep-alive' : connection) > 0;
+   if %trim(RPGAPI_request_protocol) = 'HTTP/1.0' and
+      %scan('keep-alive' : connection) = 0;
+      return *off;
+   endif;
+   if RPGAPI_clientWaiting();
+      RPGAPI_log(RPGAPI_LOG_DEBUG : 'a new client is waiting: the ' +
+                 'connection is closed after this response, for it');
+         // with jobs started with the load: a sign that one more is needed
+      RPGAPI_reportState(RPGAPI_STATE_GAVE_WAY);
+      return *off;
    endif;
    return *on;
+end-proc;
+
+
+   // whether a new client is waiting for this job, and the client of the
+   // connection it serves has sent nothing more yet. That connection is then
+   // closed after its response, and its client connects again behind the
+   // one waiting: a client sending requests back to back would otherwise
+   // keep the job until its request limit, and the others waiting for that
+   // long. With something more sent (pipelined), it is kept, so as not to
+   // cut that off
+dcl-proc RPGAPI_clientWaiting;
+   dcl-pi *n ind;
+   end-pi;
+   dcl-ds poll_fds likeds(PollFd) dim(2);
+
+   if RPGAPI_listen_socket < 0 or RPGAPI_input_start <= RPGAPI_input_end;
+      return *off;
+   endif;
+   poll_fds(1).fd = RPGAPI_listen_socket;
+   poll_fds(1).events = POLLIN;
+   poll_fds(1).revents = 0;
+   poll_fds(2).fd = RPGAPI_connection;
+   poll_fds(2).events = POLLIN;
+   poll_fds(2).revents = 0;
+   if poll(poll_fds : 2 : 0) <= 0;
+      return *off;
+   endif;
+   return poll_fds(1).revents <> 0 and poll_fds(2).revents = 0;
 end-proc;
 
 
@@ -3093,13 +3733,23 @@ dcl-proc RPGAPI_log export;
       level int(10:0) const;
       text varchar(1000) const;
    end-pi;
+
+   if RPGAPI_logging(level);
+      RPGAPI_sendLog(level : text);
+   endif;
+end-proc;
+
+
+   // puts a message in the job log, whatever the log level
+dcl-proc RPGAPI_sendLog;
+   dcl-pi *n;
+      level int(10:0) const;
+      text varchar(1000) const;
+   end-pi;
    dcl-s message varchar(512);
    dcl-s message_key char(4);
    dcl-s error_code char(8) inz(*allx'00');
 
-   if not RPGAPI_logging(level);
-      return;
-   endif;
    select;
    when level = RPGAPI_LOG_ERROR;
       message = 'RPGAPI ERROR: ';

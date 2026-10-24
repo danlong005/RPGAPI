@@ -861,6 +861,112 @@ dcl-proc test_routeMatches_decodedParam export;
 end-proc;
 
 // ============================================
+// JOBS: FIXED OR STARTED WITH THE LOAD
+// ============================================
+
+   // nothing set: 1 to 20 jobs, idle ones kept 60 seconds
+dcl-proc test_jobRange_default export;
+   dcl-ds config likeds(RPGAPI_App) inz;
+   dcl-s min_jobs int(10:0);
+   dcl-s max_jobs int(10:0);
+   dcl-s idle int(10:0);
+
+   clear config;
+   RPGAPI_jobRange(config : -1 : min_jobs : max_jobs : idle);
+   iEqual(1 : min_jobs);
+   iEqual(20 : max_jobs);
+   iEqual(60 : idle);
+end-proc;
+
+   // app.jobs alone: that many, fixed, as before
+dcl-proc test_jobRange_appJobsFixed export;
+   dcl-ds config likeds(RPGAPI_App) inz;
+   dcl-s min_jobs int(10:0);
+   dcl-s max_jobs int(10:0);
+   dcl-s idle int(10:0);
+
+   clear config;
+   config.jobs = 4;
+   RPGAPI_jobRange(config : -1 : min_jobs : max_jobs : idle);
+   iEqual(4 : min_jobs);
+   iEqual(4 : max_jobs);
+end-proc;
+
+   // RPGAPI_start's third parameter: fixed, even after RPGAPI_setJobs
+dcl-proc test_jobRange_startParameterFixed export;
+   dcl-ds config likeds(RPGAPI_App) inz;
+   dcl-s min_jobs int(10:0);
+   dcl-s max_jobs int(10:0);
+   dcl-s idle int(10:0);
+
+   clear config;
+   RPGAPI_setJobs(config : 2 : 30);
+   RPGAPI_jobRange(config : 4 : min_jobs : max_jobs : idle);
+   iEqual(4 : min_jobs);
+   iEqual(4 : max_jobs);
+   RPGAPI_jobRange(config : 0 : min_jobs : max_jobs : idle);
+   iEqual(1 : min_jobs);
+   iEqual(1 : max_jobs);
+end-proc;
+
+dcl-proc test_setJobs_range export;
+   dcl-ds config likeds(RPGAPI_App) inz;
+   dcl-s min_jobs int(10:0);
+   dcl-s max_jobs int(10:0);
+   dcl-s idle int(10:0);
+
+   clear config;
+   RPGAPI_setJobs(config : 4 : 40 : 300);
+   RPGAPI_jobRange(config : -1 : min_jobs : max_jobs : idle);
+   iEqual(4 : min_jobs);
+   iEqual(40 : max_jobs);
+   iEqual(300 : idle);
+end-proc;
+
+   // the most equal to the least: that many, fixed
+dcl-proc test_setJobs_fixed export;
+   dcl-ds config likeds(RPGAPI_App) inz;
+   dcl-s min_jobs int(10:0);
+   dcl-s max_jobs int(10:0);
+   dcl-s idle int(10:0);
+
+   clear config;
+   RPGAPI_setJobs(config : 1 : 1);
+   RPGAPI_jobRange(config : -1 : min_jobs : max_jobs : idle);
+   iEqual(1 : min_jobs);
+   iEqual(1 : max_jobs);
+   iEqual(60 : idle);
+end-proc;
+
+dcl-proc test_setJobs_refusesBadValues export;
+   dcl-ds config likeds(RPGAPI_App) inz;
+
+   clear config;
+   assert(setJobsFails(config : 0 : 5 : 60) : 'no jobs at all');
+   assert(setJobsFails(config : 5 : 4 : 60) : 'the most below the least');
+   assert(setJobsFails(config : 1 : 65 : 60) : 'more than 64');
+   assert(setJobsFails(config : 1 : 5 : 0) : 'idle for 0 seconds');
+   assert(not setJobsFails(config : 1 : 64 : 1) : '1 to 64, 1 second');
+end-proc;
+
+   // whether RPGAPI_setJobs ends with an escape message
+dcl-proc setJobsFails;
+   dcl-pi *n ind;
+      config likeds(RPGAPI_App);
+      min_jobs int(10:0) const;
+      max_jobs int(10:0) const;
+      idle int(10:0) const;
+   end-pi;
+
+   monitor;
+      RPGAPI_setJobs(config : min_jobs : max_jobs : idle);
+   on-error;
+      return *on;
+   endmon;
+   return *off;
+end-proc;
+
+// ============================================
 // DUMMY HANDLERS FOR TESTING
 // ============================================
 

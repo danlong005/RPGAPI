@@ -38,6 +38,7 @@ The same reference is a web page with a sidebar in
   [RPGAPI_setMaxUploadSize](#rpgapi_setmaxuploadsize) ·
   [RPGAPI_setTimeouts](#rpgapi_settimeouts) ·
   [RPGAPI_setKeepAlive](#rpgapi_setkeepalive) ·
+  [RPGAPI_setJobs](#rpgapi_setjobs) ·
   [RPGAPI_setCors](#rpgapi_setcors) ·
   [RPGAPI_setSecurityHeaders](#rpgapi_setsecurityheaders) ·
   [RPGAPI_setCompression](#rpgapi_setcompression) ·
@@ -97,6 +98,7 @@ The same reference is a web page with a sidebar in
 **[Guides](#guides)**:
 [routing rules](#routing-rules) ·
 [several jobs](#several-jobs) ·
+[how many jobs](#how-many-jobs) ·
 [stopping the server](#stopping-the-server) ·
 [HTTPS](#https) ·
 [keep-alive and timeouts](#keep-alive-and-timeouts) ·
@@ -192,7 +194,8 @@ the values, before `RPGAPI_start`.
 | Field | Set with | Default |
 | --- | --- | --- |
 | `port` | `app.port = 8080`, or [RPGAPI_start](#rpgapi_start)`(app : 8080)` | 3000 |
-| `jobs` | `app.jobs = 4`, or `RPGAPI_start(app : 8080 : 4)` | 1 |
+| `jobs` | `app.jobs = 4`, or `RPGAPI_start(app : 8080 : 4)`, for that many; the least with [RPGAPI_setJobs](#rpgapi_setjobs). See [several jobs](#several-jobs) | 1 to 20, started with the load |
+| `max_jobs`, `job_idle_seconds` | [RPGAPI_setJobs](#rpgapi_setjobs) | 20 jobs; 60 seconds |
 | `log_level` | [RPGAPI_setLogLevel](#rpgapi_setloglevel) | off |
 | `max_request_size` | [RPGAPI_setMaxRequestSize](#rpgapi_setmaxrequestsize) | 1MB |
 | `max_upload_size` | [RPGAPI_setMaxUploadSize](#rpgapi_setmaxuploadsize) | 0, off |
@@ -254,6 +257,8 @@ dcl-ds RPGAPI_App qualified template;
    views_directory varchar(1024);
    views_library char(10);
    views_layout varchar(1024);
+   max_jobs int(10:0);
+   job_idle_seconds int(10:0);
 end-ds;
 ```
 </details>
@@ -269,12 +274,12 @@ Opens the port and serves requests until the job ends or
 | --- | --- | --- |
 | `app` | `RPGAPI_App` | the app |
 | `port` | `int(10:0)` | the port; `app.port`, or 3000, when left out |
-| `jobs` | `int(10:0)` | how many jobs serve the port; `app.jobs`, or 1. See [several jobs](#several-jobs) |
+| `jobs` | `int(10:0)` | how many jobs serve the port, fixed. Left out: `app.jobs`, or the range set with [RPGAPI_setJobs](#rpgapi_setjobs), or 1 to 20 started with the load. See [several jobs](#several-jobs) |
 
 ```rpgle
 RPGAPI_start(app);                 // app.port, or 3000
-RPGAPI_start(app : 8080);
-RPGAPI_start(app : 8080 : 4);      // 4 jobs
+RPGAPI_start(app : 8080);          // 1 to 20 jobs, as the load needs
+RPGAPI_start(app : 8080 : 4);      // 4 jobs, fixed
 ```
 
 When the server cannot listen on the port, such as when another job is
@@ -510,6 +515,23 @@ RPGAPI_setKeepAlive(app : 15 : 1000);
 RPGAPI_setKeepAlive(app : 0);          // close after each response
 ```
 See [keep-alive and timeouts](#keep-alive-and-timeouts).
+
+### RPGAPI_setJobs
+```rpgle
+RPGAPI_setJobs(app : min : max : idleSeconds?)
+```
+How many jobs serve the port: `min` (`int(10:0)`, at least 1) always, and
+more started as clients wait, up to `max` (at most 64). A job above `min`
+that has had no client for `idleSeconds` (60 by default) is stopped. With
+`max` equal to `min`, that many jobs, fixed. Without this, an app runs 1 to
+20 jobs, or `app.jobs` when it sets that; `RPGAPI_start`'s third parameter
+overrides it. See [several jobs](#several-jobs).
+
+```rpgle
+RPGAPI_setJobs(app : 4 : 40);          // 4 to 40 jobs
+RPGAPI_setJobs(app : 2 : 20 : 300);    // idle ones kept 5 minutes
+RPGAPI_setJobs(app : 1 : 1);           // one job, fixed
+```
 
 ### RPGAPI_setCors
 ```rpgle
@@ -1471,28 +1493,78 @@ for RPGAPI itself and its unit tests; apps do not include it.
   first.
 
 ### Several jobs
-By default one job handles one request at a time. Pass the number of jobs to
-serve with as a third parameter:
+A job answers one connection at a time, so RPGAPI serves the port with
+several jobs, and by default starts them as the load needs: from 1 up to 20.
+The job you start opens the port, starts one job to serve it, and then
+watches: when every job holds a connection and a client waits (50 ms, or a
+job gives its connection up for it), it starts one more (a job serves about
+50 ms after it is started); when a job above the least has had no client for
+60 seconds, it stops it. A request is never cut off. Set another range with
+[RPGAPI_setJobs](#rpgapi_setjobs), or a fixed number:
 ```rpgle
-RPGAPI_start(app : 3000 : 4);
+RPGAPI_setJobs(app : 4 : 40);       // 4 to 40 jobs
+RPGAPI_start(app : 3000 : 4);       // 4 jobs, fixed
 ```
-The job that calls `RPGAPI_start` opens the port and starts 3 more jobs, each
-running the program this job was started with (the first program on the call
-stack outside `QSYS`, e.g. `MYAPP` for `SBMJOB CMD(CALL MYAPP)`). Each of them
-registers its routes and serves the same port, and every connection goes to
-one of the jobs that is free. Keep in mind that:
+With a fixed number, there is no job only watching: the job you start serves
+too, and starts the others once. Either way, each job runs the program this
+job was started with (the first program on the call stack outside `QSYS`,
+e.g. `MYAPP` for `SBMJOB CMD(CALL MYAPP)`), registers its routes and serves
+the same port, and every connection goes to one of the jobs that is free.
+Keep in mind that:
 - the program is started again without parameters, so it must not need any,
-  and whatever it does before `RPGAPI_start` it does in every job
+  and whatever it does before `RPGAPI_start` it does in every job, also
+  whenever a job is started for the load. Keep that code safe to repeat, or
+  use `RPGAPI_setJobs(app : 1 : 1)` for one job
 - the jobs have the same name and library list as the one you started
 - to stop the server, end the job you started, or call
   [RPGAPI_shutdown](#rpgapi_shutdown). The others end with it, each once it
   has finished the request it is on, and the job you started waits for them
 - a job that ends while the server runs (it failed, or someone ended it) is
-  replaced by the job you started, once that job is between requests, and
-  logged at WARN. At most 5 are replaced a minute, so a job that keeps failing
-  does not keep the server busy starting it
+  replaced, and logged at WARN; when jobs start with the load, only while
+  fewer than the least run. At most 5 are replaced a minute, so a job that
+  keeps failing does not keep the server busy starting it
 - each job has its own memory: data a program keeps between requests, such
-  as an array, is per job
+  as an array, is per job. Keep shared data in a file or table, or use
+  `RPGAPI_setJobs(app : 1 : 1)`
+- when every job is busy at the most and clients keep waiting (in 5 of 10
+  seconds), the job you started logs `RPGAPI WARN: all 20 jobs (the most)
+  are busy and clients waited in 7 of the last 10 seconds`, at most once a
+  minute and even with logging off: raise the most with
+  [RPGAPI_setJobs](#rpgapi_setjobs)
+
+### How many jobs
+A job answers one connection at a time, and a client that keeps sending on
+its connection keeps the job while it does. So an app needs as many jobs as
+clients sending requests at the same time, at its busiest. By default jobs
+are started up to 20 as they are needed; set the most (and the least kept
+running) with [RPGAPI_setJobs](#rpgapi_setjobs) when your busiest time needs
+more, or a fixed number. To size them:
+- programs or servers calling your API: one job for each connection they
+  use at once. A caller with a pool of 10 connections needs 10 jobs
+- browsers: a browser opens up to 6 connections to a server, so for pages
+  that load several files from it, count up to 6 for each user loading one
+- procedures that wait, on SQL or another system, keep their job that long.
+  The jobs needed are about the requests a second times the seconds each
+  takes: 50 requests a second taking 0.2 seconds each keep 10 jobs busy
+- leave room for peaks. A job waiting for a connection uses no CPU to speak
+  of, and each took about 29MB of temporary storage in the test below
+- at most 64 started with the load (and the job watching them), or 65 fixed:
+  the job you start and 64 more. A larger fixed number is taken as 65
+
+With fewer jobs than busy clients nothing fails, but the clients take turns:
+while a new client waits, a busy connection is closed after its response
+(see [keep-alive and timeouts](#keep-alive-and-timeouts)), and each client
+waits for the others. 20 clients sending requests back to back for 2 minutes
+to `examples/hello.rpgle` over HTTPS, from a PC over the internet:
+
+| Jobs | Requests a second | Average | 99% within | Slowest |
+| --- | --- | --- | --- | --- |
+| 1 | 54 | 360 ms | 643 ms | 1.4 s |
+| 20 | 641 | 21 ms | 72 ms | 0.4 s |
+
+With 1 job, the time is the 20 clients' turns, and a new connection (and TLS
+handshake) for almost every request. With 20, every client has a job and
+keeps its connection.
 
 ### Stopping the server
 `ENDJOB` ends a job controlled by default (`OPTION(*CNTRLD) DELAY(30)`), and
@@ -1502,10 +1574,14 @@ connection is closed. `ENDJOB OPTION(*IMMED)` stops at once, cutting off
 requests in progress.
 
 ```
-ENDJOB JOB(MYAPP)                        // finish the requests in progress
-ENDJOB JOB(MYAPP) OPTION(*IMMED)         // stop now
+ENDJOB JOB(123456/MYUSER/MYAPP)                  // finish the requests in progress
+ENDJOB JOB(123456/MYUSER/MYAPP) OPTION(*IMMED)   // stop now
 ```
-From the app itself, call [RPGAPI_shutdown](#rpgapi_shutdown).
+End the job you started, the one `SBMJOB` named (in `WRKACTJOB`, the one of
+type `BCH`); the jobs it started end with it. They all share its name, so
+`ENDJOB JOB(MYAPP)` alone finds several: in a batch job it fails
+(`CPF1332`), and on a 5250 screen it asks which one. From the app itself,
+call [RPGAPI_shutdown](#rpgapi_shutdown).
 
 ### HTTPS
 Call one of these before `RPGAPI_start` to serve HTTPS instead of HTTP:
@@ -1527,14 +1603,22 @@ Responses say `Connection: keep-alive` and `Keep-Alive: timeout=5`.
 
 - It is kept 5 seconds for the next request, for up to 100 requests;
   [RPGAPI_setKeepAlive](#rpgapi_setkeepalive) changes that, or turns it off.
-- Each job serves one connection at a time, so a job waiting on an idle kept
-  connection closes it when a new connection is waiting: keep-alive does not
-  keep other clients waiting. A connection is only closed like this once it
-  has been quiet for 250ms after its response, so a client sending its next
-  request right away is answered, not cut off. A new client therefore waits
-  at most 250ms for an idle connection's job, and a busy connection keeps its
-  job until its request limit. Clients open a new connection when they find
-  theirs closed.
+- Each job serves one connection at a time. When jobs are started with the
+  load, a new client waiting while every job holds a connection gets a new
+  job, and kept connections stay open. Only at the most, or with a fixed
+  number of jobs, is an idle kept connection closed for a new client: once
+  it has been quiet for 250ms after its response (500ms of the new client
+  waiting, when jobs are started with the load), so that keep-alive does not
+  keep other clients waiting. Its client's next request then fails if it was
+  already on its way, or if the client does not notice the close (browsers
+  and most HTTP libraries do, and connect again).
+- A busy connection, whose client sends its next request as soon as it has
+  the response, gives its job up too: while a new connection is waiting, the
+  response says `Connection: close`, and the client connects again behind
+  it. So the clients take turns, a request each, instead of one keeping the
+  job until its request limit. Requests the client has already sent
+  (pipelined) are answered first. Clients open a new connection when they
+  find theirs closed.
 - The connection is closed instead after a request the client sent with
   `Connection: close` (or HTTP/1.0 without `Connection: keep-alive`), a
   refused request (413, 431, ...), a request body your procedure did not read
@@ -2047,7 +2131,11 @@ SELECT message_timestamp, message_text
 - DEBUG and INFO add messages to the job log for every request: a job log that
   fills up wraps or spills to a spooled file depending on the job's
   `LOG` and job message queue settings (`QJOBMSGQMX`, `QJOBMSGQFL`). Use
-  them while looking into a problem, and WARN or ERROR otherwise.
+  them while looking into a problem, and WARN or ERROR otherwise. With
+  `JOBMSGQFL(*NOWRAP)`, which `QDFTJOBD` has, a full job message queue ends
+  the job (`CPF2526`): at DEBUG, a job answering a thousand requests a
+  second filled the 16MB of `JOBMSGQMX(16)` in about 10 seconds. Submit the
+  server with `JOBMSGQFL(*WRAP)` to log a lot.
 
 ### Character sets
 RPGAPI sends and receives UTF-8, and converts it to and from the CCSID of the

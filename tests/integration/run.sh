@@ -26,7 +26,7 @@ PYTHON=${PYTHON:-/QOpenSys/pkgs/bin/python3}
 MAKE=${MAKE:-/QOpenSys/pkgs/bin/make}
 CCSID=${CCSID:-37}
 QSH=/QOpenSys/usr/bin/qsh
-ALL="basic timeouts routes misc hello bodies multipart stream jobs logging tls cors keepalive proxy handlers static secure compress templates examples sqljson yajl"
+ALL="basic timeouts routes misc hello bodies multipart stream jobs scaling logging tls cors keepalive proxy handlers static secure compress templates examples sqljson yajl"
 SUITES=${*:-$ALL}
 PASSED=0
 FAILED=0
@@ -256,6 +256,11 @@ for suite_name in $SUITES; do
                  suite jobs ";;;;4" jobs "shutdown worker"
                  suite jobs ";;;;4" jobs "shutdown main"
                  suite jobs ";;;;1" jobs "shutdown single"; } ;;
+    scaling)   compile jobs && {
+                 suite jobs "3;;;;1,4,2" scaling range
+                 [ "$(running JOBS)" = "0" ] && pass "scaling: every job ends with the main job" || fail "scaling: jobs left running"
+                 suite jobs "3;;;;default" scaling default
+                 suite jobs "0;;;;1,2,2" scaling quiet; } ;;
     logging)   compile logging && {
                  for level in 0 1 2 3 4; do suite logging "$level;1000;;$T;" logging $level; done
                  fails_to_start logging "9;1000;;$T;" "" "is not a level"; } ;;

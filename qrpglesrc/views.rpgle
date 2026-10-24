@@ -101,6 +101,15 @@ dcl-pr user_space_pointer extpgm('QUSPTRUS');
    error_code char(8);
 end-pr;
 
+dcl-pr object_description extpgm('QUSROBJD');
+   receiver char(90);
+   receiver_length int(10:0) const;
+   format char(8) const;
+   object char(20) const;
+   object_type char(10) const;
+   error_code char(8);
+end-pr;
+
 dcl-pr getcwd pointer extproc('getcwd');
    buffer pointer value;
    size int(10:0) value;
@@ -156,6 +165,8 @@ end-ds;
 dcl-ds cache likeds(cached_t) dim(100);
 dcl-s cache_count int(10:0) inz(0);
 dcl-s service_library char(10) inz(*blanks);
+   // when the RPGAPI service program was created, as CYYMMDDHHMMSS
+dcl-s service_build char(13) inz(*blanks);
    // the files the template being compiled includes
 dcl-s include_count int(10:0);
 dcl-s includes varchar(1024) dim(10);
@@ -492,9 +503,14 @@ dcl-proc compileView;
       return '';
    endmon;
 
-      // named after the template's file name and content, and the content of
-      // the files it includes: a changed copybook is a different view
+      // named after the template's file name and content, the content of
+      // the files it includes (a changed copybook is a different view), and
+      // the RPGAPI service program: views compiled against an earlier one
+      // could fail to start (MCH4431, its interface changed), so a new one
+      // compiles them again
    crc = crc32(0 : %addr(template_name : *data) : %len(template_name));
+   service_build = serviceBuild();
+   crc = crc32(crc : %addr(service_build) : %size(service_build));
    crc = crc32(crc : source_ptr : source_length);
    findIncludes(%subst(path : 1 : %scanr('/' : path)));
    for included = 1 to include_count;
@@ -769,6 +785,27 @@ dcl-proc serviceLibrary;
       service_library = RPGAPI_ownLibrary();
    endif;
    return service_library;
+end-proc;
+
+
+   // when the RPGAPI service program views are bound to was created
+dcl-proc serviceBuild;
+   dcl-pi *n char(13);
+   end-pi;
+   dcl-s receiver char(90);
+   dcl-s error_code char(8) inz(*allx'00');
+
+   if service_build = '';
+      monitor;
+         object_description(receiver : %size(receiver) : 'OBJD0100' :
+                            'RPGAPI    ' + serviceLibrary() : '*SRVPGM' :
+                            error_code);
+         service_build = %subst(receiver : 65 : 13);
+      on-error;
+         service_build = '-';
+      endmon;
+   endif;
+   return service_build;
 end-proc;
 
 

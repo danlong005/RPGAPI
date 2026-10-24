@@ -36,6 +36,9 @@ dcl-s note_count int(10:0) inz(0);
 dcl-ds app likeds(RPGAPI_App);
 
 clear app;
+   // one job: the notes are kept in this program, and another job would
+   // have notes of its own. Keep them in a table to serve with more jobs
+RPGAPI_setJobs(app : 1 : 1);
 RPGAPI_setViews(app : VIEWS);
 RPGAPI_setLayout(app : 'layout.erpg');
 RPGAPI_get(app : '/guestbook' : %paddr(showGuestbook));

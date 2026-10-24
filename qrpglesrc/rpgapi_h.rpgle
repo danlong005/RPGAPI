@@ -154,6 +154,12 @@ dcl-ds RPGAPI_App qualified template;
    views_library char(10);
       // the layout views are written into (RPGAPI_setLayout). Blank: none
    views_layout varchar(1024);
+      // jobs started and stopped with the load (RPGAPI_setJobs): the most,
+      // with jobs the least, and the seconds a job above the least is kept
+      // idle (0: 60). With jobs and max_jobs 0, 1 to 20 jobs; with only jobs
+      // set, that many
+   max_jobs int(10:0);
+   job_idle_seconds int(10:0);
 end-ds;
 
 
@@ -427,6 +433,16 @@ dcl-pr RPGAPI_setKeepAlive;
    config likeds(RPGAPI_App);
    seconds int(10:0) const;
    max_requests int(10:0) const options(*nopass);
+end-pr;
+
+   // how many jobs serve the port: at least min, started as the load needs
+   // up to max, and stopped again after idle_seconds (60) without a client.
+   // max equal to min: that many, fixed
+dcl-pr RPGAPI_setJobs;
+   config likeds(RPGAPI_App);
+   min_jobs int(10:0) const;
+   max_jobs int(10:0) const;
+   idle_seconds int(10:0) const options(*nopass);
 end-pr;
 
    // how much to log: RPGAPI_LOG_OFF, _ERROR, _WARN, _INFO or _DEBUG
